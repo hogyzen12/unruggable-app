@@ -1,0 +1,27 @@
+[application]
+
+[web.app]
+
+# HTML title tag content
+title = "unruggable"
+
+[bundle]
+identifier = "com.unruggable.profile"
+publisher = "UnruggableEngineering"
+icon = ["/assets/icons/32x32.png"]
+copyright = "Copyright 2025 UnruggableEngineering"
+
+# include `assets` in web platform
+[web.resource]
+
+# Additional CSS style files
+style = []
+
+# Additional JavaScript files
+script = []
+
+[web.resource.dev]
+
+# Javascript code file
+# serve: [dev-server] only
+script = []
