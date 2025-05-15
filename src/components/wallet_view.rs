@@ -128,7 +128,6 @@ pub fn WalletView() -> Element {
     use_effect(move || {
         let wallets_list = wallets.read();
         let index = current_wallet_index();
-       ，顺
         let hw_connected = hardware_connected();
         let hw_pubkey = hardware_pubkey();
         
