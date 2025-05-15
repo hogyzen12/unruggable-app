@@ -22,6 +22,14 @@ bincode = "1.3"
 base64 = "0.22"
 tokio = { version = "1", features = ["time"] }
 sha2 = "0.10"
+async-trait = "0.1"
+serialport = "4.3.0"
+tokio-serial = "5.4.4"
+log = "0.4"
+lazy_static = "1.5.0"
+qrcode = "0.14"
+# For QR code SVG rendering (optional, but recommended)
+image = { version = "0.24", default-features = false }
 
 [features]
 default = []

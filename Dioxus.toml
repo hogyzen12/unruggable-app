@@ -8,7 +8,7 @@ title = "unruggable"
 [bundle]
 identifier = "com.unruggable.profile"
 publisher = "UnruggableEngineering"
-icon = ["/assets/icons/32x32.png"]
+icon = ["/assets/icons/icon.png"]
 copyright = "Copyright 2025 UnruggableEngineering"
 
 # include `assets` in web platform

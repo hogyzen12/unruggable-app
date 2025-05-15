@@ -1,5 +1,6 @@
 // src/transaction.rs
 use crate::wallet::Wallet;
+use crate::signing::{TransactionSigner, SignerType};
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Signature as SolanaSignature},
@@ -100,15 +101,27 @@ impl TransactionClient {
         }
     }
 
-    /// Send SOL from one wallet to another
+    /// Send SOL from one wallet to another (original method for backward compatibility)
     pub async fn send_sol(
         &self,
         from_wallet: &Wallet,
         to_address: &str,
         amount_sol: f64,
     ) -> Result<String, Box<dyn Error>> {
-        // Convert addresses to Pubkey
-        let from_pubkey = Pubkey::from_str(&from_wallet.get_public_key())?;
+        let signer = SignerType::from_wallet(from_wallet.clone());
+        self.send_sol_with_signer(&signer, to_address, amount_sol).await
+    }
+    
+    /// Send SOL using any signer type
+    pub async fn send_sol_with_signer(
+        &self,
+        signer: &dyn TransactionSigner,
+        to_address: &str,
+        amount_sol: f64,
+    ) -> Result<String, Box<dyn Error>> {
+        // Get the public key from the signer
+        let from_pubkey_str = signer.get_public_key().await?;
+        let from_pubkey = Pubkey::from_str(&from_pubkey_str)?;
         let to_pubkey = Pubkey::from_str(to_address)?;
         
         // Convert SOL to lamports
@@ -143,12 +156,17 @@ impl TransactionClient {
         // Serialize the transaction message for signing
         let message_bytes = transaction.message.serialize();
         
-        // Sign the message with our wallet
-        let ed25519_signature = from_wallet.sign_message(&message_bytes);
+        // Sign the message with our signer
+        let signature_bytes = signer.sign_message(&message_bytes).await?;
         
-        // Convert ed25519_dalek::Signature to solana_sdk::signature::Signature
-        let signature_bytes = ed25519_signature.to_bytes();
-        let solana_signature = SolanaSignature::from(signature_bytes);
+        // Convert to solana signature (expect exactly 64 bytes)
+        if signature_bytes.len() != 64 {
+            return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()).into());
+        }
+        
+        let mut sig_array = [0u8; 64];
+        sig_array.copy_from_slice(&signature_bytes);
+        let solana_signature = SolanaSignature::from(sig_array);
         
         // Assign the signature to the transaction
         if transaction.signatures.len() != 1 {

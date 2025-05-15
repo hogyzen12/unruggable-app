@@ -582,8 +582,44 @@ body {
 }
 
 .dropdown-item.current-wallet {
-    background-color: #2a2a2a;
+    background-color: #1f2937;
     cursor: default;
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    overflow: hidden;
+}
+
+.dropdown-item.current-wallet .dropdown-icon.wallet-icon {
+    width: 32px;
+    height: 32px;
+    background-color: #FF6B9D;
+    border-radius: 50%;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+}
+
+.dropdown-item.current-wallet .wallet-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+}
+
+.dropdown-item.current-wallet .wallet-name {
+    font-weight: 500;
+    color: white;
+    font-size: 16px;
+}
+
+.dropdown-item.current-wallet .wallet-address {
+    font-size: 13px;
+    color: #6b7280;
+    margin-top: 2px;
 }
 
 .dropdown-item.active::before {
@@ -883,5 +919,331 @@ body {
     margin-top: 16px;
     padding: 12px;
     border-radius: 8px;
+    text-align: center;
+}
+
+/* Hardware wallet indicator styles */
+.profile-icon {
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.profile-icon.connected {
+    box-shadow: 0 0 10px rgba(0, 255, 0, 0.5);
+}
+
+.hardware-status {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.profile-icon img {
+    transition: all 0.3s ease;
+}
+
+/* Hardware wallet status indicators */
+.profile-icon {
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.profile-icon.hardware-present {
+    cursor: pointer;
+}
+
+.profile-icon.hardware-connected {
+    cursor: default;
+}
+
+.profile-icon:hover {
+    transform: scale(1.05);
+}
+
+/* Hardware status indicator dot */
+.hardware-indicator {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    bottom: -2px;
+    right: -2px;
+    border: 2px solid #0f0f0f;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.hardware-indicator.present {
+    background-color: #fbbf24;  /* Yellow - device present but not connected */
+}
+
+.hardware-indicator.connected {
+    background-color: #10b981;  /* Green - device connected */
+    animation: none;
+}
+
+/* Pulse animation for present but not connected state */
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 10px rgba(251, 191, 36, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    }
+}
+
+/* Hardware wallet items in dropdown */
+.hardware-wallet-item {
+    background-color: rgba(16, 185, 129, 0.1);
+    border-left: 3px solid #10b981;
+}
+
+.hardware-icon {
+    background-color: #10b981;
+    color: white;
+}
+
+/* Special styling for hardware wallet dropdown option */
+.dropdown-item.hardware-wallet-item:hover {
+    background-color: rgba(16, 185, 129, 0.2);
+}
+
+/* Hardware wallet active state */
+.dropdown-item.hardware-wallet-item.active {
+    background-color: rgba(16, 185, 129, 0.15);
+    border-left: 3px solid #10b981;
+}
+
+/* Improve modal buttons */
+.modal-button.secondary {
+    background-color: #dc2626;
+    color: white;
+}
+
+.modal-button.secondary:hover {
+    background-color: #b91c1c;
+}
+
+/* Profile icon states */
+.profile-icon.hardware-connected {
+    border: 2px solid #10b981;
+    border-radius: 50%;
+}
+
+/* Recipient balance display */
+.recipient-balance {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #10b981;
+}
+
+.recipient-balance.checking {
+    color: #fbbf24;
+}
+
+/* Receive Modal Styles */
+.receive-modal {
+    max-width: 400px;
+}
+
+.qr-code-container {
+    display: flex;
+    justify-content: center;
+    margin: 24px 0;
+}
+
+.qr-code {
+    width: 200px;
+    height: 200px;
+    background: white;
+    padding: 16px;
+    border-radius: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.qr-code svg {
+    width: 100%;
+    height: 100%;
+}
+
+.wallet-label {
+    text-align: center;
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 16px;
+}
+
+.address-container {
+    margin: 24px 0;
+}
+
+.address-display-full {
+    display: flex;
+    align-items: center;
+    background-color: #0a0a0a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.address-display-full:hover {
+    background-color: #1a1a1a;
+    border-color: #3a3a3a;
+}
+
+.address-text {
+    flex: 1;
+    font-family: monospace;
+    font-size: 13px;
+    color: #ffffff;
+    word-break: break-all;
+    margin-right: 12px;
+}
+
+.copy-button {
+    background-color: #6366f1;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background-color 0.2s;
+}
+
+.copy-button:hover {
+    background-color: #4f46e5;
+}
+
+.receive-info {
+    margin: 24px 0;
+    padding: 16px;
+    background-color: #1e3a8a;
+    border-radius: 8px;
+}
+
+.receive-info p {
+    margin: 8px 0;
+    color: #93c5fd;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.receive-info p:first-child {
+    margin-top: 0;
+}
+
+.receive-info p:last-child {
+    margin-bottom: 0;
+}
+
+.hardware-info {
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid #3b82f6;
+}
+
+.current-address-section {
+    margin: 5px 0; /* Reduced margin to bring it closer to balance and buttons */
+    padding: 8px;
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center; /* Center the content horizontally */
+}
+
+.address-label {
+    font-weight: bold;
+    font-size: 1rem;
+    margin-bottom: 5px;
+    color: #333;
+    text-align: center; /* Center the label */
+}
+
+.current-address {
+    font-family: monospace;
+    font-size: 0.9rem;
+    line-height: 1.4;
+    word-break: break-all;
+    max-width: 100%;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.1); /* Semi-transparent white background */
+    backdrop-filter: blur(5px); /* Subtle blur effect for a glass-like look */
+    border: 1px solid rgba(255, 255, 255, 0.2); /* Subtle border */
+    border-radius: 6px;
+    color: #444;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); /* Subtle shadow for depth */
+    text-align: center; /* Center the address text */
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 600px) {
+    .current-address {
+        font-size: 0.75rem;
+        padding: 6px 10px;
+    }
+    .address-label {
+        font-size: 0.9rem;
+    }
+}
+
+/* Limit width on larger screens */
+@media (min-width: 1200px) {
+    .current-address-section {
+        max-width: 800px;
+        margin: 5px auto;
+    }
+}
+
+/* Updated to match receive modal styles */
+.address-display-full {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: #0a0a0a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    padding: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin: 0 auto;
+    max-width: 600px;
+}
+
+.address-display-full:hover {
+    background-color: #1a1a1a;
+    border-color: #3a3a3a;
+}
+
+.address-text {
+    flex: 1;
+    font-family: monospace;
+    font-size: 13px;
+    color: #ffffff;
+    word-break: break-all;
+    margin-right: 12px;
+    text-align: center;
+}
+
+.main-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px; /* Adds consistent spacing between balance, address, and action buttons */
+    padding: 10px;
+}
+
+/* Adjust existing balance-section for better alignment */
+.balance-section {
     text-align: center;
 }
