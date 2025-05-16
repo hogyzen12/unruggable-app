@@ -6,6 +6,160 @@ use crate::signing::hardware::HardwareSigner;
 use crate::rpc;
 use std::sync::Arc;
 
+/// Hardware wallet approval overlay component shown during transaction signing
+#[component]
+fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
+    rsx! {
+        div {
+            class: "hardware-approval-overlay",
+            
+            div {
+                class: "hardware-approval-content",
+                
+                h3 { 
+                    class: "hardware-approval-title",
+                    "Confirm on Hardware Wallet"
+                }
+                
+                div {
+                    class: "hardware-icon-container",
+                    div {
+                        class: "hardware-icon",
+                        div {
+                            class: "blink-indicator",
+                        }
+                    }
+                    div {
+                        class: "button-indicator",
+                        div {
+                            class: "button-press",
+                        }
+                    }
+                }
+                
+                p {
+                    class: "hardware-approval-text",
+                    "Please check your hardware wallet and confirm the transaction details."
+                }
+                
+                div {
+                    class: "hardware-steps",
+                    div {
+                        class: "hardware-step",
+                        div { class: "step-number", "1" }
+                        span { "Press the button on your Unruggable to confirm" }
+                    }
+                }
+                
+                button {
+                    class: "hardware-cancel-button",
+                    onclick: move |_| oncancel.call(()),
+                    "Cancel Transaction"
+                }
+            }
+        }
+    }
+}
+
+/// Modal component to display transaction success details
+#[component]
+pub fn TransactionSuccessModal(
+    signature: String,
+    onclose: EventHandler<()>,
+) -> Element {
+    // Explorer links for multiple explorers
+    let solana_explorer_url = format!("https://explorer.solana.com/tx/{}", signature);
+    let solscan_url = format!("https://solscan.io/tx/{}", signature);
+    let solana_fm_url = format!("https://solana.fm/tx/{}", signature);
+    
+    rsx! {
+        div {
+            class: "modal-backdrop",
+            onclick: move |_| onclose.call(()),
+            
+            div {
+                class: "modal-content",
+                onclick: move |e| e.stop_propagation(),
+                
+                h2 { class: "modal-title", "Transaction Sent Successfully!" }
+                
+                div {
+                    class: "tx-icon-container",
+                    div {
+                        class: "tx-success-icon",
+                        "✓" // Checkmark icon
+                    }
+                }
+                
+                div {
+                    class: "success-message",
+                    "Your transaction was submitted to the Solana network."
+                }
+                
+                div {
+                    class: "transaction-details",
+                    div {
+                        class: "wallet-field",
+                        label { "Transaction Signature:" }
+                        div { 
+                            class: "address-display", 
+                            title: "Click to copy",
+                            onclick: move |_| {
+                                // We can't do actual clipboard operations in Dioxus yet
+                                // This is just for UI indication
+                                log::info!("Signature copied to clipboard: {}", signature);
+                            },
+                            "{signature}"
+                        }
+                        div { 
+                            class: "copy-hint",
+                            "Click to copy"
+                        }
+                    }
+                    
+                    div {
+                        class: "explorer-links",
+                        p { "View transaction in explorer:" }
+                        
+                        div {
+                            class: "explorer-buttons",
+                            a {
+                                class: "explorer-button",
+                                href: "{solana_explorer_url}",
+                                target: "_blank",
+                                rel: "noopener noreferrer",
+                                "Solana Explorer"
+                            }
+                            a {
+                                class: "explorer-button",
+                                href: "{solscan_url}",
+                                target: "_blank",
+                                rel: "noopener noreferrer",
+                                "Solscan"
+                            }
+                            a {
+                                class: "explorer-button",
+                                href: "{solana_fm_url}",
+                                target: "_blank",
+                                rel: "noopener noreferrer",
+                                "Solana FM"
+                            }
+                        }
+                    }
+                }
+                
+                div { class: "modal-buttons",
+                    button {
+                        class: "modal-button primary",
+                        onclick: move |_| onclose.call(()),
+                        "Close"
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn SendModalWithHardware(
     wallet: Option<WalletInfo>,
@@ -21,6 +175,13 @@ pub fn SendModalWithHardware(
     let mut error_message = use_signal(|| None as Option<String>);
     let mut recipient_balance = use_signal(|| None as Option<f64>);
     let mut checking_balance = use_signal(|| false);
+    
+    // Add state for transaction success modal
+    let mut show_success_modal = use_signal(|| false);
+    let mut transaction_signature = use_signal(|| "".to_string());
+    
+    // Add state for hardware wallet approval overlay
+    let mut show_hardware_approval = use_signal(|| false);
 
     // Clone custom_rpc for use in use_effect to prevent moving the original
     let custom_rpc_for_effect = custom_rpc.clone();
@@ -79,6 +240,20 @@ pub fn SendModalWithHardware(
         }
     });
 
+    // If success modal is shown, render it instead
+    if show_success_modal() {
+        return rsx! {
+            TransactionSuccessModal {
+                signature: transaction_signature(),
+                onclose: move |_| {
+                    show_success_modal.set(false);
+                    // Call onsuccess when the user closes the modal
+                    onsuccess.call(transaction_signature());
+                }
+            }
+        };
+    }
+
     rsx! {
         div {
             class: "modal-backdrop",
@@ -87,6 +262,17 @@ pub fn SendModalWithHardware(
             div {
                 class: "modal-content",
                 onclick: move |e| e.stop_propagation(),
+                style: "position: relative;", // Needed for absolute positioning of overlay
+
+                // Hardware approval overlay - shown when waiting for hardware confirmation
+                if show_hardware_approval() {
+                    HardwareApprovalOverlay {
+                        oncancel: move |_| {
+                            show_hardware_approval.set(false);
+                            sending.set(false);
+                        }
+                    }
+                }
 
                 h2 { class: "modal-title",
                     if hardware_wallet.is_some() {
@@ -170,11 +356,18 @@ pub fn SendModalWithHardware(
                             error_message.set(None);
                             sending.set(true);
 
-                            let hardware_wallet = hardware_wallet.clone();
+                            // Show hardware approval overlay if using hardware wallet
+                            if hardware_wallet.is_some() {
+                                show_hardware_approval.set(true);
+                            }
+
+                            // IMPORTANT: Clone these values to use in the async task
+                            // but don't move hardware_wallet itself - we want to keep the reference
+                            let hardware_wallet_clone = hardware_wallet.clone();
                             let wallet_info = wallet.clone();
                             let recipient_address = recipient();
                             let amount_str = amount();
-                            let rpc_url = custom_rpc.clone(); // Original custom_rpc is still available here
+                            let rpc_url = custom_rpc.clone();
 
                             spawn(async move {
                                 // Validate inputs
@@ -183,6 +376,7 @@ pub fn SendModalWithHardware(
                                     _ => {
                                         error_message.set(Some("Invalid amount".to_string()));
                                         sending.set(false);
+                                        show_hardware_approval.set(false);
                                         return;
                                     }
                                 };
@@ -190,6 +384,7 @@ pub fn SendModalWithHardware(
                                 if amount_value > current_balance {
                                     error_message.set(Some("Insufficient balance".to_string()));
                                     sending.set(false);
+                                    show_hardware_approval.set(false);
                                     return;
                                 }
 
@@ -197,21 +392,31 @@ pub fn SendModalWithHardware(
                                 if let Err(e) = bs58::decode(&recipient_address).into_vec() {
                                     error_message.set(Some(format!("Invalid recipient address: {}", e)));
                                     sending.set(false);
+                                    show_hardware_approval.set(false);
                                     return;
                                 }
 
                                 let client = TransactionClient::new(rpc_url.as_deref());
 
                                 // Use hardware wallet if available, otherwise use software wallet
-                                if let Some(hw) = hardware_wallet {
+                                if let Some(hw) = hardware_wallet_clone {
                                     let hw_signer = HardwareSigner::from_wallet(hw);
                                     match client.send_sol_with_signer(&hw_signer, &recipient_address, amount_value).await {
                                         Ok(signature) => {
                                             println!("Transaction sent with hardware wallet: {}", signature);
-                                            onsuccess.call(signature);
+                                            
+                                            // Hide hardware approval overlay
+                                            show_hardware_approval.set(false);
+                                            
+                                            // Set the transaction signature and show success modal
+                                            transaction_signature.set(signature);
+                                            sending.set(false);
+                                            show_success_modal.set(true);
                                         }
                                         Err(e) => {
                                             error_message.set(Some(format!("Transaction failed: {}", e)));
+                                            sending.set(false);
+                                            show_hardware_approval.set(false);
                                         }
                                     }
                                 } else if let Some(wallet_info) = wallet_info {
@@ -222,26 +427,32 @@ pub fn SendModalWithHardware(
                                             match client.send_sol(&wallet, &recipient_address, amount_value).await {
                                                 Ok(signature) => {
                                                     println!("Transaction sent: {}", signature);
-                                                    onsuccess.call(signature);
+                                                    
+                                                    // Set the transaction signature and show success modal
+                                                    transaction_signature.set(signature);
+                                                    sending.set(false);
+                                                    show_success_modal.set(true);
                                                 }
                                                 Err(e) => {
                                                     error_message.set(Some(format!("Transaction failed: {}", e)));
+                                                    sending.set(false);
                                                 }
                                             }
                                         }
                                         Err(e) => {
                                             error_message.set(Some(format!("Failed to load wallet: {}", e)));
+                                            sending.set(false);
                                         }
                                     }
                                 } else {
                                     error_message.set(Some("No wallet available".to_string()));
+                                    sending.set(false);
+                                    show_hardware_approval.set(false);
                                 }
-
-                                sending.set(false);
                             });
                         },
                         disabled: sending() || recipient().is_empty() || amount().is_empty(),
-                        if sending() { "Sending..." } else { "Send" }
+                        if sending() && !show_hardware_approval() { "Sending..." } else { "Send" }
                     }
                 }
             }

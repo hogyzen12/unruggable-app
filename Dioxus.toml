@@ -1,15 +1,17 @@
 [application]
+name = "Unruggable"
+default_platform = "desktop"
+asset_dir = "public"
 
 [web.app]
-
-# HTML title tag content
-title = "unruggable"
+title = ""
 
 [bundle]
-identifier = "com.unruggable.profile"
-publisher = "UnruggableEngineering"
-icon = ["/assets/icons/icon.png"]
+identifier = "com.unruggable"
+publisher = "Unruggable Engineering Ltd."
 copyright = "Copyright 2025 UnruggableEngineering"
+category = "Utility"
+icon = ["public/icon.png"]
 
 # include `assets` in web platform
 [web.resource]

@@ -971,11 +971,17 @@ body {
     bottom: -2px;
     right: -2px;
     border: 2px solid #0f0f0f;
-    animation: pulse 2s ease-in-out infinite;
+    transition: background-color 0.3s ease;
+}
+
+/* Default state - always visible, grey when no hardware */
+.hardware-indicator.default {
+    background-color: #4b5563;  /* Grey - no device present */
 }
 
 .hardware-indicator.present {
     background-color: #fbbf24;  /* Yellow - device present but not connected */
+    animation: pulse 2s ease-in-out infinite;
 }
 
 .hardware-indicator.connected {
@@ -1043,6 +1049,167 @@ body {
 
 .recipient-balance.checking {
     color: #fbbf24;
+}
+
+/* Main content section */
+.main-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+}
+
+/* Current address display styles */
+.current-address-section {
+    text-align: center;
+    margin: 15px auto;
+    padding: 15px;
+    max-width: 350px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
+}
+
+.address-label {
+    font-size: 14px;
+    color: #9ca3af;
+    margin-bottom: 8px;
+}
+
+.current-address {
+    font-size: 12px;
+    font-family: monospace;
+    color: #ffffff;
+    word-break: break-all;
+    line-height: 1.4;
+}
+
+/* Copy button for address */
+.address-with-copy {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.copy-button {
+    background-color: #1f2937;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    font-size: 14px;
+}
+
+.copy-button:hover {
+    background-color: #374151;
+}
+
+.copy-feedback {
+    font-size: 12px;
+    color: #10b981;
+}
+
+/* Transaction success modal styles */
+.transaction-details {
+    margin: 20px 0;
+}
+
+.explorer-links {
+    margin-top: 24px;
+    text-align: center;
+}
+
+.explorer-links p {
+    font-size: 14px;
+    color: #9ca3af;
+    margin-bottom: 12px;
+}
+
+.explorer-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.explorer-button {
+    background-color: #1f2937;
+    color: #ffffff;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 10px 16px;
+    text-decoration: none;
+    font-size: 14px;
+    transition: all 0.2s ease;
+    display: inline-block;
+}
+
+.explorer-button:hover {
+    background-color: #374151;
+    border-color: #4b5563;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Animate transaction success message */
+.success-message {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Improve address display for transaction signature */
+.address-display {
+    transition: background-color 0.2s ease;
+    user-select: all; /* Makes text easier to select */
+}
+
+.address-display:hover {
+    background-color: #2a2a2a;
+    cursor: pointer;
+}
+
+/* Add receipt icon/animation to the success view */
+.tx-icon-container {
+    display: flex;
+    justify-content: center;
+    margin: 24px 0;
+}
+
+.tx-success-icon {
+    width: 64px;
+    height: 64px;
+    background-color: rgba(16, 185, 129, 0.1);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    color: #10b981;
+    animation: pulse-success 2s infinite;
+}
+
+@keyframes pulse-success {
+    0% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 15px rgba(16, 185, 129, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    }
 }
 
 /* Receive Modal Styles */
@@ -1170,80 +1337,185 @@ body {
     text-align: center; /* Center the label */
 }
 
-.current-address {
-    font-family: monospace;
-    font-size: 0.9rem;
-    line-height: 1.4;
-    word-break: break-all;
-    max-width: 100%;
-    padding: 8px 12px;
-    background: rgba(255, 255, 255, 0.1); /* Semi-transparent white background */
-    backdrop-filter: blur(5px); /* Subtle blur effect for a glass-like look */
-    border: 1px solid rgba(255, 255, 255, 0.2); /* Subtle border */
-    border-radius: 6px;
-    color: #444;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05); /* Subtle shadow for depth */
-    text-align: center; /* Center the address text */
+/* Hardware wallet approval prompt styles */
+.hardware-approval-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.8);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    z-index: 10;
+    animation: fadeIn 0.3s ease-in-out;
+    backdrop-filter: blur(3px);
+    border-radius: 16px;
 }
 
-/* Responsive adjustments for smaller screens */
-@media (max-width: 600px) {
-    .current-address {
-        font-size: 0.75rem;
-        padding: 6px 10px;
+.hardware-approval-content {
+    background-color: #1a1a1a;
+    border-radius: 16px;
+    padding: 24px;
+    width: 90%;
+    max-width: 320px;
+    text-align: center;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+.hardware-icon-container {
+    margin: 20px 0;
+    position: relative;
+}
+
+.hardware-icon {
+    width: 80px;
+    height: 80px;
+    border-radius: 10px;
+    background-color: #1f2937;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 0 auto;
+    position: relative;
+    border: 2px solid #374151;
+}
+
+.hardware-icon::before {
+    content: "🔐";
+    font-size: 32px;
+}
+
+.blink-indicator {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 20px;
+    height: 20px;
+    background-color: #fbbf24;
+    border-radius: 50%;
+    animation: blink 1s infinite alternate;
+}
+
+@keyframes blink {
+    0% {
+        opacity: 0.4;
+        box-shadow: 0 0 5px rgba(251, 191, 36, 0);
     }
-    .address-label {
-        font-size: 0.9rem;
+    100% {
+        opacity: 1;
+        box-shadow: 0 0 10px rgba(251, 191, 36, 1);
     }
 }
 
-/* Limit width on larger screens */
-@media (min-width: 1200px) {
-    .current-address-section {
-        max-width: 800px;
-        margin: 5px auto;
+.button-indicator {
+    width: 40px;
+    height: 10px;
+    background-color: #4b5563;
+    border-radius: 5px;
+    margin: 10px auto 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.button-press {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    background-color: #10b981;
+    transform: translateX(-100%);
+    animation: press-button 2s infinite;
+}
+
+@keyframes press-button {
+    0%, 20% {
+        transform: translateX(-100%);
+    }
+    30%, 70% {
+        transform: translateX(0);
+    }
+    80%, 100% {
+        transform: translateX(100%);
     }
 }
 
-/* Updated to match receive modal styles */
-.address-display-full {
+.hardware-approval-title {
+    font-size: 20px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    color: white;
+}
+
+.hardware-approval-text {
+    font-size: 14px;
+    color: #9ca3af;
+    margin-bottom: 20px;
+    line-height: 1.5;
+}
+
+.hardware-steps {
+    margin: 20px 0;
+    text-align: left;
+    background-color: #111111;
+    border-radius: 8px;
+    padding: 15px;
+}
+
+.hardware-step {
+    padding: 8px 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.step-number {
+    width: 24px;
+    height: 24px;
+    background-color: #2a2a2a;
+    border-radius: 50%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 12px;
+    font-weight: bold;
+    color: #9ca3af;
+}
+
+.hardware-cancel-button {
+    background-color: #374151;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    margin-top: 10px;
+}
+
+.hardware-cancel-button:hover {
+    background-color: #4b5563;
+}
+
+/* Hardware wallet reconnection notice */
+.hardware-reconnect-notice {
+    margin: 16px 0;
+    padding: 12px;
+    background-color: rgba(251, 191, 36, 0.1);
+    border: 1px solid #fbbf24;
+    color: #fbbf24;
+    border-radius: 8px;
+    font-size: 14px;
+    text-align: center;
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: #0a0a0a;
-    border: 1px solid #2a2a2a;
-    border-radius: 8px;
-    padding: 12px;
-    cursor: pointer;
-    transition: all 0.2s;
-    margin: 0 auto;
-    max-width: 600px;
+    gap: 8px;
 }
 
-.address-display-full:hover {
-    background-color: #1a1a1a;
-    border-color: #3a3a3a;
-}
-
-.address-text {
-    flex: 1;
-    font-family: monospace;
-    font-size: 13px;
-    color: #ffffff;
-    word-break: break-all;
-    margin-right: 12px;
-    text-align: center;
-}
-
-.main-content {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px; /* Adds consistent spacing between balance, address, and action buttons */
-    padding: 10px;
-}
-
-/* Adjust existing balance-section for better alignment */
-.balance-section {
-    text-align: center;
+.hardware-reconnect-notice::before {
+    content: "⚠️";
+    font-size: 18px;
 }

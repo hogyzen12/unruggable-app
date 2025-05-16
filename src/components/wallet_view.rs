@@ -294,11 +294,16 @@ pub fn WalletView() -> Element {
             div {
                 class: "wallet-header",
                 div {
-                    class: format!(
-                        "profile-icon {} {}", 
-                        if hardware_device_present() { "hardware-present" } else { "" },
-                        if hardware_connected() { "hardware-connected" } else { "" }
-                    ),
+                    class: {
+                        let mut classes = "profile-icon".to_string();
+                        if hardware_device_present() {
+                            classes.push_str(" hardware-present");
+                        }
+                        if hardware_connected() {
+                            classes.push_str(" hardware-connected");
+                        }
+                        classes
+                    },
                     onclick: move |e| {
                         e.stop_propagation();
                         if hardware_device_present() {
@@ -309,13 +314,16 @@ pub fn WalletView() -> Element {
                         src: ICON_32,
                         alt: "Profile"
                     }
-                    if hardware_device_present() {
-                        div {
-                            class: if hardware_connected() { 
+                    div {
+                        class: {
+                            let indicator_class = if hardware_connected() { 
                                 "hardware-indicator connected" 
-                            } else { 
+                            } else if hardware_device_present() { 
                                 "hardware-indicator present" 
-                            }
+                            } else {
+                                "hardware-indicator default"
+                            };
+                            indicator_class.to_string()
                         }
                     }
                 }
@@ -474,49 +482,6 @@ pub fn WalletView() -> Element {
                                 "🔗"
                             }
                             "RPC Settings"
-                        }
-                        button {
-                            class: "dropdown-item",
-                            onclick: move |_| {
-                                show_dropdown.set(false);
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                "⚙️"
-                            }
-                            "Settings"
-                        }
-                        button {
-                            class: "dropdown-item",
-                            onclick: move |_| {
-                                show_dropdown.set(false);
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                "🔒"
-                            }
-                            "Security"
-                        }
-                        button {
-                            class: "dropdown-item",
-                            onclick: move |_| {
-                                wallets.set(vec![]);
-                                current_wallet_index.set(0);
-                                show_dropdown.set(false);
-                                hardware_connected.set(false);
-                                hardware_pubkey.set(None);
-                                #[cfg(not(feature = "web"))]
-                                {
-                                    let home_dir = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-                                    let wallet_file = format!("{home_dir}/.solana_wallet_app/wallets.json");
-                                    std::fs::remove_file(wallet_file).ok();
-                                }
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                "🚪"
-                            }
-                            "Logout"
                         }
                     }
                 }
