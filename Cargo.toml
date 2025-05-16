@@ -30,6 +30,7 @@ lazy_static = "1.5.0"
 qrcode = "0.14"
 # For QR code SVG rendering (optional, but recommended)
 image = { version = "0.24", default-features = false }
+chrono = "0.4"
 
 [features]
 default = []

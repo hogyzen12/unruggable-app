@@ -65,6 +65,7 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
 #[component]
 pub fn TransactionSuccessModal(
     signature: String,
+    was_hardware_wallet: bool,
     onclose: EventHandler<()>,
 ) -> Element {
     // Explorer links for multiple explorers
@@ -94,6 +95,14 @@ pub fn TransactionSuccessModal(
                 div {
                     class: "success-message",
                     "Your transaction was submitted to the Solana network."
+                }
+                
+                // Add hardware wallet reconnection notice if this was a hardware wallet transaction
+                if was_hardware_wallet {
+                    div {
+                        class: "hardware-reconnect-notice",
+                        "Your hardware wallet has been disconnected after the transaction. You'll need to reconnect it for future transactions."
+                    }
                 }
                 
                 div {
@@ -160,6 +169,13 @@ pub fn TransactionSuccessModal(
     }
 }
 
+// Define a new event for hardware wallet status changes
+#[derive(Debug, Clone, PartialEq)]
+pub struct HardwareWalletEvent {
+    pub connected: bool,
+    pub pubkey: Option<String>,
+}
+
 #[component]
 pub fn SendModalWithHardware(
     wallet: Option<WalletInfo>,
@@ -168,7 +184,9 @@ pub fn SendModalWithHardware(
     custom_rpc: Option<String>,
     onclose: EventHandler<()>,
     onsuccess: EventHandler<String>,
+    #[props(!optional)] onhardware: EventHandler<HardwareWalletEvent>,
 ) -> Element {
+    // Always declare all hooks at the top of the component - never conditionally
     let mut recipient = use_signal(|| "".to_string());
     let mut amount = use_signal(|| "".to_string());
     let mut sending = use_signal(|| false);
@@ -176,47 +194,21 @@ pub fn SendModalWithHardware(
     let mut recipient_balance = use_signal(|| None as Option<f64>);
     let mut checking_balance = use_signal(|| false);
     
-    // Add state for transaction success modal
+    // Add state for transaction success modal - always declared
     let mut show_success_modal = use_signal(|| false);
     let mut transaction_signature = use_signal(|| "".to_string());
+    let mut was_hardware_transaction = use_signal(|| false);
     
-    // Add state for hardware wallet approval overlay
+    // Add state for hardware wallet approval overlay - always declared
     let mut show_hardware_approval = use_signal(|| false);
 
-    // Clone custom_rpc for use in use_effect to prevent moving the original
+    // Use all effect hooks unconditionally
     let custom_rpc_for_effect = custom_rpc.clone();
-
-    // Determine which address to show based on wallet type
-    let display_address = if let Some(hw) = &hardware_wallet {
-        // If hardware wallet is connected, try to get its public key
-        let mut hw_address = use_signal(|| None as Option<String>);
-
-        // Clone hardware_wallet for the effect
-        let hw_clone = hardware_wallet.clone();
-        use_effect(move || {
-            if let Some(hw) = &hw_clone {
-                let hw = hw.clone();
-                spawn(async move {
-                    if let Ok(pubkey) = hw.get_public_key().await {
-                        hw_address.set(Some(pubkey));
-                    }
-                });
-            }
-        });
-        hw_address().unwrap_or_else(|| "Hardware Wallet".to_string())
-    } else if let Some(w) = &wallet {
-        w.address.clone()
-    } else {
-        "No Wallet".to_string()
-    };
-
-    // Check recipient balance when address changes
     use_effect(move || {
         let recipient_addr = recipient();
-        let rpc_url = custom_rpc_for_effect.clone(); // Use the cloned version here
+        let rpc_url = custom_rpc_for_effect.clone();
 
-        if recipient_addr.len() > 30 { // Basic check if it could be a valid address
-            // Validate the address format
+        if recipient_addr.len() > 30 {
             if bs58::decode(&recipient_addr).into_vec().is_ok() {
                 checking_balance.set(true);
                 recipient_balance.set(None);
@@ -240,11 +232,12 @@ pub fn SendModalWithHardware(
         }
     });
 
-    // If success modal is shown, render it instead
+    // Now we can return different elements based on conditions
     if show_success_modal() {
         return rsx! {
             TransactionSuccessModal {
                 signature: transaction_signature(),
+                was_hardware_wallet: was_hardware_transaction(),
                 onclose: move |_| {
                     show_success_modal.set(false);
                     // Call onsuccess when the user closes the modal
@@ -253,6 +246,30 @@ pub fn SendModalWithHardware(
             }
         };
     }
+
+    // Determine which address to show based on wallet type
+    let display_address = if let Some(hw) = &hardware_wallet {
+        // Use a signal to track hardware wallet address - declared outside any conditionals
+        let mut hw_address = use_signal(|| None as Option<String>);
+
+        // Clone hardware_wallet for the effect
+        let hw_clone = hardware_wallet.clone();
+        use_effect(move || {
+            if let Some(hw) = &hw_clone {
+                let hw = hw.clone();
+                spawn(async move {
+                    if let Ok(pubkey) = hw.get_public_key().await {
+                        hw_address.set(Some(pubkey));
+                    }
+                });
+            }
+        });
+        hw_address().unwrap_or_else(|| "Hardware Wallet".to_string())
+    } else if let Some(w) = &wallet {
+        w.address.clone()
+    } else {
+        "No Wallet".to_string()
+    };
 
     rsx! {
         div {
@@ -359,6 +376,9 @@ pub fn SendModalWithHardware(
                             // Show hardware approval overlay if using hardware wallet
                             if hardware_wallet.is_some() {
                                 show_hardware_approval.set(true);
+                                was_hardware_transaction.set(true);
+                            } else {
+                                was_hardware_transaction.set(false);
                             }
 
                             // IMPORTANT: Clone these values to use in the async task
@@ -368,6 +388,9 @@ pub fn SendModalWithHardware(
                             let recipient_address = recipient();
                             let amount_str = amount();
                             let rpc_url = custom_rpc.clone();
+
+                            // Clone the onhardware event handler for use in async block
+                            let onhardware_handler = onhardware.clone();
 
                             spawn(async move {
                                 // Validate inputs
@@ -400,13 +423,23 @@ pub fn SendModalWithHardware(
 
                                 // Use hardware wallet if available, otherwise use software wallet
                                 if let Some(hw) = hardware_wallet_clone {
-                                    let hw_signer = HardwareSigner::from_wallet(hw);
+                                    let hw_signer = HardwareSigner::from_wallet(hw.clone());
                                     match client.send_sol_with_signer(&hw_signer, &recipient_address, amount_value).await {
                                         Ok(signature) => {
                                             println!("Transaction sent with hardware wallet: {}", signature);
                                             
                                             // Hide hardware approval overlay
                                             show_hardware_approval.set(false);
+                                            
+                                            // Disconnect the hardware wallet
+                                            // This ensures the UI state matches reality
+                                            hw.disconnect().await;
+                                            
+                                            // Notify the parent component about hardware wallet disconnection
+                                            onhardware_handler.call(HardwareWalletEvent {
+                                                connected: false,
+                                                pubkey: None,
+                                            });
                                             
                                             // Set the transaction signature and show success modal
                                             transaction_signature.set(signature);

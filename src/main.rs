@@ -2,13 +2,13 @@ use dioxus::prelude::*;
 
 mod wallet;
 mod rpc;
+mod prices;
 mod transaction;
 mod signing;
 mod hardware;
 mod storage;
 mod components;
 
-// Change this import - WalletView is re-exported from components module
 use components::*;
 
 #[derive(Debug, Clone, Routable, PartialEq)]

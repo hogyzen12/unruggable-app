@@ -1,5 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 const DEFAULT_RPC_URL: &str = "https://serene-stylish-mound.solana-mainnet.quiknode.pro/5489821bcd1547d9cd7b2d81f90c086e36e0e9f7/";
 
@@ -225,4 +226,271 @@ pub async fn get_token_accounts_by_owner(
         .collect();
 
     Ok(token_accounts)
+}
+
+/// Transaction history related structs
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TransactionHistoryItem {
+    pub signature: String,
+    pub slot: u64,
+    #[serde(rename = "blockTime")]
+    pub block_time: Option<i64>,
+    #[serde(rename = "confirmationStatus")]
+    pub confirmation_status: Option<String>,
+    pub err: Option<serde_json::Value>,
+    pub memo: Option<String>,
+}
+
+/// Convert a timestamp to a human-readable date/time
+pub fn format_timestamp(timestamp: i64) -> String {
+    let datetime = chrono::NaiveDateTime::from_timestamp_opt(timestamp, 0)
+        .unwrap_or_else(|| chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+    datetime.format("%Y-%m-%d %H:%M:%S").to_string()
+}
+
+/// Gets a simplified transaction item with decoded info useful for UI display
+#[derive(Debug, Clone, Serialize)]
+pub struct TransactionInfo {
+    pub signature: String,
+    pub timestamp: String,
+    pub time_ago: String,
+    pub status: String,
+    pub raw_status: String,
+    pub memo: Option<String>,
+    pub error: Option<String>,
+}
+
+/// Fetches transactions history for a given address
+pub async fn get_transaction_history(
+    address: &str,
+    limit: usize,
+    rpc_url: Option<&str>,
+) -> Result<Vec<TransactionInfo>, String> {
+    let client = Client::new();
+    let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
+    
+    // Default to 20 transactions or user-requested limit (max 50 to avoid too much data)
+    let limit = limit.min(50).max(1);
+    
+    let request = RpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: 1,
+        method: "getSignaturesForAddress".to_string(),
+        params: vec![
+            serde_json::Value::String(address.to_string()),
+            serde_json::json!({
+                "limit": limit,
+                "commitment": "finalized"
+            }),
+        ],
+    };
+    
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("RPC error: {}", response.status()));
+    }
+    
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    
+    // Check for errors in the response
+    if let Some(error) = json.get("error") {
+        return Err(format!("RPC error: {:?}", error));
+    }
+    
+    // Get the result
+    if let Some(result) = json.get("result") {
+        // Parse the result as a Vec<TransactionHistoryItem>
+        let transactions: Vec<TransactionHistoryItem> = serde_json::from_value(result.clone())
+            .map_err(|e| format!("Failed to parse transactions: {}", e))?;
+        
+        // Get current timestamp for "time ago" calculations
+        let current_time = chrono::Utc::now().timestamp();
+        
+        // Convert to TransactionInfo
+        let transactions_info = transactions
+            .into_iter()
+            .map(|tx| {
+                let timestamp = if let Some(block_time) = tx.block_time {
+                    let formatted = format_timestamp(block_time);
+                    formatted
+                } else {
+                    "Unknown time".to_string()
+                };
+                
+                // Calculate time ago
+                let time_ago = if let Some(block_time) = tx.block_time {
+                    let diff = current_time - block_time;
+                    if diff < 60 {
+                        format!("{} seconds ago", diff)
+                    } else if diff < 3600 {
+                        format!("{} minutes ago", diff / 60)
+                    } else if diff < 86400 {
+                        format!("{} hours ago", diff / 3600)
+                    } else {
+                        format!("{} days ago", diff / 86400)
+                    }
+                } else {
+                    "Unknown time".to_string()
+                };
+                
+                // Determine status
+                let status = if let Some(err) = &tx.err {
+                    "Failed".to_string()
+                } else {
+                    "Success".to_string()
+                };
+                
+                let raw_status = tx.confirmation_status
+                    .unwrap_or_else(|| "unknown".to_string());
+                
+                // Extract error message if any
+                let error = if let Some(err) = tx.err {
+                    let err_str = format!("{:?}", err);
+                    if err_str.len() > 100 {
+                        Some(format!("{}...", &err_str[..100]))
+                    } else {
+                        Some(err_str)
+                    }
+                } else {
+                    None
+                };
+                
+                TransactionInfo {
+                    signature: tx.signature,
+                    timestamp,
+                    time_ago,
+                    status,
+                    raw_status,
+                    memo: tx.memo,
+                    error,
+                }
+            })
+            .collect();
+        
+        Ok(transactions_info)
+    } else {
+        Err("Failed to get transactions from response".to_string())
+    }
+}
+
+/// Gets detailed information about a specific transaction
+pub async fn get_transaction_details(
+    signature: &str,
+    rpc_url: Option<&str>,
+) -> Result<HashMap<String, serde_json::Value>, String> {
+    let client = Client::new();
+    let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
+    
+    let request = RpcRequest {
+        jsonrpc: "2.0".to_string(),
+        id: 1,
+        method: "getTransaction".to_string(),
+        params: vec![
+            serde_json::Value::String(signature.to_string()),
+            serde_json::json!({
+                "encoding": "jsonParsed",
+                "commitment": "finalized",
+                "maxSupportedTransactionVersion": 0
+            }),
+        ],
+    };
+    
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send request: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("RPC error: {}", response.status()));
+    }
+    
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
+    
+    // Check for errors in the response
+    if let Some(error) = json.get("error") {
+        return Err(format!("RPC error: {:?}", error));
+    }
+    
+    // Extract the result
+    if let Some(result) = json.get("result") {
+        if result.is_null() {
+            return Err("Transaction not found".to_string());
+        }
+        
+        // Extract useful information to show in UI
+        let mut details = HashMap::new();
+        
+        // Add basic transaction info
+        if let Some(slot) = result.get("slot") {
+            details.insert("slot".to_string(), slot.clone());
+        }
+        
+        if let Some(block_time) = result.get("blockTime") {
+            if let Some(time) = block_time.as_i64() {
+                details.insert("blockTime".to_string(), block_time.clone());
+                details.insert("formattedTime".to_string(), 
+                    serde_json::Value::String(format_timestamp(time)));
+            }
+        }
+        
+        // Add transaction data
+        if let Some(meta) = result.get("meta") {
+            details.insert("meta".to_string(), meta.clone());
+            
+            // Extract fee
+            if let Some(fee) = meta.get("fee") {
+                if let Some(fee_val) = fee.as_u64() {
+                    details.insert("feeSOL".to_string(), 
+                        serde_json::Value::String(format!("{:.9}", fee_val as f64 / 1_000_000_000.0)));
+                }
+            }
+            
+            // Extract status
+            if let Some(err) = meta.get("err") {
+                if err.is_null() {
+                    details.insert("status".to_string(), 
+                        serde_json::Value::String("Success".to_string()));
+                } else {
+                    details.insert("status".to_string(), 
+                        serde_json::Value::String("Failed".to_string()));
+                    details.insert("error".to_string(), err.clone());
+                }
+            } else {
+                details.insert("status".to_string(), 
+                    serde_json::Value::String("Unknown".to_string()));
+            }
+        }
+        
+        // Add transaction instructions
+        if let Some(transaction) = result.get("transaction") {
+            if let Some(message) = transaction.get("message") {
+                details.insert("message".to_string(), message.clone());
+                
+                // Extract instructions
+                if let Some(instructions) = message.get("instructions") {
+                    details.insert("instructions".to_string(), instructions.clone());
+                }
+            }
+        }
+        
+        Ok(details)
+    } else {
+        Err("Failed to get transaction details from response".to_string())
+    }
 }

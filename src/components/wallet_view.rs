@@ -7,9 +7,12 @@ use crate::storage::{
     save_rpc_to_storage,
     clear_rpc_storage
 };
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, TransactionHistoryModal};
+use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
+// Import the prices module - we need to add this to main.rs
+use crate::prices;
 use crate::transaction::TransactionClient;
 use crate::hardware::HardwareWallet;
 use std::sync::Arc;
@@ -20,6 +23,10 @@ const ICON_32: Asset = asset!("/assets/icons/32x32.png");
 const ICON_SOL: Asset = asset!("/assets/icons/solanaLogo.png");
 const ICON_USDC: Asset = asset!("/assets/icons/usdcLogo.png");
 const ICON_USDT: Asset = asset!("/assets/icons/usdtLogo.png");
+const ICON_JTO: Asset = asset!("/assets/icons/jtoLogo.png");
+const ICON_JUP: Asset = asset!("/assets/icons/jupLogo.png");
+const ICON_JLP: Asset = asset!("/assets/icons/jlpLogo.png");
+const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
 
 // JupiterToken struct with PartialEq and Eq for use_memo
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,9 +38,61 @@ struct JupiterToken {
     tags: Vec<String>,
 }
 
-// Hardcoded verified tokens including USDC and USDT
+// Helper function to fetch token prices from the Pyth Network
+async fn fetch_token_prices(
+    mut token_prices: Signal<HashMap<String, f64>>,
+    mut prices_loading: Signal<bool>,
+    mut price_error: Signal<Option<String>>,
+    mut sol_price: Signal<f64>,
+    mut daily_change: Signal<f64>,
+    mut daily_change_percent: Signal<f64>,
+) {
+    prices_loading.set(true);
+    price_error.set(None);
+
+    // Call the prices module to fetch current prices
+    match prices::get_prices().await {
+        Ok(prices) => {
+            // Update token prices
+            token_prices.set(prices.clone());
+
+            // Update SOL price and calculate change values
+            if let Some(new_sol_price) = prices.get("SOL") {
+                // Calculate absolute change - comparing to the previous price
+                let old_price = sol_price();
+                let price_diff = new_sol_price - old_price;
+                
+                // Only update change values if we have a previous price (not first load)
+                if old_price > 0.0 {
+                    daily_change.set(price_diff);
+                    daily_change_percent.set((price_diff / old_price) * 100.0);
+                } else {
+                    // Default to 1% change for first load
+                    daily_change.set(new_sol_price * 0.01);
+                    daily_change_percent.set(1.0);
+                }
+                
+                // Update SOL price value
+                sol_price.set(*new_sol_price);
+            }
+            
+            println!("Successfully updated token prices: {:?}", prices);
+        },
+        Err(e) => {
+            // Handle error without crashing the app
+            price_error.set(Some(format!("Failed to fetch prices: {}", e)));
+            println!("Error fetching token prices: {}", e);
+        }
+    }
+    
+    prices_loading.set(false);
+}
+
+// Hardcoded verified tokens including USDC, USDT, JTO, JUP, JLP, and BONK
 fn get_verified_tokens() -> HashMap<String, JupiterToken> {
     let mut map = HashMap::new();
+    
+    // USDC
     map.insert(
         "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
         JupiterToken {
@@ -44,6 +103,8 @@ fn get_verified_tokens() -> HashMap<String, JupiterToken> {
             tags: vec!["stablecoin".to_string()],
         },
     );
+    
+    // USDT
     map.insert(
         "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".to_string(),
         JupiterToken {
@@ -54,6 +115,55 @@ fn get_verified_tokens() -> HashMap<String, JupiterToken> {
             tags: vec!["stablecoin".to_string()],
         },
     );
+    
+    // JTO
+    map.insert(
+        "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL".to_string(),
+        JupiterToken {
+            address: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL".to_string(),
+            name: "Jito".to_string(),
+            symbol: "JTO".to_string(),
+            logo_uri: "".to_string(),
+            tags: vec!["token".to_string()],
+        },
+    );
+    
+    // JUP
+    map.insert(
+        "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN".to_string(),
+        JupiterToken {
+            address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN".to_string(),
+            name: "Jupiter".to_string(),
+            symbol: "JUP".to_string(),
+            logo_uri: "".to_string(),
+            tags: vec!["token".to_string()],
+        },
+    );
+    
+    // JLP
+    map.insert(
+        "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4".to_string(),
+        JupiterToken {
+            address: "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4".to_string(),
+            name: "Jupiter LP".to_string(),
+            symbol: "JLP".to_string(),
+            logo_uri: "".to_string(),
+            tags: vec!["token".to_string()],
+        },
+    );
+    
+    // BONK
+    map.insert(
+        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string(),
+        JupiterToken {
+            address: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string(),
+            name: "Bonk".to_string(),
+            symbol: "BONK".to_string(),
+            logo_uri: "".to_string(),
+            tags: vec!["meme".to_string()],
+        },
+    );
+    
     map
 }
 
@@ -69,6 +179,7 @@ pub fn WalletView() -> Element {
     let mut show_rpc_modal = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
+    let mut show_history_modal = use_signal(|| false);
 
     // Hardware wallet state
     let mut hardware_wallet = use_signal(|| None as Option<Arc<HardwareWallet>>);
@@ -83,12 +194,19 @@ pub fn WalletView() -> Element {
 
     // Balance management
     let mut balance = use_signal(|| 0.0);
-    let mut sol_price = use_signal(|| 50.0);
-    let daily_change = use_signal(|| 42.13);
-    let daily_change_percent = use_signal(|| 4.20);
+    let mut sol_price = use_signal(|| 50.0); // Default price - will be updated from Pyth
+    
+    // Change these to ref signals for holding dynamic values
+    let mut daily_change = use_signal(|| 0.0);
+    let mut daily_change_percent = use_signal(|| 0.0);
 
     // Token management
     let mut tokens = use_signal(|| Vec::<Token>::new());
+    
+    // Add a new signal for token prices
+    let mut token_prices = use_signal(|| HashMap::<String, f64>::new());
+    let mut prices_loading = use_signal(|| false);
+    let mut price_error = use_signal(|| None as Option<String>);
 
     // Verified tokens loaded with USDC and USDT
     let verified_tokens = use_memo(move || get_verified_tokens());
@@ -124,6 +242,20 @@ pub fn WalletView() -> Element {
         });
     });
 
+    // Fetch token prices periodically
+    use_effect(move || {
+        spawn(async move {
+            // Initial fetch
+            fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent).await;
+            
+            // Then fetch every 2 minutes (120 seconds)
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(120)).await;
+                fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent).await;
+            }
+        });
+    });
+
     // Fetch balance and token accounts when wallet changes or hardware wallet connects
     use_effect(move || {
         let wallets_list = wallets.read();
@@ -140,6 +272,7 @@ pub fn WalletView() -> Element {
         };
         
         let rpc_url = custom_rpc();
+        let token_prices_snapshot = token_prices.read().clone();
         
         // Clone verified_tokens for use in the async closure
         let verified_tokens_clone = verified_tokens.clone();
@@ -191,17 +324,32 @@ pub fn WalletView() -> Element {
                         .into_iter()
                         .map(|account| {
                             let metadata = verified_tokens_map.get(&account.mint).unwrap();
-                            let price = match metadata.symbol.as_str() {
-                                "USDC" => 1.0,
-                                "USDT" => 1.0,
-                                _ => 1.0,
-                            };
+                            
+                            // Get real price from token_prices if available
+                            let price = token_prices_snapshot.get(&metadata.symbol)
+                                .copied()
+                                .unwrap_or_else(|| {
+                                    match metadata.symbol.as_str() {
+                                        "USDC" => 1.0,
+                                        "USDT" => 1.0,
+                                        _ => 1.0,
+                                    }
+                                });
+                                
                             let value_usd = account.amount * price;
                             let icon_type = match metadata.symbol.as_str() {
                                 "USDC" => ICON_USDC.to_string(),
                                 "USDT" => ICON_USDT.to_string(),
+                                "JTO" => ICON_JTO.to_string(),
+                                "JUP" => ICON_JUP.to_string(),
+                                "JLP" => ICON_JLP.to_string(),
+                                "BONK" => ICON_BONK.to_string(),
                                 _ => ICON_32.to_string(),
                             };
+                            
+                            // For now, use a static 3% price change until we implement historical price data
+                            let price_change = 3.0;
+                            
                             Token {
                                 mint: account.mint.clone(),
                                 symbol: metadata.symbol.clone(),
@@ -210,12 +358,15 @@ pub fn WalletView() -> Element {
                                 balance: account.amount,
                                 value_usd,
                                 price,
-                                price_change: 0.0,
+                                price_change,
                             }
                         })
                         .collect::<Vec<Token>>();
                     
                     println!("Processed tokens for address {}: {:?}", address, new_tokens);
+                    
+                    // Get the most recent SOL price
+                    let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
                     
                     let mut all_tokens = vec![Token {
                         mint: "So11111111111111111111111111111111111111112".to_string(),
@@ -223,9 +374,9 @@ pub fn WalletView() -> Element {
                         name: "Solana".to_string(),
                         icon_type: ICON_SOL.to_string(),
                         balance: balance(),
-                        value_usd: balance() * sol_price(),
-                        price: sol_price(),
-                        price_change: 0.0,
+                        value_usd: balance() * current_sol_price,
+                        price: current_sol_price,
+                        price_change: daily_change_percent(),
                     }];
                     all_tokens.extend(new_tokens);
                     
@@ -233,15 +384,19 @@ pub fn WalletView() -> Element {
                 }
                 Err(e) => {
                     println!("Failed to fetch token accounts for address {}: {}", address, e);
+                    
+                    // Get the most recent SOL price
+                    let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
+                    
                     tokens.set(vec![Token {
                         mint: "So11111111111111111111111111111111111111112".to_string(),
                         symbol: "SOL".to_string(),
                         name: "Solana".to_string(),
                         icon_type: ICON_SOL.to_string(),
                         balance: balance(),
-                        value_usd: balance() * sol_price(),
-                        price: sol_price(),
-                        price_change: 0.0,
+                        value_usd: balance() * current_sol_price,
+                        price: current_sol_price,
+                        price_change: daily_change_percent(),
                     }]);
                 }
             }
@@ -278,7 +433,7 @@ pub fn WalletView() -> Element {
         "No wallet".to_string()
     };
 
-    // Calculate USD value
+    // Calculate USD value using current SOL price
     let usd_balance = balance() * sol_price();
 
     rsx! {
@@ -483,6 +638,22 @@ pub fn WalletView() -> Element {
                             }
                             "RPC Settings"
                         }
+                        
+                        // Add refresh prices button
+                        button {
+                            class: "dropdown-item",
+                            onclick: move |_| {
+                                spawn(async move {
+                                    fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent).await;
+                                });
+                                show_dropdown.set(false);
+                            },
+                            div {
+                                class: "dropdown-icon action-icon",
+                                if prices_loading() { "⏳" } else { "🔄" }
+                            }
+                            if prices_loading() { "Refreshing Prices..." } else { "Refresh Prices" }
+                        }
                     }
                 }
             }
@@ -566,11 +737,11 @@ pub fn WalletView() -> Element {
                     custom_rpc: custom_rpc(),
                     onclose: move |_| {
                         show_send_modal.set(false);
-                        hardware_wallet.set(None);
+                        // Don't reset hardware_wallet here
                     },
                     onsuccess: move |_| {
                         show_send_modal.set(false);
-                        hardware_wallet.set(None);
+                        // Don't reset hardware_wallet here either
                         if let Some(wallet) = wallets.read().get(current_wallet_index()) {
                             let address = wallet.address.clone();
                             let rpc_url = custom_rpc();
@@ -587,6 +758,17 @@ pub fn WalletView() -> Element {
                                 }
                             });
                         }
+                    },
+                    // Add new event handler for hardware wallet status changes
+                    onhardware: move |event: HardwareWalletEvent| {
+                        // Update the hardware wallet connection state in the parent component
+                        hardware_connected.set(event.connected);
+                        hardware_pubkey.set(event.pubkey);
+                        
+                        // If disconnected, also set the hardware_wallet to None
+                        if !event.connected {
+                            hardware_wallet.set(None);
+                        }
                     }
                 }
             }
@@ -598,7 +780,25 @@ pub fn WalletView() -> Element {
                     onclose: move |_| show_receive_modal.set(false)
                 }
             }
-            
+
+            if show_history_modal() {
+                TransactionHistoryModal {
+                    address: {
+                        // this whole block is a single expression that returns a String
+                        if hardware_connected() && hardware_pubkey().is_some() {
+                            hardware_pubkey().unwrap()
+                        } else {
+                            current_wallet
+                                .as_ref()
+                                .map(|w| w.address.clone())
+                                .unwrap_or_default()
+                        }
+                    },
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| show_history_modal.set(false)
+                }
+            }
+                        
             // Main content container for balance, address, and actions
             div {
                 class: "main-content",
@@ -606,22 +806,32 @@ pub fn WalletView() -> Element {
                     class: "balance-section",
                     div {
                         class: "balance-amount",
-                        "${usd_balance:.2}"
-                    }
-                    div {
-                        class: "balance-change",
-                        span {
-                            class: "change-positive",
-                            "+${daily_change:.2}"
+                        // Show loading state for total portfolio value when prices are refreshing
+                        if prices_loading() {
+                            "Loading..."
+                        } else {
+                            // Calculate total portfolio value (sum of all token values) and round to nearest dollar
+                            {
+                                let total_value = tokens.read().iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                // Format the value with no decimal places - round to nearest dollar
+                                format!("${:.0}", total_value.round())
+                            }
                         }
+                    }
+                    // SOL balance row - clean and simple, no USD value
+                    div {
+                        class: "balance-sol-row",
                         span {
-                            class: "change-positive",
-                            "+{daily_change_percent:.2}%"
+                            class: "balance-sol",
+                            "{balance:.4} SOL"
                         }
                     }
-                    div {
-                        class: "balance-sol",
-                        "{balance:.4} SOL"
+                    // Display price refresh error if any
+                    if let Some(error) = price_error() {
+                        div {
+                            class: "price-error",
+                            "Price data error: {error}"
+                        }
                     }
                 }
                 
@@ -683,6 +893,18 @@ pub fn WalletView() -> Element {
                         span {
                             class: "action-label",
                             "Swap"
+                        }
+                    }
+                    button {
+                        class: "action-button",
+                        onclick: move |_| show_history_modal.set(true),
+                        div {
+                            class: "action-icon history-icon",
+                            "📜"
+                        }
+                        span {
+                            class: "action-label",
+                            "History"
                         }
                     }
                 }
