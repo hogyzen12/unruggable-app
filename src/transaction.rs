@@ -1,6 +1,7 @@
 // src/transaction.rs
 use crate::wallet::Wallet;
 use crate::signing::{TransactionSigner, SignerType};
+use crate::storage::get_current_jito_settings;
 use solana_sdk::{
     pubkey::Pubkey,
     signature::{Signature as SolanaSignature},
@@ -68,19 +69,42 @@ impl TransactionClient {
 
     /// Send a signed transaction
     pub async fn send_transaction(&self, signed_tx: &str) -> Result<String, Box<dyn Error>> {
-        let request = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "sendTransaction",
-            "params": [
-                signed_tx,
-                {
-                    "encoding": "base58",
-                    "skipPreflight": false,
-                    "preflightCommitment": "finalized"
-                }
-            ]
-        });
+        // Check Jito settings
+        let jito_settings = get_current_jito_settings();
+        
+        // Prepare the request, potentially with Jito-specific parameters
+        let request = if jito_settings.jito_tx {
+            // If JitoTx is enabled, use base64 encoding as recommended by Jito
+            // and skip preflight as required by Jito
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "sendTransaction",
+                "params": [
+                    signed_tx,
+                    {
+                        "encoding": "base58", // We're still using base58 as that's what our code produces
+                        "skipPreflight": true, // Jito requires skipPreflight=true
+                        "preflightCommitment": "finalized"
+                    }
+                ]
+            })
+        } else {
+            // Regular transaction submission
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "sendTransaction",
+                "params": [
+                    signed_tx,
+                    {
+                        "encoding": "base58",
+                        "skipPreflight": false,
+                        "preflightCommitment": "finalized"
+                    }
+                ]
+            })
+        };
 
         let response = self.client
             .post(&self.rpc_url)
@@ -119,6 +143,9 @@ impl TransactionClient {
         to_address: &str,
         amount_sol: f64,
     ) -> Result<String, Box<dyn Error>> {
+        // Check Jito settings
+        let jito_settings = get_current_jito_settings();
+        
         // Get the public key from the signer
         let from_pubkey_str = signer.get_public_key().await?;
         let from_pubkey = Pubkey::from_str(&from_pubkey_str)?;
@@ -141,8 +168,17 @@ impl TransactionClient {
             amount_lamports,
         );
         
-        // Create a message with the instruction
-        let mut message = Message::new(&[transfer_instruction], Some(&from_pubkey));
+        // Start with the basic transfer instruction
+        let mut instructions = vec![transfer_instruction];
+        
+        // Apply Jito modifications if JitoTx is enabled
+        if jito_settings.jito_tx {
+            println!("JitoTx is enabled, applying Jito modifications");
+            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+        }
+        
+        // Create a message with all instructions
+        let mut message = Message::new(&instructions, Some(&from_pubkey));
         message.recent_blockhash = recent_blockhash;
         
         // Create a VersionedTransaction with empty signatures
@@ -206,6 +242,39 @@ impl TransactionClient {
         } else {
             Ok(false)
         }
+    }
+
+    //Jito tx options
+    fn apply_jito_modifications(
+        &self,
+        from_pubkey: &Pubkey,
+        instructions: &mut Vec<solana_sdk::instruction::Instruction>,
+    ) -> Result<(), Box<dyn Error>> {
+        // First Jito address (as per JS example)
+        let jito_address1 = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
+        
+        // Second Jito address (as per JS example)
+        let jito_address2 = Pubkey::from_str("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL")?;
+
+        // Add two transfer instructions as tips to Jito
+        let tip_instruction1 = system_instruction::transfer(
+            from_pubkey,
+            &jito_address1,
+            100_000, // 0.0001 SOL in lamports
+        );
+
+        let tip_instruction2 = system_instruction::transfer(
+            from_pubkey,
+            &jito_address2,
+            100_000, // 0.0001 SOL in lamports
+        );
+
+        // Add the tip instructions to the existing instructions list
+        instructions.push(tip_instruction1);
+        instructions.push(tip_instruction2);
+
+        println!("Added Jito tip instructions to transaction");
+        Ok(())
     }
 }
 

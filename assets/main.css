@@ -294,20 +294,28 @@ body {
     font-size: 14px;
 }
 
-.token-price {
-    color: #6b7280;
-}
-
 .token-change {
     font-size: 12px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+    margin-left: 8px;
 }
 
 .token-change.positive {
-    color: #10b981;
+    color: #10b981; /* Green for positive */
+    background-color: rgba(16, 185, 129, 0.1);
 }
 
 .token-change.negative {
-    color: #ef4444;
+    color: #ef4444; /* Red for negative */
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+/* Make token price more readable */
+.token-price {
+    color: #d1d5db;
+    font-weight: 500;
 }
 
 .token-values {

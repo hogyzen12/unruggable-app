@@ -198,10 +198,10 @@ pub fn WalletView() -> Element {
     let mut show_jito_modal = use_signal(|| false);
     let mut jito_settings = use_signal(|| load_jito_settings_from_storage());
 
-
     // Balance management
     let mut balance = use_signal(|| 0.0);
     let mut sol_price = use_signal(|| 50.0); // Default price - will be updated from Pyth
+    let mut token_changes = use_signal(|| HashMap::<String, (Option<f64>, Option<f64>)>::new());
     
     // Change these to ref signals for holding dynamic values
     let mut daily_change = use_signal(|| 0.0);
@@ -217,6 +217,31 @@ pub fn WalletView() -> Element {
 
     // Verified tokens loaded with USDC and USDT
     let verified_tokens = use_memo(move || get_verified_tokens());
+
+    fn get_token_price_change(
+        symbol: &str, 
+        changes_map: &HashMap<String, (Option<f64>, Option<f64>)>
+    ) -> f64 {
+        // Try exact match first
+        if let Some((_, Some(percentage))) = changes_map.get(symbol) {
+            return *percentage;
+        }
+        
+        // Try uppercase
+        let uppercase = symbol.to_uppercase();
+        if let Some((_, Some(percentage))) = changes_map.get(&uppercase) {
+            return *percentage;
+        }
+        
+        // Try lowercase
+        let lowercase = symbol.to_lowercase();
+        if let Some((_, Some(percentage))) = changes_map.get(&lowercase) {
+            return *percentage;
+        }
+        
+        // No match found, use default
+        3.0
+    }
 
     // Load wallets from storage on component mount
     use_effect(move || {
@@ -248,6 +273,43 @@ pub fn WalletView() -> Element {
             }
         });
     });
+
+    // Create a separate effect for fetching historical data less frequently
+    use_effect(move || {
+        spawn(async move {
+            // Initial fetch of historical changes
+            fetch_historical_changes(token_prices, token_changes).await;
+            
+            // Then fetch every 15 minutes (much less frequent than current prices)
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(900)).await;
+                fetch_historical_changes(token_prices, token_changes).await;
+            }
+        });
+    });
+
+    
+    async fn fetch_historical_changes(
+        token_prices: Signal<HashMap<String, f64>>,
+        mut token_changes: Signal<HashMap<String, (Option<f64>, Option<f64>)>>,
+    ) {
+        // Get a copy of current prices
+        let current_prices = token_prices.read().clone();
+        
+        // Fetch historical changes separately
+        match prices::get_historical_changes(&current_prices).await {
+            Ok(changes) => {
+                println!("PRICE DEBUG: Successfully fetched historical changes: {:#?}", changes);
+                token_changes.set(changes); // Just use the original changes directly
+                
+                // Add this line to confirm the data was set
+                println!("PRICE DEBUG: After setting token_changes: {:#?}", token_changes.read());
+            },
+            Err(e) => {
+                println!("PRICE DEBUG: Error fetching historical changes: {}", e);
+            }
+        }
+    }
 
     // Fetch token prices periodically
     use_effect(move || {
@@ -297,6 +359,7 @@ pub fn WalletView() -> Element {
                 }
             }
             
+            
             // Fetch token accounts
             let filter = Some(rpc::TokenAccountFilter::ProgramId(
                 "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()
@@ -307,6 +370,11 @@ pub fn WalletView() -> Element {
                     
                     // Access the HashMap inside the Memo using read()
                     let verified_tokens_map = verified_tokens_clone.read();
+                    
+                    // Get snapshots of current prices and historical changes
+                    let token_prices_snapshot = token_prices_snapshot.clone();
+                    let token_changes_snapshot = token_changes.read().clone();
+                    println!("PRICE DEBUG: token_changes_snapshot in token creation: {:#?}", token_changes_snapshot);
                     
                     // Filter token accounts
                     let filtered_accounts: Vec<_> = token_accounts
@@ -342,6 +410,24 @@ pub fn WalletView() -> Element {
                                         _ => 1.0,
                                     }
                                 });
+                            
+                                let symbol = metadata.symbol.as_str();
+                                println!("PRICE DEBUG: Looking up price change for {}", symbol);
+                                println!("PRICE DEBUG: token_changes_snapshot keys: {:?}", token_changes_snapshot.keys().collect::<Vec<_>>());
+                                let price_change = get_token_price_change(symbol, &token_changes_snapshot);
+                                println!("PRICE DEBUG: Got price change for {}: {}", symbol, price_change);
+                                
+                                // Use this price_change variable here
+                                let value_usd = account.amount * price;
+                                let icon_type = match metadata.symbol.as_str() {
+                                    "USDC" => ICON_USDC.to_string(),
+                                    "USDT" => ICON_USDT.to_string(),
+                                    "JTO" => ICON_JTO.to_string(),
+                                    "JUP" => ICON_JUP.to_string(),
+                                    "JLP" => ICON_JLP.to_string(),
+                                    "BONK" => ICON_BONK.to_string(),
+                                    _ => ICON_32.to_string(),
+                                };
                                 
                             let value_usd = account.amount * price;
                             let icon_type = match metadata.symbol.as_str() {
@@ -353,9 +439,6 @@ pub fn WalletView() -> Element {
                                 "BONK" => ICON_BONK.to_string(),
                                 _ => ICON_32.to_string(),
                             };
-                            
-                            // For now, use a static 3% price change until we implement historical price data
-                            let price_change = 3.0;
                             
                             Token {
                                 mint: account.mint.clone(),
@@ -375,6 +458,9 @@ pub fn WalletView() -> Element {
                     // Get the most recent SOL price
                     let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
                     
+                    // Get SOL percentage change from historical data                    
+                    let sol_price_change = get_token_price_change("SOL", &token_changes_snapshot);
+
                     let mut all_tokens = vec![Token {
                         mint: "So11111111111111111111111111111111111111112".to_string(),
                         symbol: "SOL".to_string(),
@@ -383,7 +469,7 @@ pub fn WalletView() -> Element {
                         balance: balance(),
                         value_usd: balance() * current_sol_price,
                         price: current_sol_price,
-                        price_change: daily_change_percent(),
+                        price_change: sol_price_change,
                     }];
                     all_tokens.extend(new_tokens);
                     
@@ -395,6 +481,11 @@ pub fn WalletView() -> Element {
                     // Get the most recent SOL price
                     let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
                     
+                    // Get SOL percentage change from historical data (if available)
+                    let token_changes_snapshot = token_changes.read().clone();
+                    // Get SOL percentage change from historical data
+                    let sol_price_change = get_token_price_change("SOL", &token_changes_snapshot);
+                    
                     tokens.set(vec![Token {
                         mint: "So11111111111111111111111111111111111111112".to_string(),
                         symbol: "SOL".to_string(),
@@ -403,7 +494,7 @@ pub fn WalletView() -> Element {
                         balance: balance(),
                         value_usd: balance() * current_sol_price,
                         price: current_sol_price,
-                        price_change: daily_change_percent(),
+                        price_change: sol_price_change,
                     }]);
                 }
             }
@@ -981,8 +1072,18 @@ pub fn WalletView() -> Element {
                                             "${token.price:.2}"
                                         }
                                         span {
-                                            class: "token-change positive",
-                                            "+{token.price_change:.1}%"
+                                            // Change class based on whether the price change is positive or negative
+                                            class: if token.price_change >= 0.0 {
+                                                "token-change positive"
+                                            } else {
+                                                "token-change negative"
+                                            },
+                                            // Format with + or - sign based on positive/negative value
+                                            if token.price_change >= 0.0 {
+                                                "+{token.price_change:.1}%"
+                                            } else {
+                                                "{token.price_change:.1}%" // Negative number already has - sign
+                                            }
                                         }
                                     }
                                 }

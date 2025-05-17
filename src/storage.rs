@@ -178,3 +178,8 @@ pub fn load_jito_settings_from_storage() -> JitoSettings {
             .unwrap_or_default()
     }
 }
+
+// Helper function to get current Jito settings
+pub fn get_current_jito_settings() -> JitoSettings {
+    load_jito_settings_from_storage()
+}
