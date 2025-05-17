@@ -1890,3 +1890,385 @@ body {
     font-size: 14px;
     color: #9ca3af;
 }
+
+/* Jito status indicator styles */
+.jito-status-indicator {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 12px;
+    border-radius: 8px;
+    margin: 10px auto;
+    max-width: 180px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.jito-status-indicator::before {
+    content: "";
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+}
+
+.jito-status-indicator.jito-tx-active {
+    background-color: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #10b981;
+}
+
+.jito-status-indicator.jito-tx-active::before {
+    background-color: #10b981;
+    box-shadow: 0 0 5px #10b981;
+}
+
+.jito-status-indicator.jito-bundles-active {
+    background-color: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    color: #fbbf24;
+}
+
+.jito-status-indicator.jito-bundles-active::before {
+    background-color: #fbbf24;
+    box-shadow: 0 0 5px #fbbf24;
+}
+
+.jito-status-indicator.jito-inactive {
+    background-color: rgba(156, 163, 175, 0.1);
+    border: 1px solid rgba(156, 163, 175, 0.3);
+    color: #9ca3af;
+}
+
+.jito-status-indicator.jito-inactive::before {
+    background-color: #9ca3af;
+}
+
+.jito-status-indicator:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Enhanced toggle item styling */
+.toggle-item {
+    position: relative;
+    padding: 16px;
+    transition: all 0.2s ease;
+}
+
+.toggle-item:hover {
+    background-color: #151515;
+}
+
+.toggle-item-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    margin-right: 16px;
+}
+
+/* Add a small animation for toggle switches */
+@keyframes toggle-on {
+    0% { transform: scale(0.8); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+input:checked + .toggle-slider:before {
+    animation: toggle-on 0.2s ease-in-out;
+}
+
+/* Jito explanation section */
+.jito-explanation {
+    margin-top: 20px;
+    padding: 16px;
+    background-color: rgba(99, 102, 241, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+}
+
+.jito-explanation h4 {
+    color: #6366f1;
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 16px;
+}
+
+.jito-explanation p {
+    color: #d1d5db;
+    font-size: 14px;
+    line-height: 1.5;
+    margin-bottom: 10px;
+}
+
+.jito-explanation p:last-child {
+    margin-bottom: 0;
+}
+
+/* Visibility state for the Jito indicator */
+.jito-status-indicator {
+    opacity: 0;
+    transform: translateY(10px);
+    animation: fade-in 0.3s ease-in-out forwards;
+    animation-delay: 0.5s;
+}
+
+@keyframes fade-in {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Additional styles for enhanced Jito modal */
+.info-button {
+    background-color: #6366f1;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 13px;
+    margin-left: 10px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.info-button:hover {
+    background-color: #4f46e5;
+}
+
+.status-summary {
+    text-align: center;
+    margin: 20px 0;
+    padding: 12px;
+    background-color: #0a0a0a;
+    border-radius: 8px;
+    color: #9ca3af;
+    font-size: 14px;
+}
+
+.status-active {
+    color: #10b981;
+    font-weight: 600;
+}
+
+.status-experimental {
+    color: #fbbf24;
+    font-weight: 600;
+}
+
+.status-disabled {
+    color: #ef4444;
+    font-weight: 600;
+}
+
+/* Improved info message with button */
+.info-message {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px;
+    background-color: #1e3a8a;
+    border: 1px solid #3b82f6;
+    color: #93c5fd;
+    border-radius: 8px;
+    margin-top: 16px;
+    font-size: 14px;
+}
+
+/* Animation for the explanation panel */
+.jito-explanation {
+    animation: slide-down 0.3s ease-in-out;
+    transform-origin: top center;
+    margin-bottom: 16px;
+}
+
+@keyframes slide-down {
+    from {
+        opacity: 0;
+        transform: scaleY(0);
+    }
+    to {
+        opacity: 1;
+        transform: scaleY(1);
+    }
+}
+
+/* Jito protection badge in Send Modal */
+.jito-protection-badge {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+    background-color: rgba(16, 185, 129, 0.1);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    color: #10b981;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    font-weight: 500;
+    animation: badge-pulse 2s infinite ease-in-out;
+}
+
+.jito-protection-badge.experimental {
+    background-color: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    color: #fbbf24;
+}
+
+@keyframes badge-pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.2);
+    }
+    70% {
+        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    }
+}
+
+.jito-protection-badge.experimental {
+    animation: badge-pulse-experimental 2s infinite ease-in-out;
+}
+
+@keyframes badge-pulse-experimental {
+    0% {
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.2);
+    }
+    70% {
+        box-shadow: 0 0 0 6px rgba(251, 191, 36, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    }
+}
+
+/* Jito settings toggle styles */
+.toggle-section {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    margin: 24px 0;
+}
+
+.toggle-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background-color: #0a0a0a;
+    border-radius: 8px;
+    border: 1px solid #2a2a2a;
+}
+
+.toggle-label {
+    font-weight: 600;
+    font-size: 16px;
+    color: white;
+}
+
+.toggle-description {
+    font-size: 13px;
+    color: #9ca3af;
+    margin-top: 2px;
+    margin-bottom: 8px;
+}
+
+.toggle-item-content {
+    flex: 1;
+}
+
+/* Toggle switch styling */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 26px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #374151;
+    transition: .4s;
+    border-radius: 34px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 4px;
+    bottom: 4px;
+    background-color: white;
+    transition: .4s;
+    border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+    background-color: #6366f1;
+}
+
+input:focus + .toggle-slider {
+    box-shadow: 0 0 1px #6366f1;
+}
+
+input:checked + .toggle-slider:before {
+    transform: translateX(26px);
+}
+
+/* Secondary button for "Disable All" */
+.secondary-button {
+    background-color: #4b5563;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.secondary-button:hover {
+    background-color: #6b7280;
+}
+
+/* Jito icon for dropdown */
+.dropdown-icon.jito-icon {
+    color: #fbbf24;
+}
+
+/* Additional CSS for Jito toggle specifics */
+.toggle-item-content {
+    display: flex;
+    flex-direction: column;
+    margin-right: 16px;
+    flex: 1;
+}
+
+.toggle-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}

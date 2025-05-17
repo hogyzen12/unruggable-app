@@ -13,17 +13,3 @@ pub struct JupiterToken {
     pub logo_uri: String,
     pub tags: Vec<String>,
 }
-
-pub fn get_verified_tokens() -> HashMap<String, JupiterToken> {
-    // Parse the JSON at runtime
-    let tokens: Vec<JupiterToken> = serde_json::from_str(TOKENS_JSON)
-        .unwrap_or_else(|e| {
-            println!("Failed to parse tokens.json: {}", e);
-            Vec::new()
-        });
-
-    tokens
-        .into_iter()
-        .map(|token| (token.address.clone(), token))
-        .collect()
-}

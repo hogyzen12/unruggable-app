@@ -5,15 +5,17 @@ use crate::storage::{
     save_wallet_to_storage, 
     load_rpc_from_storage,
     save_rpc_to_storage,
-    clear_rpc_storage
+    clear_rpc_storage,
+    load_jito_settings_from_storage,
+    save_jito_settings_to_storage,
+    JitoSettings
 };
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, TransactionHistoryModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, TransactionHistoryModal, JitoModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
 // Import the prices module - we need to add this to main.rs
 use crate::prices;
-use crate::transaction::TransactionClient;
 use crate::hardware::HardwareWallet;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -191,6 +193,11 @@ pub fn WalletView() -> Element {
     // RPC management
     let mut custom_rpc = use_signal(|| load_rpc_from_storage());
     let mut rpc_input = use_signal(|| custom_rpc().unwrap_or_default());
+
+    //JITO Stuff
+    let mut show_jito_modal = use_signal(|| false);
+    let mut jito_settings = use_signal(|| load_jito_settings_from_storage());
+
 
     // Balance management
     let mut balance = use_signal(|| 0.0);
@@ -638,6 +645,19 @@ pub fn WalletView() -> Element {
                             }
                             "RPC Settings"
                         }
+
+                        button {
+                            class: "dropdown-item",
+                            onclick: move |_| {
+                                show_jito_modal.set(true);
+                                show_dropdown.set(false);
+                            },
+                            div {
+                                class: "dropdown-icon action-icon jito-icon",
+                                "⚡"
+                            }
+                            "Jito Settings"
+                        }
                         
                         // Add refresh prices button
                         button {
@@ -701,6 +721,18 @@ pub fn WalletView() -> Element {
                                 }
                             });
                         }
+                    }
+                }
+            }
+
+            if show_jito_modal() {
+                JitoModal {
+                    current_settings: jito_settings(),
+                    onclose: move |_| show_jito_modal.set(false),
+                    onsave: move |new_settings| {
+                        jito_settings.set(new_settings);
+                        save_jito_settings_to_storage(&new_settings);
+                        show_jito_modal.set(false);
                     }
                 }
             }

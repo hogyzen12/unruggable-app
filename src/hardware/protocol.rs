@@ -1,7 +1,5 @@
 // src/hardware/protocol.rs
 use std::error::Error;
-use ed25519_dalek::{Signature, VerifyingKey};
-use bs58;
 use base64::Engine; // Add this import
 
 /// Command types that can be sent to the hardware wallet

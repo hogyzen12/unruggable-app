@@ -16,10 +16,13 @@
 │   │   ├── 256x256.png
 │   │   ├── 32x32.png
 │   │   ├── 64x64.png
+│   │   ├── bonkLogo.png
 │   │   ├── icon.icns
 │   │   ├── icon.ico
 │   │   ├── icon.png
-│   │   ├── sendicn.gif
+│   │   ├── jlpLogo.png
+│   │   ├── jtoLogo.png
+│   │   ├── jupLogo.png
 │   │   ├── solanaLogo.png
 │   │   ├── usdcLogo.png
 │   │   └── usdtLogo.png
@@ -44,6 +47,7 @@
 │   │   │   ├── receive_modal.rs
 │   │   │   ├── rpc_modal.rs
 │   │   │   ├── send_modal.rs
+│   │   │   ├── transaction_history_modal.rs
 │   │   │   └── wallet_modal.rs
 │   │   └── wallet_view.rs
 │   ├── hardware
@@ -51,6 +55,7 @@
 │   │   ├── protocol.rs
 │   │   └── serial.rs
 │   ├── main.rs
+│   ├── prices.rs
 │   ├── rpc.rs
 │   ├── signing
 │   │   ├── hardware.rs
@@ -62,4 +67,4 @@
 ├── structure.txt
 └── tailwind.config.js
 
-9 directories, 54 files
+9 directories, 59 files

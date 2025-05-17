@@ -5,9 +5,6 @@ use crate::hardware::HardwareWallet;
 use std::sync::Arc;
 use qrcode::{QrCode, render::svg};
 
-// Icon assets
-const ICON_32: Asset = asset!("/assets/icons/32x32.png");
-
 #[component]
 pub fn ReceiveModal(
     wallet: Option<WalletInfo>,

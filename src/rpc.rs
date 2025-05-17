@@ -344,7 +344,7 @@ pub async fn get_transaction_history(
                 };
                 
                 // Determine status
-                let status = if let Some(err) = &tx.err {
+                let status = if let Some(_err) = &tx.err {
                     "Failed".to_string()
                 } else {
                     "Success".to_string()
