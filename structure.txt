@@ -43,6 +43,7 @@
 │   │   ├── mod.rs
 │   │   ├── modals
 │   │   │   ├── hardware_modal.rs
+│   │   │   ├── jito_modal.rs
 │   │   │   ├── mod.rs
 │   │   │   ├── receive_modal.rs
 │   │   │   ├── rpc_modal.rs
@@ -67,4 +68,4 @@
 ├── structure.txt
 └── tailwind.config.js
 
-9 directories, 59 files
+9 directories, 60 files

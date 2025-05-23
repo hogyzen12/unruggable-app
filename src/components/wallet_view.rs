@@ -10,7 +10,7 @@ use crate::storage::{
     save_jito_settings_to_storage,
     JitoSettings
 };
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, TransactionHistoryModal, JitoModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, JitoModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
@@ -901,24 +901,6 @@ pub fn WalletView() -> Element {
                     wallet: current_wallet.clone(),
                     hardware_wallet: hardware_wallet(),
                     onclose: move |_| show_receive_modal.set(false)
-                }
-            }
-
-            if show_history_modal() {
-                TransactionHistoryModal {
-                    address: {
-                        // this whole block is a single expression that returns a String
-                        if hardware_connected() && hardware_pubkey().is_some() {
-                            hardware_pubkey().unwrap()
-                        } else {
-                            current_wallet
-                                .as_ref()
-                                .map(|w| w.address.clone())
-                                .unwrap_or_default()
-                        }
-                    },
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| show_history_modal.set(false)
                 }
             }
                         
