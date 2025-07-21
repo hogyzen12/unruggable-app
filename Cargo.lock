@@ -9000,6 +9000,7 @@ dependencies = [
  "sha2 0.10.9",
  "solana-client",
  "solana-sdk",
+ "solana-stake-interface",
  "tokio",
  "tokio-serial",
 ]
