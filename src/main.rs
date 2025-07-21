@@ -8,6 +8,7 @@ mod signing;
 mod hardware;
 mod storage;
 mod components;
+mod validators;
 
 use components::*;
 

@@ -2280,3 +2280,184 @@ input:checked + .toggle-slider:before {
     justify-content: space-between;
     margin-bottom: 12px;
 }
+
+/* Stake Modal Specific Styles */
+.stake-modal {
+    max-width: 420px;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+/* Validator Selector Styles */
+.validator-selector {
+    position: relative;
+}
+
+.validator-dropdown-button {
+    width: 100%;
+    padding: 12px 16px;
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+
+.validator-dropdown-button:hover {
+    background-color: #374151;
+    border-color: #6366f1;
+}
+
+.selected-validator {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+
+.validator-name {
+    font-weight: 600;
+    color: white;
+    font-size: 14px;
+}
+
+.validator-details {
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+.validator-placeholder {
+    color: #9ca3af;
+    font-size: 14px;
+}
+
+.dropdown-arrow {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+/* Validator Dropdown */
+.validator-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+    z-index: 1000;
+    margin-top: 4px;
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+}
+
+.validator-option {
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid #374151;
+    transition: background-color 0.2s ease;
+}
+
+.validator-option:hover {
+    background-color: #374151;
+}
+
+.validator-option:last-child {
+    border-bottom: none;
+}
+
+.validator-option-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.validator-option-name {
+    font-weight: 600;
+    color: white;
+    font-size: 14px;
+}
+
+.validator-commission {
+    background-color: #059669;
+    color: white;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.validator-description {
+    font-size: 12px;
+    color: #d1d5db;
+    margin-bottom: 4px;
+}
+
+.validator-stats {
+    font-size: 11px;
+    color: #9ca3af;
+}
+
+/* Field Hint for minimum stake */
+.field-hint {
+    margin-top: 4px;
+    font-size: 12px;
+    color: #9ca3af;
+}
+
+/* Stake Info Section */
+.stake-info-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.info-message {
+    padding: 10px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    line-height: 1.4;
+}
+
+.info-message.warning {
+    background-color: #451a03;
+    border: 1px solid #d97706;
+    color: #fbbf24;
+}
+
+.info-message:not(.warning) {
+    background-color: #1e3a8a;
+    border: 1px solid #3b82f6;
+    color: #bfdbfe;
+}
+
+/* Force the amount input to match balance display exactly */
+.amount-input-field {
+    width: 100% !important;
+    padding: 12px !important;
+    background-color: #0a0a0a !important;
+    border: 1px solid #374151 !important;
+    border-radius: 8px !important;
+    color: #fbbf24 !important;
+    font-family: monospace !important;
+    font-size: 16px !important;
+    text-align: left !important;
+    box-sizing: border-box !important;
+}
+
+.amount-input-field:focus {
+    outline: none !important;
+    border-color: #6366f1 !important;
+    background-color: #0a0a0a !important;
+}
+
+.amount-input-field::placeholder {
+    color: #6b7280 !important;
+}

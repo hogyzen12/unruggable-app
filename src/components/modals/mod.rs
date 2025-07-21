@@ -4,6 +4,7 @@ pub mod send_modal;
 pub mod hardware_modal;
 pub mod receive_modal;
 pub mod jito_modal;
+pub mod stake_modal;
 
 pub use wallet_modal::WalletModal;
 pub use rpc_modal::RpcModal;
@@ -11,3 +12,4 @@ pub use send_modal::SendModalWithHardware;
 pub use hardware_modal::HardwareWalletModal;
 pub use receive_modal::ReceiveModal;
 pub use jito_modal::JitoModal;
+pub use stake_modal::StakeModal;

@@ -10,7 +10,7 @@ use crate::storage::{
     save_jito_settings_to_storage,
     JitoSettings
 };
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, JitoModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
@@ -182,6 +182,7 @@ pub fn WalletView() -> Element {
     let mut show_send_modal = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
     let mut show_history_modal = use_signal(|| false);
+    let mut show_stake_modal = use_signal(|| false);
 
     // Hardware wallet state
     let mut hardware_wallet = use_signal(|| None as Option<Arc<HardwareWallet>>);
@@ -903,6 +904,37 @@ pub fn WalletView() -> Element {
                     onclose: move |_| show_receive_modal.set(false)
                 }
             }
+
+            if show_stake_modal() {
+                StakeModal {
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    current_balance: balance(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| {
+                        show_stake_modal.set(false);
+                    },
+                    onsuccess: move |_| {
+                        show_stake_modal.set(false);
+                        // Refresh balance after staking
+                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
+                            let address = wallet.address.clone();
+                            let rpc_url = custom_rpc();
+                            
+                            spawn(async move {
+                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
+                                    Ok(sol_balance) => {
+                                        balance.set(sol_balance);
+                                    }
+                                    Err(e) => {
+                                        println!("Error refreshing balance after stake: {}", e);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
                         
             // Main content container for balance, address, and actions
             div {
@@ -987,6 +1019,18 @@ pub fn WalletView() -> Element {
                         span {
                             class: "action-label",
                             "Send"
+                        }
+                    }
+                    button {
+                        class: "action-button",
+                        onclick: move |_| show_stake_modal.set(true),
+                        div {
+                            class: "action-icon",
+                            "🏛️"
+                        }
+                        span {
+                            class: "action-label",
+                            "Stake"
                         }
                     }
                     button {
