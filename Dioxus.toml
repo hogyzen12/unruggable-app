@@ -2,9 +2,13 @@
 name = "Unruggable"
 default_platform = "desktop"
 asset_dir = "public"
+android_manifest = "custom/AndroidManifest.xml"
 
 [web.app]
 title = ""
+
+[android]
+package = "com.unruggable"
 
 [bundle]
 identifier = "com.unruggable"

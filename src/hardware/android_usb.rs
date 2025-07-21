@@ -29,7 +29,7 @@ impl From<jni::errors::Error> for StorageError {
 
 #[cfg(target_os = "android")]
 pub struct AndroidUsbSerial {
-    pub port: Option<GlobalRef>, // Public field to allow access from mod.rs
+    pub port: Option<GlobalRef>,
     device_info: Option<AndroidUsbDevice>,
 }
 
@@ -128,12 +128,15 @@ impl AndroidUsbSerial {
 
     /// Send command to the hardware wallet
     pub async fn send_command(&self, command: Command) -> Result<Response, StorageError> {
-        let port_global = self.port.as_ref().ok_or(StorageError("Not connected to hardware wallet".to_string()))?;
+        // Clone the GlobalRef to avoid lifetime issues
+        let port_global = self.port.as_ref()
+            .ok_or(StorageError("Not connected to hardware wallet".to_string()))?
+            .clone();
         let cmd_data = format_esp32_command(&command);
         let (tx, rx) = std::sync::mpsc::channel();
 
         dispatch(move |env, activity, _webview| {
-            let result = Self::java_usb_serial_transfer(env, activity, port_global, &cmd_data);
+            let result = Self::java_usb_serial_transfer(env, activity, &port_global, &cmd_data);
             tx.send(result).unwrap();
         });
 
@@ -145,20 +148,18 @@ impl AndroidUsbSerial {
 
     /// Disconnect from the USB device
     pub async fn disconnect(&mut self) {
-        if let Some(port_global) = self.port.as_ref() {
+        if let Some(port_global) = self.port.take() { // Use take() to move the value out
             let (tx, rx) = std::sync::mpsc::channel();
             dispatch(move |env, activity, _webview| {
-                let result = Self::java_disconnect_usb_serial_device(env, activity, port_global);
+                let result = Self::java_disconnect_usb_serial_device(env, activity, &port_global);
                 tx.send(result).unwrap();
             });
             let _ = rx.recv(); // Ignore result for simplicity
         }
-        self.port = None;
         self.device_info = None;
         log::info!("🔌 Disconnected from USB serial device");
     }
 
-    // JNI methods for USB serial operations using usb-serial-for-android library
     fn java_scan_usb_serial_devices(
         env: &mut JNIEnv<'_>,
         activity: &JObject<'_>,

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- USB device filters for hardware wallets -->
+    <usb-device vendor-id="1027" product-id="24577" /> <!-- FTDI FT232R -->
+    <usb-device vendor-id="1027" product-id="24592" /> <!-- FTDI FT2232H -->
+    <usb-device vendor-id="1027" product-id="24593" /> <!-- FTDI FT4232H -->
+    <usb-device vendor-id="1027" product-id="24596" /> <!-- FTDI FT232H -->
+    <usb-device vendor-id="1027" product-id="24597" /> <!-- FTDI FT-X series -->
+    <usb-device vendor-id="4292" product-id="60000" /> <!-- CP2102/CP2109 -->
+    <usb-device vendor-id="4292" product-id="60016" /> <!-- CP2105 -->
+    <usb-device vendor-id="4292" product-id="60017" /> <!-- CP2108 -->
+    <usb-device vendor-id="6790" product-id="29987" /> <!-- CH340 -->
+    <usb-device vendor-id="6790" product-id="21795" /> <!-- CH341 -->
+    <usb-device vendor-id="12346" product-id="4097" /> <!-- ESP32-S3 -->
+    <usb-device vendor-id="12346" product-id="2" /> <!-- ESP32-S2 -->
+</resources>

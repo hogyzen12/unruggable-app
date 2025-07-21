@@ -37,31 +37,6 @@ impl From<jni::errors::Error> for StorageError {
     }
 }
 
-// Get the appropriate storage directory for the current platform
-fn get_storage_dir() -> String {
-    #[cfg(target_os = "android")]
-    {
-        match get_android_files_dir() {
-            Ok(dir) => {
-                log::info!("✅ Using Android files directory: {}", dir);
-                dir
-            }
-            Err(e) => {
-                log::error!("❌ Failed to get Android files directory: {}", e);
-                log::warn!("⚠️ Falling back to current directory");
-                ".".to_string()
-            }
-        }
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        let home_dir = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".to_string());
-        format!("{home_dir}/.solana_wallet_app")
-    }
-}
-
 // Android-specific function to get the proper files directory
 #[cfg(target_os = "android")]
 fn get_android_files_dir() -> Result<String, StorageError> {
@@ -100,10 +75,12 @@ fn get_android_files_dir() -> Result<String, StorageError> {
     }
 }
 
-// Alternative simpler approach using lazy static
+// Use OnceLock instead of lazy_static for Android
 #[cfg(target_os = "android")]
-lazy_static::lazy_static! {
-    static ref ANDROID_FILES_DIR: Option<String> = {
+fn get_android_files_dir_cached() -> &'static Option<String> {
+    use std::sync::OnceLock;
+    static ANDROID_FILES_DIR: OnceLock<Option<String>> = OnceLock::new();
+    ANDROID_FILES_DIR.get_or_init(|| {
         match get_android_files_dir() {
             Ok(dir) => {
                 log::info!("✅ Android files directory initialized: {}", dir);
@@ -114,18 +91,49 @@ lazy_static::lazy_static! {
                 None
             }
         }
-    };
+    })
+}
+
+// Use lazy_static only on non-Android platforms
+#[cfg(not(target_os = "android"))]
+lazy_static::lazy_static! {
+    static ref ANDROID_FILES_DIR: Option<String> = None;
+}
+
+// Get the appropriate storage directory for the current platform
+fn get_storage_dir() -> String {
+    #[cfg(target_os = "android")]
+    {
+        match get_android_files_dir() {
+            Ok(dir) => {
+                log::info!("✅ Using Android files directory: {}", dir);
+                dir
+            }
+            Err(e) => {
+                log::error!("❌ Failed to get Android files directory: {}", e);
+                log::warn!("⚠️ Falling back to current directory");
+                ".".to_string()
+            }
+        }
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let home_dir = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        format!("{home_dir}/.solana_wallet_app")
+    }
 }
 
 // Simplified storage directory function
 fn get_storage_dir_simple() -> String {
     #[cfg(target_os = "android")]
     {
-        if let Some(ref dir) = *ANDROID_FILES_DIR {
+        if let Some(ref dir) = *get_android_files_dir_cached() {
             dir.clone()
         } else {
             log::warn!("⚠️ Using fallback storage directory");
-            ".".to_string()
+            "/data/data/com.unruggable/files".to_string() // Hardcoded fallback
         }
     }
     #[cfg(not(target_os = "android"))]
@@ -179,6 +187,36 @@ fn ensure_storage_dir() -> Result<(), std::io::Error> {
         Err(e) => {
             log::error!("❌ Failed to create storage directory {}: {}", storage_dir, e);
             Err(e)
+        }
+    }
+}
+
+// Add this function for testing Android storage
+#[cfg(target_os = "android")]
+pub fn ensure_android_storage_works() -> Result<(), String> {
+    log::info!("🔧 Testing Android storage...");
+    
+    // Try to write a simple test file
+    let test_dir = "/data/data/com.unruggable/files";
+    
+    match std::fs::create_dir_all(test_dir) {
+        Ok(_) => log::info!("✅ Created storage directory: {}", test_dir),
+        Err(e) => {
+            log::error!("❌ Failed to create storage directory: {}", e);
+            return Err(format!("Storage directory creation failed: {}", e));
+        }
+    }
+    
+    let test_file = format!("{}/test.txt", test_dir);
+    match std::fs::write(&test_file, "test") {
+        Ok(_) => {
+            log::info!("✅ Storage write test successful");
+            let _ = std::fs::remove_file(&test_file);
+            Ok(())
+        }
+        Err(e) => {
+            log::error!("❌ Storage write test failed: {}", e);
+            Err(format!("Storage write failed: {}", e))
         }
     }
 }
@@ -377,7 +415,7 @@ pub fn clear_rpc_storage() {
         storage.remove_item("custom_rpc").unwrap();
     }
     
-    #[cfg(not(feature = "web"))]
+    #[cfg(not(target_os = "android"))]
     {
         let rpc_file = get_rpc_file_path();
         match std::fs::remove_file(&rpc_file) {
@@ -478,61 +516,4 @@ pub fn load_jito_settings_from_storage() -> JitoSettings {
 
 pub fn get_current_jito_settings() -> JitoSettings {
     load_jito_settings_from_storage()
-}
-
-// Enhanced debug function
-pub fn debug_storage_info() {
-    log::info!("🔍 === STORAGE DEBUG INFO ===");
-    log::info!("Platform: {}", std::env::consts::OS);
-    log::info!("Architecture: {}", std::env::consts::ARCH);
-    
-    #[cfg(target_os = "android")]
-    {
-        log::info!("🤖 Android environment variables:");
-        for (key, value) in std::env::vars() {
-            if key.contains("ANDROID") || key.contains("DATA") || key.contains("FILES") || key.contains("STORAGE") {
-                log::info!("  {}: {}", key, value);
-            }
-        }
-        
-        log::info!("🔄 Android files dir from lazy static: {:?}", *ANDROID_FILES_DIR);
-    }
-    
-    let storage_dir = get_storage_dir_simple();
-    log::info!("📁 Final storage directory: {}", storage_dir);
-    log::info!("📄 Wallets file: {}", get_wallets_file_path());
-    log::info!("🔗 RPC file: {}", get_rpc_file_path());
-    log::info!("⚡ Jito settings file: {}", get_jito_settings_file_path());
-    
-    // Check if storage directory exists
-    if Path::new(&storage_dir).exists() {
-        log::info!("✅ Storage directory exists");
-        
-        // List contents
-        match std::fs::read_dir(&storage_dir) {
-            Ok(entries) => {
-                log::info!("📋 Storage directory contents:");
-                for entry in entries.flatten() {
-                    if let Ok(metadata) = entry.metadata() {
-                        log::info!("  - {} ({} bytes)", entry.file_name().to_string_lossy(), metadata.len());
-                    } else {
-                        log::info!("  - {}", entry.file_name().to_string_lossy());
-                    }
-                }
-            }
-            Err(e) => {
-                log::error!("❌ Cannot read storage directory: {}", e);
-            }
-        }
-    } else {
-        log::warn!("⚠️ Storage directory does not exist");
-    }
-    
-    // Test storage operations
-    match ensure_storage_dir() {
-        Ok(_) => log::info!("✅ Storage directory creation: OK"),
-        Err(e) => log::error!("❌ Storage directory creation failed: {}", e),
-    }
-    
-    log::info!("🔍 === END STORAGE DEBUG INFO ===");
 }

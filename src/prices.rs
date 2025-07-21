@@ -3,14 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use chrono::{DateTime, Utc, Datelike, TimeZone};
-use lazy_static::lazy_static;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 // Constants for the APIs
 const PYTH_HERMES_URL: &str = "https://hermes.pyth.network/v2/updates/price/latest";
 const PYTH_HISTORY_URL: &str = "https://benchmarks.pyth.network/v1/shims/tradingview/history";
-// Cache timeout for historical data only
 const HISTORICAL_CACHE_TIMEOUT: u64 = 3600; // 1 hour for historical data
 
 // Token IDs for Pyth Network
@@ -22,10 +20,19 @@ pub const TOKEN_IDS: &[(&str, &str)] = &[
     ("BONK", "72b021217ca3fe68922a19aaf990109cb9d84e9ad004b4d2025ad6f529314419"),
 ];
 
-// Only cache for historical prices
-lazy_static! {
+// Only use lazy_static on non-Android platforms
+#[cfg(not(target_os = "android"))]
+lazy_static::lazy_static! {
     static ref HISTORICAL_CACHE: Mutex<HashMap<String, (f64, Instant)>> = 
         Mutex::new(HashMap::new());
+}
+
+// For Android, use a simple function that returns a new HashMap each time
+#[cfg(target_os = "android")]
+fn get_historical_cache() -> &'static Mutex<HashMap<String, (f64, Instant)>> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Mutex<HashMap<String, (f64, Instant)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 // API response structs
@@ -63,7 +70,6 @@ pub struct TokenPriceData {
 }
 
 /// Gets current prices - UNCHANGED from original implementation
-/// This maintains the original fast performance with no caching
 pub async fn get_prices() -> Result<HashMap<String, f64>, Box<dyn Error>> {
     let client = Client::new();
 
@@ -117,8 +123,13 @@ async fn get_previous_day_price(symbol: &str) -> Result<Option<f64>, Box<dyn Err
     println!("get_previous_day_price called for symbol: {}", symbol);
     
     // Check cache first for historical data
+    #[cfg(not(target_os = "android"))]
+    let cache_ref = &*HISTORICAL_CACHE;
+    #[cfg(target_os = "android")]
+    let cache_ref = get_historical_cache();
+    
     {
-        let cache = HISTORICAL_CACHE.lock().unwrap();
+        let cache = cache_ref.lock().unwrap();
         if let Some((price, timestamp)) = cache.get(symbol) {
             if timestamp.elapsed() < Duration::from_secs(HISTORICAL_CACHE_TIMEOUT) {
                 println!("Using cached historical price for {}: {}, age: {:?}", 
@@ -211,7 +222,7 @@ async fn get_previous_day_price(symbol: &str) -> Result<Option<f64>, Box<dyn Err
             
             // Update cache for historical data only
             {
-                let mut cache = HISTORICAL_CACHE.lock().unwrap();
+                let mut cache = cache_ref.lock().unwrap();
                 cache.insert(symbol.to_string(), (price, Instant::now()));
                 println!("Updated cache for {}", symbol);
             }
@@ -307,7 +318,6 @@ pub async fn get_historical_changes(
 }
 
 /// Gets both current and historical price data
-/// This is for convenience but should be called less frequently
 pub async fn get_price_data() -> Result<HashMap<String, TokenPriceData>, Box<dyn Error>> {
     // Get current prices (fast)
     let current_prices = get_prices().await?;
