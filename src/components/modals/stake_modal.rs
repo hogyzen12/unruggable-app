@@ -184,7 +184,7 @@ pub fn StakeModal(
                         class: "amount-input-field",
                         r#type: "number",
                         step: "0.000001",
-                        min: "0.1",
+                        min: "0.01",
                         max: "{current_balance}",
                         placeholder: "0.0",
                         value: "{amount}",
@@ -195,7 +195,7 @@ pub fn StakeModal(
                     }
                     div {
                         class: "field-hint",
-                        "Minimum stake amount: 0.1 SOL"
+                        "Minimum stake amount: 0.01 SOL"
                     }
                 }
 
@@ -227,15 +227,15 @@ pub fn StakeModal(
                     }
                     button {
                         class: "modal-button primary",
-                        disabled: staking() || amount().is_empty() || amount().parse::<f64>().unwrap_or(0.0) < 0.1 || selected_validator().is_none(),
+                        disabled: staking() || amount().is_empty() || amount().parse::<f64>().unwrap_or(0.0) < 0.01 || selected_validator().is_none(),
                         onclick: move |_| {
                             error_message.set(None);
                             
                             // Validate amount
                             let stake_amount = match amount().parse::<f64>() {
-                                Ok(amt) if amt >= 0.1 && amt <= current_balance => amt,
+                                Ok(amt) if amt >= 0.01 && amt <= current_balance => amt,
                                 _ => {
-                                    error_message.set(Some("Please enter a valid amount between 0.1 SOL and your available balance".to_string()));
+                                    error_message.set(Some("Please enter a valid amount between 0.01 SOL and your available balance".to_string()));
                                     return;
                                 }
                             };

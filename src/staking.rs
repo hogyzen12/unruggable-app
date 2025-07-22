@@ -5,17 +5,16 @@ use solana_sdk::{
     signer::Signer,
     commitment_config::CommitmentConfig,
     signature::Keypair,
+    compute_budget::ComputeBudgetInstruction,
 };
 use solana_client::rpc_client::RpcClient;
 use crate::wallet::{Wallet, WalletInfo};
 use crate::hardware::HardwareWallet;
 use std::sync::Arc;
 use std::str::FromStr;
-use ed25519_dalek::{SigningKey, VerifyingKey}; // Add this line
-
+use ed25519_dalek::{SigningKey, VerifyingKey};
 
 // Use the correct staking interface
-// For now, we'll use the basic solana-sdk staking instructions
 use solana_sdk::stake::{
     instruction::{initialize, delegate_stake},
     state::{Authorized, Lockup},
@@ -68,9 +67,9 @@ pub async fn create_stake_account(
     let stake_amount_lamports = (stake_amount_sol * 1_000_000_000.0) as u64;
     
     // Validate minimum stake amount (0.1 SOL)
-    if stake_amount_lamports < 100_000_000 {
+    if stake_amount_lamports < 10_000_000 {
         return Err(StakingError::InvalidAmount(
-            "Minimum stake amount is 0.1 SOL".to_string()
+            "Minimum stake amount is 0.01 SOL".to_string()
         ));
     }
 
@@ -99,11 +98,11 @@ pub async fn create_stake_account(
     let balance_lamports = client.get_balance(&authority_pubkey)
         .map_err(|e| StakingError::RpcError(format!("Failed to get balance: {}", e)))?;
     
-    // Need stake amount + rent exemption + transaction fees (approximately 0.005 SOL total overhead)
+    // Need stake amount + rent exemption + transaction fees (approximately 0.01 SOL total overhead)
     let rent_exemption = client.get_minimum_balance_for_rent_exemption(200) // stake account size
         .map_err(|e| StakingError::RpcError(format!("Failed to get rent exemption: {}", e)))?;
     
-    let total_required = stake_amount_lamports + rent_exemption + 5_000_000; // 0.005 SOL for fees
+    let total_required = stake_amount_lamports + rent_exemption + 10_000_000; // 0.01 SOL for fees
     
     if balance_lamports < total_required {
         return Err(StakingError::InsufficientBalance(
@@ -122,9 +121,15 @@ pub async fn create_stake_account(
     let recent_blockhash = client.get_latest_blockhash()
         .map_err(|e| StakingError::RpcError(format!("Failed to get recent blockhash: {}", e)))?;
 
-    // Create the transaction instructions
+    // Create the transaction instructions (following the successful transaction pattern)
     let instructions = vec![
-        // 1. Create stake account
+        // 1. Set compute unit price (like in the successful transaction)
+        ComputeBudgetInstruction::set_compute_unit_price(125_000), // 0.13 lamports per compute unit
+        
+        // 2. Set compute unit limit (like in the successful transaction)  
+        ComputeBudgetInstruction::set_compute_unit_limit(600_000), // 600,000 compute units
+        
+        // 3. Create stake account
         system_instruction::create_account(
             &authority_pubkey,
             &stake_account_pubkey,
@@ -133,7 +138,7 @@ pub async fn create_stake_account(
             &solana_sdk::stake::program::id(),
         ),
         
-        // 2. Initialize stake account
+        // 4. Initialize stake account
         initialize(
             &stake_account_pubkey,
             &Authorized {
@@ -143,7 +148,7 @@ pub async fn create_stake_account(
             &Lockup::default(),
         ),
         
-        // 3. Delegate stake to validator
+        // 5. Delegate stake to validator
         delegate_stake(
             &stake_account_pubkey,
             &authority_pubkey,
@@ -151,11 +156,6 @@ pub async fn create_stake_account(
         ),
     ];
 
-    // Create transaction
-    let mut transaction = Transaction::new_with_payer(&instructions, Some(&authority_pubkey));
-    transaction.sign(&[&stake_account_keypair], recent_blockhash);
-
-    
     // Sign the transaction with the appropriate wallet
     let signature = if let Some(_hw) = &hardware_wallet {
         // For now, return error for hardware wallet - we'll implement this later
@@ -179,10 +179,11 @@ pub async fn create_stake_account(
         let solana_keypair = solana_sdk::signature::Keypair::from_bytes(&full_keypair_bytes)
             .map_err(|e| StakingError::WalletError(format!("Failed to create Solana keypair: {}", e)))?;
         
-        // Create transaction and sign with BOTH keypairs
+        // Create transaction with proper signers
         let mut transaction = Transaction::new_with_payer(&instructions, Some(&authority_pubkey));
         
-        // Sign with BOTH the wallet keypair AND the stake account keypair
+        // Sign with BOTH the wallet keypair (authority) AND the stake account keypair
+        // The order matters: authority first, then stake account
         transaction.sign(&[&solana_keypair, &stake_account_keypair], recent_blockhash);
         
         // Send transaction
@@ -203,10 +204,20 @@ pub async fn create_stake_account(
 
 /// Get stake account information
 pub async fn get_stake_account_info(
-    _stake_account_pubkey: &Pubkey,
-    _rpc_url: Option<&str>,
+    stake_account_pubkey: &Pubkey,
+    rpc_url: Option<&str>,
 ) -> Result<Option<StakeAccountInfo>, StakingError> {
-    // This is a placeholder - you would implement actual stake account parsing here
-    // For now, we'll return None
-    Ok(None)
+    let rpc_url = rpc_url.unwrap_or("https://serene-stylish-mound.solana-mainnet.quiknode.pro/5489821bcd1547d9cd7b2d81f90c086e36e0e9f7/");
+    let client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+    
+    // Get stake account data
+    match client.get_account(stake_account_pubkey) {
+        Ok(account) => {
+            // Parse stake account data to get delegation info
+            // This is a simplified version - you'd need to properly parse the stake account state
+            // For now, we'll return None to indicate we need to implement proper parsing
+            Ok(None)
+        }
+        Err(_) => Ok(None), // Account doesn't exist or other error
+    }
 }
