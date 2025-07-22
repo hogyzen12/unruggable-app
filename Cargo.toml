@@ -36,7 +36,7 @@ dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011" }
 #dioxus = { version = "0.6.3", features = ["fullstack", "router"] }
 serialport = "4.3.0"
 tokio-serial = "5.4.4"
-solana-client = { version = "2.1", optional = true }
+solana-client = { version = "2.1"}
 
 # Android-specific dependencies
 [target.'cfg(target_os = "android")'.dependencies]

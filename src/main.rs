@@ -9,6 +9,7 @@ mod hardware;
 mod storage;
 mod components;
 mod validators;
+mod staking;
 
 use components::*;
 

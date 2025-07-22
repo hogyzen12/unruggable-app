@@ -3,6 +3,7 @@ use crate::wallet::WalletInfo;
 use crate::hardware::HardwareWallet;
 use crate::validators::{ValidatorInfo, get_recommended_validators};
 use crate::rpc;
+use crate::staking;
 use std::sync::Arc;
 
 #[component]
@@ -238,7 +239,7 @@ pub fn StakeModal(
                                     return;
                                 }
                             };
-
+                        
                             // Validate validator selection
                             let validator = match selected_validator() {
                                 Some(v) => v,
@@ -247,19 +248,36 @@ pub fn StakeModal(
                                     return;
                                 }
                             };
-
+                        
                             staking.set(true);
-
-                            // For now, just show a placeholder success message
-                            // We'll implement the actual staking logic in the next step
+                        
+                            // Import the staking module
+                            use crate::staking::create_stake_account;
+                        
+                            let wallet_clone = wallet.clone();
+                            let hardware_wallet_clone = hardware_wallet.clone(); // Remove the () - it's already the value
+                            let custom_rpc_clone = custom_rpc.clone();
+                            let validator_vote_account = validator.vote_account.clone();
+                        
                             spawn(async move {
-                                // Simulate staking delay
-                                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-                                staking.set(false);
-                                
-                                // Placeholder success - will be replaced with actual transaction
-                                println!("Would stake {} SOL to validator: {} ({})", stake_amount, validator.name, validator.vote_account);
-                                onsuccess.call("stake_placeholder_signature".to_string());
+                                match create_stake_account(
+                                    wallet_clone.as_ref(),
+                                    hardware_wallet_clone,
+                                    &validator_vote_account,
+                                    stake_amount,
+                                    custom_rpc_clone.as_deref(),
+                                ).await {
+                                    Ok(stake_info) => {
+                                        println!("Successfully created stake account: {:?}", stake_info);
+                                        staking.set(false);
+                                        onsuccess.call(stake_info.transaction_signature);
+                                    }
+                                    Err(e) => {
+                                        println!("Staking error: {}", e);
+                                        error_message.set(Some(e.to_string()));
+                                        staking.set(false);
+                                    }
+                                }
                             });
                         },
                         if staking() {
