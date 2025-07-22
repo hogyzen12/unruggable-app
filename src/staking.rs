@@ -6,18 +6,24 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     signature::Keypair,
     compute_budget::ComputeBudgetInstruction,
+    account::Account,
 };
 use solana_client::rpc_client::RpcClient;
+use solana_client::rpc_config::{RpcAccountInfoConfig, RpcProgramAccountsConfig};
+use solana_client::rpc_filter::{RpcFilterType, Memcmp, MemcmpEncodedBytes};
+use solana_account_decoder;
 use crate::wallet::{Wallet, WalletInfo};
 use crate::hardware::HardwareWallet;
+use crate::validators::{ValidatorInfo, get_recommended_validators};
 use std::sync::Arc;
 use std::str::FromStr;
 use ed25519_dalek::{SigningKey, VerifyingKey};
+use serde::{Deserialize, Serialize};
 
 // Use the correct staking interface
 use solana_sdk::stake::{
     instruction::{initialize, delegate_stake},
-    state::{Authorized, Lockup},
+    state::{Authorized, Lockup, StakeState},
 };
 
 #[derive(Debug, Clone)]
@@ -26,6 +32,39 @@ pub struct StakeAccountInfo {
     pub transaction_signature: String,
     pub validator_vote_account: Pubkey,
     pub staked_amount: u64, // in lamports
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DetailedStakeAccount {
+    pub pubkey: Pubkey,
+    pub state: StakeAccountState,
+    pub balance: u64, // in lamports
+    pub rent_exempt_reserve: u64,
+    pub validator_vote_account: Option<Pubkey>,
+    pub validator_name: String,
+    pub activation_epoch: Option<u64>,
+    pub deactivation_epoch: Option<u64>,
+    pub stake_authority: Pubkey,
+    pub withdraw_authority: Pubkey,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum StakeAccountState {
+    Uninitialized,
+    Initialized,
+    Delegated,
+    RewardsPool,
+}
+
+impl std::fmt::Display for StakeAccountState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StakeAccountState::Uninitialized => write!(f, "Uninitialized"),
+            StakeAccountState::Initialized => write!(f, "Initialized"),
+            StakeAccountState::Delegated => write!(f, "Active"),
+            StakeAccountState::RewardsPool => write!(f, "Rewards Pool"),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -37,6 +76,7 @@ pub enum StakingError {
     RpcError(String),
     HardwareWalletError(String),
     WalletError(String),
+    AccountParsingError(String),
 }
 
 impl std::fmt::Display for StakingError {
@@ -49,6 +89,7 @@ impl std::fmt::Display for StakingError {
             StakingError::RpcError(msg) => write!(f, "RPC error: {}", msg),
             StakingError::HardwareWalletError(msg) => write!(f, "Hardware wallet error: {}", msg),
             StakingError::WalletError(msg) => write!(f, "Wallet error: {}", msg),
+            StakingError::AccountParsingError(msg) => write!(f, "Account parsing error: {}", msg),
         }
     }
 }
@@ -66,7 +107,7 @@ pub async fn create_stake_account(
     // Convert SOL to lamports
     let stake_amount_lamports = (stake_amount_sol * 1_000_000_000.0) as u64;
     
-    // Validate minimum stake amount (0.1 SOL)
+    // Validate minimum stake amount (0.01 SOL)
     if stake_amount_lamports < 10_000_000 {
         return Err(StakingError::InvalidAmount(
             "Minimum stake amount is 0.01 SOL".to_string()
@@ -202,7 +243,156 @@ pub async fn create_stake_account(
     })
 }
 
-/// Get stake account information
+/// Scan all stake accounts owned by a wallet
+pub async fn scan_stake_accounts(
+    wallet_address: &str,
+    rpc_url: Option<&str>,
+) -> Result<Vec<DetailedStakeAccount>, StakingError> {
+    let authority_pubkey = Pubkey::from_str(wallet_address)
+        .map_err(|_| StakingError::WalletError("Invalid wallet address".to_string()))?;
+
+    let rpc_url = rpc_url.unwrap_or("https://serene-stylish-mound.solana-mainnet.quiknode.pro/5489821bcd1547d9cd7b2d81f90c086e36e0e9f7/");
+    let client = RpcClient::new_with_commitment(rpc_url, CommitmentConfig::confirmed());
+
+    // Get all stake program accounts where the authority matches our wallet
+    let stake_program_id = solana_sdk::stake::program::id();
+    
+    // Search for accounts where the staker authority is our wallet
+    let staker_filter = RpcFilterType::Memcmp(Memcmp::new(
+        44, // offset for staker authority in stake account
+        MemcmpEncodedBytes::Bytes(authority_pubkey.to_bytes().to_vec()),
+    ));
+    
+    // Search for accounts where the withdrawer authority is our wallet  
+    let withdrawer_filter = RpcFilterType::Memcmp(Memcmp::new(
+        76, // offset for withdrawer authority in stake account
+        MemcmpEncodedBytes::Bytes(authority_pubkey.to_bytes().to_vec()),
+    ));
+
+    let config = RpcProgramAccountsConfig {
+        filters: Some(vec![staker_filter]),
+        account_config: RpcAccountInfoConfig {
+            encoding: Some(solana_account_decoder::UiAccountEncoding::Base64),
+            data_slice: None,
+            commitment: Some(CommitmentConfig::confirmed()),
+            min_context_slot: None,
+        },
+        with_context: None,
+        sort_results: None,
+    };
+
+    // Get accounts where we are the staker
+    let staker_accounts = client.get_program_accounts_with_config(&stake_program_id, config.clone())
+        .map_err(|e| StakingError::RpcError(format!("Failed to get stake accounts: {}", e)))?;
+
+    // Get accounts where we are the withdrawer (but different from staker accounts)
+    let config_withdrawer = RpcProgramAccountsConfig {
+        filters: Some(vec![withdrawer_filter]),
+        account_config: config.account_config.clone(),
+        with_context: None,
+        sort_results: None,
+    };
+
+    let withdrawer_accounts = client.get_program_accounts_with_config(&stake_program_id, config_withdrawer)
+        .map_err(|e| StakingError::RpcError(format!("Failed to get withdrawer stake accounts: {}", e)))?;
+
+    // Combine and deduplicate accounts
+    let mut all_accounts = staker_accounts;
+    for (pubkey, account) in withdrawer_accounts {
+        if !all_accounts.iter().any(|(existing_pubkey, _)| *existing_pubkey == pubkey) {
+            all_accounts.push((pubkey, account));
+        }
+    }
+
+    // Parse each stake account
+    let mut detailed_accounts = Vec::new();
+    let validators = get_recommended_validators();
+
+    for (pubkey, account) in all_accounts {
+        if let Ok(detailed_account) = parse_stake_account(pubkey, account, &validators).await {
+            detailed_accounts.push(detailed_account);
+        }
+    }
+
+    Ok(detailed_accounts)
+}
+
+/// Parse a stake account's data into a detailed structure
+async fn parse_stake_account(
+    pubkey: Pubkey,
+    account: Account,
+    validators: &[ValidatorInfo],
+) -> Result<DetailedStakeAccount, StakingError> {
+    // Parse the stake account data
+    let stake_state = bincode::deserialize::<StakeState>(&account.data)
+        .map_err(|e| StakingError::AccountParsingError(format!("Failed to deserialize stake state: {}", e)))?;
+
+    let (state, validator_vote_account, activation_epoch, deactivation_epoch, stake_authority, withdraw_authority) = match stake_state {
+        StakeState::Uninitialized => {
+            (StakeAccountState::Uninitialized, None, None, None, pubkey, pubkey)
+        }
+        StakeState::Initialized(meta) => {
+            (StakeAccountState::Initialized, None, None, None, meta.authorized.staker, meta.authorized.withdrawer)
+        }
+        StakeState::Stake(meta, stake) => {
+            let activation_epoch = if stake.delegation.activation_epoch == u64::MAX {
+                None
+            } else {
+                Some(stake.delegation.activation_epoch)
+            };
+            
+            let deactivation_epoch = if stake.delegation.deactivation_epoch == u64::MAX {
+                None
+            } else {
+                Some(stake.delegation.deactivation_epoch)
+            };
+
+            (
+                StakeAccountState::Delegated,
+                Some(stake.delegation.voter_pubkey),
+                activation_epoch,
+                deactivation_epoch,
+                meta.authorized.staker,
+                meta.authorized.withdrawer,
+            )
+        }
+        StakeState::RewardsPool => {
+            (StakeAccountState::RewardsPool, None, None, None, pubkey, pubkey)
+        }
+    };
+
+    // Find validator name
+    let validator_name = if let Some(vote_account) = validator_vote_account {
+        validators
+            .iter()
+            .find(|v| v.vote_account == vote_account.to_string())
+            .map(|v| v.name.clone())
+            .unwrap_or_else(|| format!("{}...{}", 
+                vote_account.to_string().chars().take(4).collect::<String>(),
+                vote_account.to_string().chars().rev().take(4).collect::<String>()
+            ))
+    } else {
+        "No Validator".to_string()
+    };
+
+    // Rent exempt reserve is typically 2.3 SOL for stake accounts
+    let rent_exempt_reserve = 2_282_880; // This should be fetched from RPC but hardcoded for now
+
+    Ok(DetailedStakeAccount {
+        pubkey,
+        state,
+        balance: account.lamports,
+        rent_exempt_reserve,
+        validator_vote_account,
+        validator_name,
+        activation_epoch,
+        deactivation_epoch,
+        stake_authority,
+        withdraw_authority,
+    })
+}
+
+/// Get stake account information (original function - keeping for compatibility)
 pub async fn get_stake_account_info(
     stake_account_pubkey: &Pubkey,
     rpc_url: Option<&str>,
@@ -214,8 +404,17 @@ pub async fn get_stake_account_info(
     match client.get_account(stake_account_pubkey) {
         Ok(account) => {
             // Parse stake account data to get delegation info
-            // This is a simplified version - you'd need to properly parse the stake account state
-            // For now, we'll return None to indicate we need to implement proper parsing
+            let validators = get_recommended_validators();
+            if let Ok(detailed_account) = parse_stake_account(*stake_account_pubkey, account, &validators).await {
+                if let Some(validator_vote_account) = detailed_account.validator_vote_account {
+                    return Ok(Some(StakeAccountInfo {
+                        stake_account_pubkey: *stake_account_pubkey,
+                        transaction_signature: "".to_string(), // No signature for existing accounts
+                        validator_vote_account,
+                        staked_amount: detailed_account.balance - detailed_account.rent_exempt_reserve,
+                    }));
+                }
+            }
             Ok(None)
         }
         Err(_) => Ok(None), // Account doesn't exist or other error

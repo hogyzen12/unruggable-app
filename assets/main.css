@@ -2461,3 +2461,369 @@ input:checked + .toggle-slider:before {
 .amount-input-field::placeholder {
     color: #6b7280 !important;
 }
+
+/* Enhanced Stake Modal Styles */
+
+/* Header with toggle */
+.modal-header-with-toggle {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding-bottom: 15px;
+    border-bottom: 1px solid #374151;
+}
+
+.mode-toggle {
+    display: flex;
+    background-color: #1f2937;
+    border-radius: 8px;
+    padding: 2px;
+    border: 1px solid #374151;
+}
+
+.toggle-button {
+    padding: 8px 16px;
+    background: transparent;
+    border: none;
+    color: #9ca3af;
+    font-size: 14px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.toggle-button.active {
+    background-color: #6366f1;
+    color: white;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.toggle-button:hover:not(.active) {
+    color: #d1d5db;
+    background-color: #374151;
+}
+
+/* Staking Success Modal */
+.tx-success-icon.stake-success {
+    background: linear-gradient(135deg, #059669, #10b981);
+    color: white;
+    font-size: 32px;
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    box-shadow: 0 8px 25px rgba(16, 185, 129, 0.3);
+    animation: successPulse 1.5s ease-in-out;
+}
+
+@keyframes successPulse {
+    0% {
+        transform: scale(0.8);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.05);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+.stake-success-details {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 20px 0;
+    padding: 20px;
+    background-color: #1f2937;
+    border-radius: 8px;
+    border: 1px solid #374151;
+}
+
+.stake-detail-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #374151;
+}
+
+.stake-detail-card:last-child {
+    border-bottom: none;
+}
+
+.stake-detail-label {
+    font-size: 14px;
+    color: #9ca3af;
+    font-weight: 500;
+}
+
+.stake-detail-value {
+    font-size: 14px;
+    color: #d1d5db;
+    font-weight: 600;
+}
+
+.stake-detail-value.stake-amount {
+    color: #fbbf24;
+    font-family: monospace;
+    font-size: 16px;
+}
+
+/* Stakes Overview */
+.stakes-overview {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.stakes-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 15px;
+}
+
+.summary-card {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 16px;
+    text-align: center;
+}
+
+.summary-label {
+    font-size: 13px;
+    color: #9ca3af;
+    margin-bottom: 8px;
+    font-weight: 500;
+}
+
+.summary-value {
+    font-size: 20px;
+    font-weight: 700;
+    color: #fbbf24;
+    font-family: monospace;
+}
+
+/* Loading and Empty States */
+.loading-stakes {
+    text-align: center;
+    padding: 40px 20px;
+    color: #9ca3af;
+    font-size: 16px;
+}
+
+.no-stakes {
+    text-align: center;
+    padding: 40px 20px;
+    color: #9ca3af;
+}
+
+.no-stakes-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+}
+
+.no-stakes-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #d1d5db;
+    margin-bottom: 8px;
+}
+
+.no-stakes-description {
+    font-size: 14px;
+    line-height: 1.5;
+    max-width: 280px;
+    margin: 0 auto;
+}
+
+/* Stakes List */
+.stakes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.stakes-list::-webkit-scrollbar {
+    width: 4px;
+}
+
+.stakes-list::-webkit-scrollbar-track {
+    background: #1f2937;
+    border-radius: 2px;
+}
+
+.stakes-list::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 2px;
+}
+
+.stakes-list::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+/* Stake Account Cards */
+.stake-account-card {
+    background-color: #1f2937;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 16px;
+    transition: border-color 0.2s ease;
+}
+
+.stake-account-card:hover {
+    border-color: #4b5563;
+}
+
+.stake-account-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.stake-account-address {
+    font-family: monospace;
+    font-size: 14px;
+    color: #d1d5db;
+    font-weight: 600;
+}
+
+.stake-status {
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.stake-status.active {
+    background-color: #059669;
+    color: white;
+}
+
+.stake-status.initialized {
+    background-color: #d97706;
+    color: white;
+}
+
+.stake-status.uninitialized {
+    background-color: #6b7280;
+    color: white;
+}
+
+.stake-status.rewards {
+    background-color: #7c3aed;
+    color: white;
+}
+
+/* Stake Account Details */
+.stake-account-details {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.stake-detail-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.stake-detail-row .stake-detail-label {
+    font-size: 13px;
+    color: #9ca3af;
+    font-weight: 500;
+}
+
+.stake-detail-row .stake-detail-value {
+    font-size: 13px;
+    color: #d1d5db;
+    font-weight: 600;
+}
+
+.stake-detail-row .stake-detail-value.stake-amount {
+    color: #fbbf24;
+    font-family: monospace;
+}
+
+/* Stake Account Actions */
+.stake-account-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.action-button {
+    padding: 6px 12px;
+    border: none;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    flex: 1;
+    min-width: 100px;
+}
+
+.action-button.secondary {
+    background-color: #374151;
+    color: #d1d5db;
+    border: 1px solid #4b5563;
+}
+
+.action-button.secondary:hover {
+    background-color: #4b5563;
+    border-color: #6b7280;
+}
+
+.action-button.danger {
+    background-color: #dc2626;
+    color: white;
+}
+
+.action-button.danger:hover {
+    background-color: #b91c1c;
+}
+
+/* Enhanced modal responsiveness for stakes view */
+@media (max-width: 640px) {
+    .stakes-summary {
+        grid-template-columns: 1fr;
+    }
+    
+    .summary-card {
+        padding: 12px;
+    }
+    
+    .summary-value {
+        font-size: 18px;
+    }
+    
+    .stake-account-card {
+        padding: 12px;
+    }
+    
+    .stake-account-actions {
+        flex-direction: column;
+    }
+    
+    .action-button {
+        min-width: auto;
+    }
+    
+    .stake-success-details {
+        padding: 16px;
+    }
+}
