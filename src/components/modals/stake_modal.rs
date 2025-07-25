@@ -177,12 +177,25 @@ pub fn StakeModal(
 
     // Load validators on component mount
     use_effect(move || {
-        let validator_list = get_recommended_validators();
-        // Set default validator (the first one marked as default)
-        if let Some(default_validator) = validator_list.iter().find(|v| v.is_default).cloned() {
-            selected_validator.set(Some(default_validator));
-        }
-        validators.set(validator_list);
+        spawn(async move {
+            println!("📋 Stake modal opened - loading validators with live data...");
+            
+            // This single call handles everything: 
+            // - Fetches live data from RPC
+            // - Updates with real commission, stake, and skip rates  
+            // - Falls back to static data if RPC fails
+            // - Prints detailed debug info to console
+            let validator_list = get_recommended_validators().await;
+            
+            // Set default validator (the first one marked as default)
+            if let Some(default_validator) = validator_list.iter().find(|v| v.is_default).cloned() {
+                println!("🌟 Selected default validator: {}", default_validator.name);
+                selected_validator.set(Some(default_validator));
+            }
+            
+            validators.set(validator_list);
+            println!("🚀 Validator data loaded and ready for UI");
+        });
     });
 
     // Clone values before use_effect to avoid move issues
@@ -300,9 +313,9 @@ pub fn StakeModal(
                     h2 { 
                         class: "modal-title",
                         if mode() == ModalMode::Stake {
-                            "🏛️ Stake SOL"
+                            "Stake SOL"
                         } else {
-                            "📊 My Staked Sol"
+                            "My Staked Sol"
                         }
                     }
                     
@@ -370,11 +383,11 @@ pub fn StakeModal(
                                         class: "selected-validator",
                                         div {
                                             class: "validator-name",
-                                            "🏛️ {validator.name}"
+                                            "{validator.name}"
                                         }
                                         div {
                                             class: "validator-details",
-                                            "{validator.commission}% commission"
+                                            "Commission: {validator.commission}% • Skip Rate: {validator.skip_rate:.1}%"
                                         }
                                     }
                                 } else {
@@ -383,12 +396,13 @@ pub fn StakeModal(
                                         "Select a validator..."
                                     }
                                 }
+                                
                                 div {
                                     class: "dropdown-arrow",
                                     if show_validator_dropdown() { "▲" } else { "▼" }
                                 }
                             }
-
+                    
                             // Validator Dropdown
                             if show_validator_dropdown() {
                                 div {
@@ -408,14 +422,14 @@ pub fn StakeModal(
                                                 div {
                                                     class: "validator-option-name",
                                                     if validator.is_default {
-                                                        "⭐ {validator.name} (Recommended)"
+                                                        "{validator.name} (⭐ Recommended)"
                                                     } else {
-                                                        "🏛️ {validator.name}"
+                                                        "{validator.name}"
                                                     }
                                                 }
                                                 div {
                                                     class: "validator-commission",
-                                                    "{validator.commission}%"
+                                                    "Commission: {validator.commission}%"
                                                 }
                                             }
                                             div {
@@ -425,7 +439,7 @@ pub fn StakeModal(
                                             if validator.active_stake > 0.0 {
                                                 div {
                                                     class: "validator-stats",
-                                                    "Active Stake: {validator.active_stake:.0} SOL • Skip Rate: {validator.skip_rate:.2}%"
+                                                    "Active Stake: {validator.active_stake:.0} SOL • Skip Rate: {validator.skip_rate:.1}%"
                                                 }
                                             }
                                         }
