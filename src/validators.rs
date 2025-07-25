@@ -61,13 +61,13 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             is_default: true,
         },
         ValidatorInfo {
-            identity: "DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy".to_string(),
-            vote_account: "3N7s9zXMZ4QqvHQR15t5GNHyqc89KduzMP7423eWiD5g".to_string(),
-            name: "Solana Foundation".to_string(),
-            description: "Official Solana Foundation validator".to_string(),
-            commission: 2.0,
-            active_stake: 13061017.501494104,
-            skip_rate: 1.5, // Static estimate - typically very good
+            identity: "6xWLi1TDSh65fWsSqE1zdvANTSuVDRMx4ghsGJwgunS8".to_string(),
+            vote_account: "BbM5kJgrwEj3tYFfBPnjcARB54wDUHkXmLUTkazUmt2x".to_string(),
+            name: "Jito Validator".to_string(),
+            description: "High-performance Jito validator with 99.99% voting rate and MEV optimization".to_string(),
+            commission: 0.0,
+            active_stake: 253219.0, // From the data you provided
+            skip_rate: 1.0, // Very low estimate given 99.99% voting rate
             is_default: false,
         },
         ValidatorInfo {
@@ -80,6 +80,16 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             skip_rate: 2.5, // Static estimate
             is_default: false,
         },
+        ValidatorInfo {
+            identity: "DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy".to_string(),
+            vote_account: "3N7s9zXMZ4QqvHQR15t5GNHyqc89KduzMP7423eWiD5g".to_string(),
+            name: "Solana Foundation".to_string(),
+            description: "Official Solana Foundation validator".to_string(),
+            commission: 2.0,
+            active_stake: 13061017.501494104,
+            skip_rate: 1.5, // Static estimate - typically very good
+            is_default: false,
+        },
         // Main Phase Labs node
         ValidatorInfo {
             identity: "phz1CRbEsCtFCh2Ro5tjyu588VU1WPMwW9BJS9yFNn2".to_string(),
@@ -90,19 +100,7 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             active_stake: 0.0,
             skip_rate: 3.0, // Static estimate
             is_default: false,
-        },
-        // Institutional Validator for SOC2 secured staking
-        ValidatorInfo {
-            identity: "ciTyjzN9iyobidMycjyqRRM7vXAHXkFzH3m8vEr6cQj".to_string(),
-            vote_account: "CiTYUYPAPHdcri5yEfsmqVcs54J6j8X1QaiFLgYqMVe".to_string(),
-            name: "Institutional Validator".to_string(),
-            description: "SOC2 secured institutional-grade staking validator".to_string(),
-            commission: 5.0,
-            active_stake: 0.0,
-            skip_rate: 2.0, // Static estimate
-            is_default: false,
-        },
-        // Radiants
+        },        
         ValidatorInfo {
             identity: "radM7PKUpZwJ9bYPAJ7V8FXHeUmH1zim6iaXUKkftP9".to_string(),
             vote_account: "radYEig9KGrMTMWbWRFV7LStotQbnLgPaEFHVDsudQz".to_string(),
@@ -111,28 +109,6 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             commission: 5.0,
             active_stake: 0.0,
             skip_rate: 2.5, // Static estimate
-            is_default: false,
-        },
-        // Validator supporting creatives
-        ValidatorInfo {
-            identity: "YE11a5nVJtUNqsojkphYuWc7StqBzbCeFH6BjhAAUEV".to_string(),
-            vote_account: "YE111yizdzBA7JQKMXjy9VSx1shKAczUbs3b3e6vKQH".to_string(),
-            name: "Creative Arts Validator".to_string(),
-            description: "Supporting creative communities and artists in the Solana ecosystem".to_string(),
-            commission: 5.0,
-            active_stake: 0.0,
-            skip_rate: 3.0, // Static estimate
-            is_default: false,
-        },
-        // 0% commission, 0% MEV node
-        ValidatorInfo {
-            identity: "gojir4WnhS7VS1JdbnanJMzaMfr4UD7KeX1ixWAHEmw".to_string(),
-            vote_account: "goJiRADNdmfnJ4iWEyft7KaYMPTVsRba2Ee1akDEBXb".to_string(),
-            name: "Zero Commission Validator".to_string(),
-            description: "High-quality validator with 0% commission and 0% MEV extraction".to_string(),
-            commission: 0.0,
-            active_stake: 0.0,
-            skip_rate: 1.8, // Static estimate - likely very good
             is_default: false,
         },
         // Love validator
@@ -146,6 +122,39 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             skip_rate: 2.0, // Static estimate
             is_default: false,
         },
+        // Institutional Validator for SOC2 secured staking
+        //ValidatorInfo {
+        //    identity: "ciTyjzN9iyobidMycjyqRRM7vXAHXkFzH3m8vEr6cQj".to_string(),
+        //    vote_account: "CiTYUYPAPHdcri5yEfsmqVcs54J6j8X1QaiFLgYqMVe".to_string(),
+        //    name: "Institutional Validator".to_string(),
+        //    description: "SOC2 secured institutional-grade staking validator".to_string(),
+        //    commission: 5.0,
+        //    active_stake: 0.0,
+        //    skip_rate: 2.0, // Static estimate
+        //    is_default: false,
+        //},
+        // Validator supporting creatives
+        //ValidatorInfo {
+        //    identity: "YE11a5nVJtUNqsojkphYuWc7StqBzbCeFH6BjhAAUEV".to_string(),
+        //    vote_account: "YE111yizdzBA7JQKMXjy9VSx1shKAczUbs3b3e6vKQH".to_string(),
+        //    name: "Creative Arts Validator".to_string(),
+        //    description: "Supporting creative communities and artists in the Solana ecosystem".to_string(),
+        //    commission: 5.0,
+        //    active_stake: 0.0,
+        //    skip_rate: 3.0, // Static estimate
+        //    is_default: false,
+        //},
+        // 0% commission, 0% MEV node
+        //ValidatorInfo {
+        //    identity: "gojir4WnhS7VS1JdbnanJMzaMfr4UD7KeX1ixWAHEmw".to_string(),
+        //    vote_account: "goJiRADNdmfnJ4iWEyft7KaYMPTVsRba2Ee1akDEBXb".to_string(),
+        //    name: "Zero Commission Validator".to_string(),
+        //    description: "High-quality validator with 0% commission and 0% MEV extraction".to_string(),
+        //    commission: 0.0,
+        //    active_stake: 0.0,
+        //    skip_rate: 1.8, // Static estimate - likely very good
+        //    is_default: false,
+        //},
     ]
 }
 
