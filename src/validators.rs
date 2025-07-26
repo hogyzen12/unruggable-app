@@ -80,6 +80,17 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             skip_rate: 2.5, // Static estimate
             is_default: false,
         },
+        // Love validator
+        ValidatorInfo {
+            identity: "Love31pnbDJNVzZZVbtV4h2ftvTPVcBpXW11BSTCa6s".to_string(),
+            vote_account: "Love31JHTTweTzCu3BjyjhXJadjRrd57hiNZn7M1fLj".to_string(),
+            name: "Love Validator".to_string(),
+            description: "You are loved, and you have a home here.".to_string(),
+            commission: 0.0,
+            active_stake: 0.0,
+            skip_rate: 2.0, // Static estimate
+            is_default: false,
+        },
         ValidatorInfo {
             identity: "DRpbCBMxVnDK7maPM5tGv6MvB3v1sRMC86PZ8okm21hy".to_string(),
             vote_account: "3N7s9zXMZ4QqvHQR15t5GNHyqc89KduzMP7423eWiD5g".to_string(),
@@ -109,17 +120,6 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             commission: 5.0,
             active_stake: 0.0,
             skip_rate: 2.5, // Static estimate
-            is_default: false,
-        },
-        // Love validator
-        ValidatorInfo {
-            identity: "Love31pnbDJNVzZZVbtV4h2ftvTPVcBpXW11BSTCa6s".to_string(),
-            vote_account: "Love31JHTTweTzCu3BjyjhXJadjRrd57hiNZn7M1fLj".to_string(),
-            name: "Love Validator".to_string(),
-            description: "You are loved, and you have a home here.".to_string(),
-            commission: 0.0,
-            active_stake: 0.0,
-            skip_rate: 2.0, // Static estimate
             is_default: false,
         },
         // Institutional Validator for SOC2 secured staking

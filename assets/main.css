@@ -115,14 +115,19 @@ body {
     padding: 0;
 }
 
-/* Wallet page styling */
 .wallet-container {
     max-width: 390px;
     margin: 0 auto;
-    background: linear-gradient(180deg, #f97316 0%, #000000 100%);
+    background-image: 
+        linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.5)),
+        url('https://pbs.twimg.com/media/Gv1Mca8WMAIGdHX?format=jpg&name=large');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
     min-height: 100vh;
     position: relative;
 }
+
 
 .wallet-header {
     display: flex;
@@ -2826,5 +2831,122 @@ input:checked + .toggle-slider:before {
     
     .stake-success-details {
         padding: 16px;
+    }
+}
+
+/* Dynamic wallet container - replaces static background */
+.wallet-container-dynamic {
+    max-width: 390px;
+    margin: 0 auto;
+    min-height: 100vh;
+    position: relative;
+    /* Background set dynamically via style attribute */
+}
+
+/* Background selector modal */
+.background-selector-modal {
+    max-width: 500px;
+    max-height: 80vh;
+}
+
+.background-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+.background-option {
+    border: 2px solid transparent;
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background-color: #2a2a2a;
+    position: relative;
+}
+
+.background-option:hover {
+    border-color: #6366f1;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.background-option.selected {
+    border-color: #10b981;
+    box-shadow: 0 4px 12px rgba(16, 185, 129, 0.4);
+}
+
+.background-preview {
+    height: 120px;
+    width: 100%;
+    background-size: cover;
+    background-position: center;
+    position: relative;
+}
+
+.background-info {
+    padding: 12px;
+}
+
+.background-info h4 {
+    margin: 0 0 4px 0;
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.background-info p {
+    margin: 0;
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+.selected-indicator {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    background-color: #10b981;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: bold;
+    font-size: 12px;
+}
+
+/* Background grid scrollbar styling */
+.background-grid::-webkit-scrollbar {
+    width: 6px;
+}
+
+.background-grid::-webkit-scrollbar-track {
+    background: #1a1a1a;
+    border-radius: 3px;
+}
+
+.background-grid::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 3px;
+}
+
+.background-grid::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+    .background-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .background-selector-modal {
+        width: 95%;
+        margin: 10px;
     }
 }

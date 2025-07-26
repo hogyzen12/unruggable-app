@@ -14,9 +14,10 @@ use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, Ha
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
-// Import the prices module - we need to add this to main.rs
 use crate::prices;
 use crate::hardware::HardwareWallet;
+use crate::components::background_themes::BackgroundTheme;
+use crate::components::modals::BackgroundModal;
 use std::sync::Arc;
 use std::collections::HashMap;
 
@@ -218,6 +219,10 @@ pub fn WalletView() -> Element {
 
     // Verified tokens loaded with USDC and USDT
     let verified_tokens = use_memo(move || get_verified_tokens());
+
+    // Background Selections
+    let mut selected_background = use_signal(|| BackgroundTheme::get_presets()[0].clone());
+    let mut show_background_modal = use_signal(|| false);
 
     fn get_token_price_change(
         symbol: &str, 
@@ -537,7 +542,13 @@ pub fn WalletView() -> Element {
 
     rsx! {
         div {
-            class: "wallet-container",
+            class: "wallet-container-dynamic",
+            style: {
+                format!(
+                    "background-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 0%, rgba(0, 0, 0, 0.3) 40%, rgba(0, 0, 0, 0.7) 100%), url('{}'); background-size: cover; background-position: center top; background-repeat: no-repeat; background-attachment: fixed;",
+                    selected_background.read().url
+                )
+            },
             onclick: move |_| {
                 if show_dropdown() {
                     show_dropdown.set(false);
@@ -766,6 +777,19 @@ pub fn WalletView() -> Element {
                             }
                             if prices_loading() { "Refreshing Prices..." } else { "Refresh Prices" }
                         }
+
+                        button {
+                            class: "dropdown-item",
+                            onclick: move |_| {
+                                show_background_modal.set(true);
+                                show_dropdown.set(false);
+                            },
+                            div {
+                                class: "dropdown-icon action-icon",
+                                "🎨"
+                            }
+                            "Change Background"
+                        }
                     }
                 }
             }
@@ -932,6 +956,17 @@ pub fn WalletView() -> Element {
                                 }
                             });
                         }
+                    }
+                }
+            }
+
+            if show_background_modal() {
+                BackgroundModal {
+                    current_background: selected_background(),
+                    onclose: move |_| show_background_modal.set(false),
+                    onselect: move |theme: BackgroundTheme| {
+                        selected_background.set(theme);
+                        show_background_modal.set(false);
                     }
                 }
             }
