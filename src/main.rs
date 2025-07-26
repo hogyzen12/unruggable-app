@@ -10,6 +10,8 @@ mod storage;
 mod components;
 mod validators;
 mod staking;
+mod currency;
+mod currency_utils;
 
 use components::*;
 

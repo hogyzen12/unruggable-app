@@ -6,6 +6,7 @@ pub mod receive_modal;
 pub mod jito_modal;
 pub mod stake_modal;
 pub mod background_modal;
+pub mod currency_modal;
 
 pub use wallet_modal::WalletModal;
 pub use rpc_modal::RpcModal;
@@ -15,3 +16,4 @@ pub use receive_modal::ReceiveModal;
 pub use jito_modal::JitoModal;
 pub use stake_modal::StakeModal;
 pub use background_modal::BackgroundModal;
+pub use currency_modal::CurrencyModal;

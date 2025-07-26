@@ -10,6 +10,21 @@ use crate::storage::{
     save_jito_settings_to_storage,
     JitoSettings
 };
+use crate::currency::{
+    SELECTED_CURRENCY, 
+    EXCHANGE_RATES,
+    initialize_currency_system,
+    update_exchange_rates_loop,
+    get_current_currency_symbol
+};
+use crate::currency_utils::{
+    format_price_in_selected_currency,
+    format_balance_value,
+    format_token_value,
+    format_price_change,
+    get_current_currency_code
+};
+use crate::components::modals::currency_modal::CurrencyModal;
 use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
@@ -223,6 +238,9 @@ pub fn WalletView() -> Element {
     // Background Selections
     let mut selected_background = use_signal(|| BackgroundTheme::get_presets()[0].clone());
     let mut show_background_modal = use_signal(|| false);
+
+    //Currency
+    let mut show_currency_modal = use_signal(|| false);
 
     fn get_token_price_change(
         symbol: &str, 
@@ -507,6 +525,16 @@ pub fn WalletView() -> Element {
         });
     });
 
+    use_effect(move || {
+        spawn(async move {
+            // Initialize currency system
+            initialize_currency_system().await;
+            
+            // Start exchange rate update loop
+            update_exchange_rates_loop().await;
+        });
+    });
+
     let current_wallet = wallets.read().get(current_wallet_index()).cloned();
     
     // Get full address for display
@@ -605,6 +633,7 @@ pub fn WalletView() -> Element {
                         class: "dropdown-menu",
                         onclick: move |e| e.stop_propagation(),
                         
+                        // Current wallet display
                         if let Some(ref wallet) = current_wallet {
                             div {
                                 class: "dropdown-item current-wallet",
@@ -620,6 +649,7 @@ pub fn WalletView() -> Element {
                             }
                         }
                         
+                        // Hardware wallet display (unchanged)
                         if hardware_connected() && hardware_pubkey().is_some() {
                             div {
                                 class: "dropdown-item hardware-wallet-item active",
@@ -649,6 +679,29 @@ pub fn WalletView() -> Element {
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                        
+                        div { class: "dropdown-divider" }
+                        
+                        // NEW: Currency Selector
+                        button {
+                            class: "dropdown-item currency-selector",
+                            onclick: move |_| {
+                                show_currency_modal.set(true);
+                                show_dropdown.set(false);
+                            },
+                            div {
+                                class: "dropdown-icon action-icon",
+                                "💱"
+                            }
+                            div {
+                                class: "currency-display",
+                                "Currency: "
+                                span {
+                                    class: "current-symbol",
+                                    "{get_current_currency_code()}"
                                 }
                             }
                         }
@@ -692,6 +745,7 @@ pub fn WalletView() -> Element {
                         
                         div { class: "dropdown-divider" }
                         
+                        // Existing action buttons (unchanged)
                         button {
                             class: "dropdown-item",
                             onclick: move |_| {
@@ -701,10 +755,11 @@ pub fn WalletView() -> Element {
                             },
                             div {
                                 class: "dropdown-icon action-icon",
-                                "➕"
+                                "+"
                             }
                             "Create Wallet"
                         }
+                        
                         button {
                             class: "dropdown-item",
                             onclick: move |_| {
@@ -748,7 +803,7 @@ pub fn WalletView() -> Element {
                             }
                             "RPC Settings"
                         }
-
+                
                         button {
                             class: "dropdown-item",
                             onclick: move |_| {
@@ -756,39 +811,10 @@ pub fn WalletView() -> Element {
                                 show_dropdown.set(false);
                             },
                             div {
-                                class: "dropdown-icon action-icon jito-icon",
+                                class: "dropdown-icon action-icon",
                                 "⚡"
                             }
-                            "Jito Settings"
-                        }
-                        
-                        // Add refresh prices button
-                        button {
-                            class: "dropdown-item",
-                            onclick: move |_| {
-                                spawn(async move {
-                                    fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent).await;
-                                });
-                                show_dropdown.set(false);
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                if prices_loading() { "⏳" } else { "🔄" }
-                            }
-                            if prices_loading() { "Refreshing Prices..." } else { "Refresh Prices" }
-                        }
-
-                        button {
-                            class: "dropdown-item",
-                            onclick: move |_| {
-                                show_background_modal.set(true);
-                                show_dropdown.set(false);
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                "🎨"
-                            }
-                            "Change Background"
+                            "JITO Settings"
                         }
                     }
                 }
@@ -970,6 +996,12 @@ pub fn WalletView() -> Element {
                     }
                 }
             }
+
+            if show_currency_modal() {
+                CurrencyModal {
+                    onclose: move |_| show_currency_modal.set(false)
+                }
+            }
                         
             // Main content container for balance, address, and actions
             div {
@@ -985,8 +1017,7 @@ pub fn WalletView() -> Element {
                             // Calculate total portfolio value (sum of all token values) and round to nearest dollar
                             {
                                 let total_value = tokens.read().iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                // Format the value with no decimal places - round to nearest dollar
-                                format!("${:.0}", total_value.round())
+                                format_price_in_selected_currency(total_value)
                             }
                         }
                     }
@@ -1153,7 +1184,7 @@ pub fn WalletView() -> Element {
                                 class: "token-values",
                                 div {
                                     class: "token-value-usd",
-                                    "${token.value_usd:.2}"
+                                    "{format_token_value(token.balance, token.price)}"
                                 }
                                 div {
                                     class: "token-amount",
