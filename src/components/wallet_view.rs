@@ -21,6 +21,8 @@ use crate::currency_utils::{
     format_price_in_selected_currency,
     format_balance_value,
     format_token_value,
+    format_token_value_smart,
+    format_token_amount, 
     format_price_change,
     get_current_currency_code
 };
@@ -1183,8 +1185,12 @@ pub fn WalletView() -> Element {
                                         alt: "{token.symbol}",
                                         width: "24",
                                         height: "24",
-                                        onerror: move |_| {
-                                            println!("Failed to load image for {}: {}", token.symbol, token.icon_type);
+                                        onerror: {
+                                            let symbol = token.symbol.clone();
+                                            let icon_type = token.icon_type.clone();
+                                            move |_| {
+                                                println!("Failed to load image for {}: {}", symbol, icon_type);
+                                            }
                                         },
                                     }
                                 }
@@ -1201,31 +1207,56 @@ pub fn WalletView() -> Element {
                                             "${token.price:.2}"
                                         }
                                         span {
-                                            // Change class based on whether the price change is positive or negative
                                             class: if token.price_change >= 0.0 {
                                                 "token-change positive"
                                             } else {
                                                 "token-change negative"
                                             },
-                                            // Format with + or - sign based on positive/negative value
                                             if token.price_change >= 0.0 {
                                                 "+{token.price_change:.1}%"
                                             } else {
-                                                "{token.price_change:.1}%" // Negative number already has - sign
+                                                "{token.price_change:.1}%"
                                             }
                                         }
                                     }
                                 }
                             }
+                            // Send button positioned absolutely - doesn't affect layout
+                            button {
+                                class: "token-send-button",
+                                onclick: {
+                                    let token_symbol = token.symbol.clone();
+                                    let token_mint = token.mint.clone();
+                                    move |_| {
+                                        if token_symbol == "SOL" {
+                                            show_send_modal.set(true);
+                                        } else {
+                                            println!("Send {} (mint: {}) clicked", token_symbol, token_mint);
+                                            // TODO: Implement token send modal
+                                        }
+                                    }
+                                },
+                                title: "Send {token.symbol}",
+                                div {
+                                    class: "token-send-icon",
+                                    img {
+                                        src: "{ICON_SEND}",
+                                        alt: "Send",
+                                        width: "14",
+                                        height: "14",
+                                    }
+                                }
+                            }
+                            // Keep original token-values structure
                             div {
                                 class: "token-values",
                                 div {
                                     class: "token-value-usd",
-                                    "{format_token_value(token.balance, token.price)}"
+                                    "{format_token_value_smart(token.balance, token.price)}"
                                 }
                                 div {
                                     class: "token-amount",
-                                    "{token.balance:.2} {token.symbol}"
+                                    "{format_token_amount(token.balance, &token.symbol)}"
                                 }
                             }
                         }

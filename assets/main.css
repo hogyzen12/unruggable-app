@@ -257,7 +257,6 @@ body {
     color: #9ca3af;
 }
 
-/* Tokens section */
 .tokens-section {
     background-color: #111111;
     border-radius: 20px 20px 0 0;
@@ -277,10 +276,12 @@ body {
     gap: 20px;
 }
 
+/* Keep original token-item structure but add position relative for send button */
 .token-item {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    position: relative; /* Add this for absolute positioning of send button */
 }
 
 .token-info {
@@ -372,7 +373,63 @@ body {
     color: #6b7280;
 }
 
-/* Add these to main.css after the existing menu-icon styles */
+/* Add send button styles that work with existing layout */
+.token-send-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background-color: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    opacity: 0.4;
+    position: absolute;
+    right: 120px; /* Position between token info and values */
+    z-index: 1;
+}
+
+.token-send-button:hover {
+    background-color: rgba(99, 102, 241, 0.2);
+    border-color: rgba(99, 102, 241, 0.4);
+    opacity: 0.8;
+    transform: scale(1.1);
+}
+
+.token-send-button:active {
+    transform: scale(0.9);
+}
+
+.token-send-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.token-send-icon img {
+    filter: invert(0.7);
+    transition: filter 0.2s ease;
+}
+
+.token-send-button:hover .token-send-icon img {
+    filter: invert(0.9);
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+    .token-send-button {
+        right: 100px; /* Adjust position for mobile */
+        width: 24px;
+        height: 24px;
+    }
+    
+    .token-send-icon img {
+        width: 12px;
+        height: 12px;
+    }
+}
 
 /* Dropdown menu */
 .dropdown-menu {

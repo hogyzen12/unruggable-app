@@ -102,6 +102,149 @@ pub fn use_currency_context() -> (String, String, f64) {
     (currency_code, symbol, rate)
 }
 
+/// Format token amounts with smart abbreviations and 5-character limit
+pub fn format_token_amount(amount: f64, symbol: &str) -> String {
+    // Handle zero or very small amounts
+    if amount == 0.0 {
+        return format!("0 {}", symbol);
+    }
+    
+    if amount < 0.000001 {
+        return format!("~0 {}", symbol);
+    }
+    
+    // For amounts >= 1 billion, use B suffix
+    if amount >= 1_000_000_000.0 {
+        let value = amount / 1_000_000_000.0;
+        if value >= 100.0 {
+            return format!("{}B {}", (value as i32), symbol); // e.g., "123B SOL"
+        } else if value >= 10.0 {
+            return format!("{:.0}B {}", value, symbol); // e.g., "12B SOL"
+        } else {
+            return format!("{:.1}B {}", value, symbol); // e.g., "1.2B SOL"
+        }
+    }
+    
+    // For amounts >= 1 million, use M suffix
+    if amount >= 1_000_000.0 {
+        let value = amount / 1_000_000.0;
+        if value >= 100.0 {
+            return format!("{}M {}", (value as i32), symbol); // e.g., "123M BONK"
+        } else if value >= 10.0 {
+            return format!("{:.0}M {}", value, symbol); // e.g., "12M BONK"
+        } else {
+            return format!("{:.1}M {}", value, symbol); // e.g., "1.2M BONK"
+        }
+    }
+    
+    // For amounts >= 1 thousand, use K suffix
+    if amount >= 1_000.0 {
+        let value = amount / 1_000.0;
+        if value >= 100.0 {
+            return format!("{}K {}", (value as i32), symbol); // e.g., "123K JUP"
+        } else if value >= 10.0 {
+            return format!("{:.0}K {}", value, symbol); // e.g., "12K JUP"
+        } else {
+            return format!("{:.1}K {}", value, symbol); // e.g., "1.2K JUP"
+        }
+    }
+    
+    // For amounts >= 100, show whole numbers
+    if amount >= 100.0 {
+        return format!("{:.0} {}", amount, symbol); // e.g., "150 USDC"
+    }
+    
+    // For amounts >= 10, show 1 decimal place
+    if amount >= 10.0 {
+        return format!("{:.1} {}", amount, symbol); // e.g., "12.5 SOL"
+    }
+    
+    // For amounts >= 1, show 2 decimal places
+    if amount >= 1.0 {
+        return format!("{:.2} {}", amount, symbol); // e.g., "9.53 JTO"
+    }
+    
+    // For amounts < 1, show up to 4 decimal places but trim trailing zeros
+    if amount >= 0.01 {
+        return format!("{:.2} {}", amount, symbol); // e.g., "0.12 SOL"
+    }
+    
+    if amount >= 0.001 {
+        return format!("{:.3} {}", amount, symbol); // e.g., "0.001 BTC"
+    }
+    
+    // For very small amounts, show 4 decimal places
+    format!("{:.4} {}", amount, symbol) // e.g., "0.0001 ETH"
+}
+
+/// Format token value in USD with smart formatting and length limits
+pub fn format_token_value_smart(token_amount: f64, token_usd_price: f64) -> String {
+    let usd_value = token_amount * token_usd_price;
+    
+    // Handle zero value
+    if usd_value == 0.0 {
+        return "$0".to_string();
+    }
+    
+    // Get currency symbol (could be $, €, £, etc.)
+    let symbol = get_current_currency_symbol();
+    let converted_value = convert_from_usd(usd_value, &SELECTED_CURRENCY.read());
+    
+    // For very large amounts, use B/M/K abbreviations
+    if converted_value >= 1_000_000_000.0 {
+        let value = converted_value / 1_000_000_000.0;
+        if value >= 100.0 {
+            return format!("{}{}B", symbol, (value as i32)); // e.g., "$123B"
+        } else if value >= 10.0 {
+            return format!("{}{:.0}B", symbol, value); // e.g., "$12B"
+        } else {
+            return format!("{}{:.1}B", symbol, value); // e.g., "$1.2B"
+        }
+    }
+    
+    if converted_value >= 1_000_000.0 {
+        let value = converted_value / 1_000_000.0;
+        if value >= 100.0 {
+            return format!("{}{}M", symbol, (value as i32)); // e.g., "$123M"
+        } else if value >= 10.0 {
+            return format!("{}{:.0}M", symbol, value); // e.g., "$12M"
+        } else {
+            return format!("{}{:.1}M", symbol, value); // e.g., "$1.2M"
+        }
+    }
+    
+    if converted_value >= 1_000.0 {
+        let value = converted_value / 1_000.0;
+        if value >= 100.0 {
+            return format!("{}{}K", symbol, (value as i32)); // e.g., "$123K"
+        } else if value >= 10.0 {
+            return format!("{}{:.0}K", symbol, value); // e.g., "$12K"
+        } else {
+            return format!("{}{:.1}K", symbol, value); // e.g., "$1.2K"
+        }
+    }
+    
+    // For smaller amounts, show appropriate precision
+    if converted_value >= 100.0 {
+        return format!("{}{:.0}", symbol, converted_value); // e.g., "$150"
+    }
+    
+    if converted_value >= 10.0 {
+        return format!("{}{:.1}", symbol, converted_value); // e.g., "$19.1"
+    }
+    
+    if converted_value >= 1.0 {
+        return format!("{}{:.2}", symbol, converted_value); // e.g., "$4.49"
+    }
+    
+    if converted_value >= 0.01 {
+        return format!("{}{:.2}", symbol, converted_value); // e.g., "$0.12"
+    }
+    
+    // For very small amounts
+    format!("{}~0", symbol) // e.g., "$~0"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
