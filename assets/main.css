@@ -501,11 +501,18 @@ body {
 .wallet-field textarea {
     width: 100%;
     padding: 12px;
-    background-color: #111111;
-    border: 1px solid #374151;
+    background-color: #0a0a0a;
+    border: 1px solid #2a2a2a;
     border-radius: 8px;
     color: white;
     font-size: 16px;
+    box-sizing: border-box; /* Add this to prevent overflow */
+}
+
+/* Special styling for recipient address input to match address display */
+.wallet-field input[placeholder="Enter Solana address"] {
+    font-family: monospace;
+    font-size: 11.5px; /* Match address display font size */
 }
 
 .wallet-field input:focus,
@@ -523,13 +530,19 @@ body {
 
 .address-display,
 .private-key-display {
+    width: 100%; /* Ensure full width */
     padding: 12px;
-    background-color: #111111;
+    background-color: #0a0a0a;
+    border: 1px solid #2a2a2a; /* Add border to match inputs */
     border-radius: 8px;
     color: white;
     font-family: monospace;
-    font-size: 14px;
-    word-break: break-all;
+    font-size: 11.5px; /* Smaller font to fit on one line */
+    word-break: keep-all; /* Prevent breaking */
+    white-space: nowrap; /* Keep on single line */
+    overflow: hidden; /* Hide overflow */
+    text-overflow: ellipsis; /* Show ... for overflow */
+    box-sizing: border-box; /* Add this to prevent overflow */
 }
 
 .private-key-warning {
@@ -780,34 +793,6 @@ body {
     overflow-y: auto;
 }
 
-.wallet-field input,
-.wallet-field textarea {
-    width: 100%;
-    padding: 12px;
-    background-color: #0a0a0a;
-    border: 1px solid #2a2a2a;
-    border-radius: 8px;
-    color: white;
-    font-size: 16px;
-}
-
-.wallet-field input:focus,
-.wallet-field textarea:focus {
-    outline: none;
-    border-color: #6366f1;
-}
-
-.address-display,
-.private-key-display {
-    padding: 12px;
-    background-color: #0a0a0a;
-    border-radius: 8px;
-    color: white;
-    font-family: monospace;
-    font-size: 13px;
-    word-break: break-all;
-}
-
 /* Additional modal styles */
 .error-message {
     padding: 12px;
@@ -893,17 +878,6 @@ body {
     background-color: #6366f1;
 }
 
-/* Send Modal styles */
-.balance-display {
-    padding: 12px;
-    background-color: #0a0a0a;
-    border-radius: 8px;
-    color: #fbbf24;
-    font-family: monospace;
-    font-size: 16px;
-    text-align: center;
-}
-
 .wallet-field input[type="number"] {
     width: 100%;
 }
@@ -914,20 +888,17 @@ body {
 
 /* Send Modal styles */
 .balance-display {
+    width: 100%; /* Ensure full width */
     padding: 12px;
     background-color: #0a0a0a;
+    border: 1px solid #2a2a2a; /* Add border to match other fields */
     border-radius: 8px;
     color: #fbbf24;
     font-family: monospace;
     font-size: 16px;
     text-align: center;
+    box-sizing: border-box; /* Add this to prevent overflow */
 }
-
-.wallet-field input[type="number"] {
-    width: 100%;
-}
-
-/* Add these to main.css after the existing modal styles */
 
 .success-message {
     padding: 12px;
@@ -3408,4 +3379,57 @@ input:checked + .toggle-slider:before {
     100% {
         box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
     }
+}
+
+/* Clean fix for Send Modal field sizing - replace existing rules */
+
+/* Update the existing .wallet-field input rule to ensure proper box-sizing */
+.wallet-field input,
+.wallet-field textarea {
+    width: 100%;
+    padding: 12px;
+    background-color: #0a0a0a;
+    border: 1px solid #2a2a2a;
+    border-radius: 8px;
+    color: white;
+    font-size: 16px;
+    box-sizing: border-box; /* Add this to prevent overflow */
+}
+
+/* Special styling for recipient address input to match address display */
+.wallet-field input[placeholder="Enter Solana address"] {
+    font-family: monospace;
+    font-size: 11px; /* Match address display font size */
+}
+
+/* Update the .address-display rule to match input field styling */
+.address-display,
+.private-key-display {
+    width: 100%; /* Ensure full width */
+    padding: 12px;
+    background-color: #0a0a0a;
+    border: 1px solid #2a2a2a; /* Add border to match inputs */
+    border-radius: 8px;
+    color: white;
+    font-family: monospace;
+    font-size: 11px; /* Smaller font to fit on one line */
+    word-break: keep-all; /* Prevent breaking */
+    white-space: nowrap; /* Keep on single line */
+    overflow: hidden; /* Hide overflow */
+    text-overflow: ellipsis; /* Show ... for overflow */
+    box-sizing: border-box; /* Add this to prevent overflow */
+}
+
+/* Update the .balance-display rule to match other fields */
+.balance-display {
+    width: 100%; /* Ensure full width */
+    padding: 12px;
+    background-color: #0a0a0a;
+    border: 1px solid #2a2a2a; /* Add border to match other fields */
+    border-radius: 8px;
+    color: #fbbf24;
+    font-family: monospace;
+    font-size: 16px;
+    text-align: center;
+    box-sizing: border-box; /* Add this to prevent overflow */
 }
