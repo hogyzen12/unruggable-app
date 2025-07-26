@@ -3157,3 +3157,221 @@ input:checked + .toggle-slider:before {
         text-align: center;
     }
 }
+
+/* Enhanced balance section styling - moved higher and bolder */
+.balance-section-enhanced {
+    text-align: center;
+    padding: 15px 20px 20px; /* Reduced top padding from 30px to 15px to move it higher */
+}
+
+.balance-amount-bold {
+    font-size: 58px; /* Increased from 52px for more prominence */
+    font-weight: 700; /* Increased from 300 to 700 for much bolder text */
+    color: white;
+    margin-bottom: 8px; /* Reduced margin for tighter spacing */
+    text-shadow: 0 3px 6px rgba(0, 0, 0, 0.3); /* Enhanced shadow for more depth */
+    letter-spacing: -1px; /* Tighter letter spacing for cleaner look */
+}
+
+/* Alternative version with even bolder styling */
+.balance-amount-ultra-bold {
+    font-size: 62px;
+    font-weight: 800; /* Ultra bold */
+    color: white;
+    margin-bottom: 8px;
+    text-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
+    letter-spacing: -1.5px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+/* Keep the existing balance-sol styling the same */
+.balance-sol-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 5px;
+}
+
+.balance-sol {
+    font-size: 20px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 300;
+    letter-spacing: 0.5px;
+}
+
+/* SIMPLIFIED - ONE SECTION TO CONTROL EVERYTHING */
+.wallet-header-enhanced {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 10px;
+    background-color: rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(2px);
+    position: relative;
+    z-index: 100;
+    gap: 6px;
+}
+
+.header-address-section {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1;
+    margin: 0;
+    text-align: center;
+    min-width: 0;
+    overflow: visible;
+}
+
+.header-address-label {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.6);
+    text-transform: uppercase;
+    letter-spacing: 0.1px;
+    margin-bottom: 2px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.header-address-display {
+    font-size: 8px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    color: white;
+    font-weight: 400;
+    letter-spacing: -0.1px;
+    background-color: rgba(255, 255, 255, 0.08);
+    padding: 3px 6px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+    overflow: visible;
+    text-overflow: unset;
+    white-space: nowrap;
+    box-sizing: border-box;
+    flex: 1;
+    min-height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+/* Enhanced highlighting with better text shadow approach */
+/* CSS-based highlighting using pseudo-elements - FIXED */
+.highlight-address {
+    position: relative;
+}
+
+.highlight-address::before {
+    content: attr(data-address);
+    position: absolute;
+    top: 3px;
+    left: 6px;
+    width: calc(100% - 12px);
+    height: calc(100% - 6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 8px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    letter-spacing: -0.1px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 2;
+    
+    /* This creates the highlighting effect */
+    background: linear-gradient(
+        to right,
+        #ffffff 0%, #ffffff 9.09%,    /* First 4 chars - bright white */
+        rgba(255,255,255,0.4) 9.09%, rgba(255,255,255,0.4) 90.91%,  /* Middle chars - dimmed */
+        #ffffff 90.91%, #ffffff 100%  /* Last 4 chars - bright white */
+    );
+    background-clip: text;
+    -webkit-background-clip: text;
+    color: transparent;
+    font-weight: 600;
+}
+
+/* Hide the original text */
+.highlight-address {
+    color: transparent;
+}
+
+.profile-icon {
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+}
+
+.profile-icon img {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+}
+
+.menu-icon {
+    width: 32px;
+    height: 32px;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    flex-shrink: 0;
+    backdrop-filter: blur(3px);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.menu-icon:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.menu-icon::before {
+    content: '☰';
+    color: white;
+    font-size: 16px;
+}
+
+.hardware-indicator {
+    position: absolute;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    bottom: -1px;
+    right: -1px;
+    border: 1px solid #0f0f0f;
+    transition: background-color 0.3s ease;
+}
+
+.hardware-indicator.default {
+    background-color: #4b5563;
+}
+
+.hardware-indicator.present {
+    background-color: #fbbf24;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.hardware-indicator.connected {
+    background-color: #10b981;
+    animation: none;
+}
+
+@keyframes pulse {
+    0% {
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7);
+    }
+    70% {
+        box-shadow: 0 0 0 6px rgba(251, 191, 36, 0);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    }
+}

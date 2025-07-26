@@ -585,7 +585,8 @@ pub fn WalletView() -> Element {
             
             // Header
             div {
-                class: "wallet-header",
+                class: "wallet-header-enhanced",
+                // Left side - Profile/Hardware icon
                 div {
                     class: {
                         let mut classes = "profile-icon".to_string();
@@ -620,6 +621,32 @@ pub fn WalletView() -> Element {
                         }
                     }
                 }
+
+                // Center - Wallet Address Section with working CSS highlighting
+                div {
+                    class: "header-address-section",
+                    div {
+                        class: "header-address-label",
+                        if hardware_connected() && hardware_pubkey().is_some() {
+                            "Hardware Wallet"
+                        } else if current_wallet.is_some() {
+                            "Wallet"
+                        } else {
+                            "No Wallet"
+                        }
+                    }
+                    div {
+                        class: "header-address-display highlight-address",
+                        "data-address": "{full_address}",
+                        if full_address != "No Wallet" {
+                            "{full_address}"
+                        } else {
+                            "---"
+                        }
+                    }
+                }
+
+                // Right side - Menu icon
                 div {
                     class: "menu-icon",
                     onclick: move |e| {
@@ -816,6 +843,19 @@ pub fn WalletView() -> Element {
                             }
                             "JITO Settings"
                         }
+
+                        button {
+                            class: "dropdown-item",
+                            onclick: move |_| {
+                                show_background_modal.set(true);
+                                show_dropdown.set(false);
+                            },
+                            div {
+                                class: "dropdown-icon action-icon",
+                                "🎨"
+                            }
+                            "Change Background"
+                        }
                     }
                 }
             }
@@ -1007,9 +1047,9 @@ pub fn WalletView() -> Element {
             div {
                 class: "main-content",
                 div {
-                    class: "balance-section",
+                    class: "balance-section-enhanced",
                     div {
-                        class: "balance-amount",
+                        class: "balance-amount-bold",
                         // Show loading state for total portfolio value when prices are refreshing
                         if prices_loading() {
                             "Loading..."
@@ -1022,41 +1062,18 @@ pub fn WalletView() -> Element {
                         }
                     }
                     // SOL balance row - clean and simple, no USD value
-                    div {
-                        class: "balance-sol-row",
-                        span {
-                            class: "balance-sol",
-                            "{balance:.4} SOL"
-                        }
-                    }
+                    //div {
+                    //    class: "balance-sol-row",
+                    //    span {
+                    //        class: "balance-sol",
+                    //        "{balance:.4} SOL"
+                    //    }
+                    //}
                     // Display price refresh error if any
                     if let Some(error) = price_error() {
                         div {
                             class: "price-error",
                             "Price data error: {error}"
-                        }
-                    }
-                }
-                
-                // Display current wallet address without copy button
-                div {
-                    class: "current-address-section",
-                    div {
-                        class: "address-label",
-                        if hardware_connected() && hardware_pubkey().is_some() {
-                            "Hardware Wallet Address"
-                        } else if current_wallet.is_some() {
-                            "Wallet Address"
-                        } else {
-                            "No Wallet Connected"
-                        }
-                    }
-                    div {
-                        class: "current-address",
-                        if full_address != "No Wallet" {
-                            "{full_address}"
-                        } else {
-                            "---"
                         }
                     }
                 }
