@@ -4,11 +4,73 @@ use crate::hardware::HardwareWallet;
 use crate::validators::{ValidatorInfo, get_recommended_validators};
 use crate::staking::{self, DetailedStakeAccount, StakeAccountState};
 use std::sync::Arc;
+use crate::signing::hardware::HardwareSigner;
+use crate::staking::create_stake_account;
 
 #[derive(PartialEq, Clone)]
 enum ModalMode {
     Stake,
     MyStakes,
+}
+
+/// Hardware wallet approval overlay component for staking transactions
+#[component]
+fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
+    rsx! {
+        div {
+            class: "hardware-approval-overlay",
+            
+            div {
+                class: "hardware-approval-content",
+                
+                h3 { 
+                    class: "hardware-approval-title",
+                    "Confirm Staking on Hardware Wallet"
+                }
+                
+                div {
+                    class: "hardware-icon-container",
+                    div {
+                        class: "hardware-icon",
+                        div {
+                            class: "blink-indicator",
+                        }
+                    }
+                    div {
+                        class: "button-indicator",
+                        div {
+                            class: "button-press",
+                        }
+                    }
+                }
+                
+                p {
+                    class: "hardware-approval-text",
+                    "Please check your hardware wallet and confirm the staking transaction details."
+                }
+                
+                div {
+                    class: "hardware-steps",
+                    div {
+                        class: "hardware-step",
+                        div { class: "step-number", "1" }
+                        span { "Review the staking details on your Unruggable" }
+                    }
+                    div {
+                        class: "hardware-step",
+                        div { class: "step-number", "2" }
+                        span { "Press the button to confirm the transaction" }
+                    }
+                }
+                
+                button {
+                    class: "hardware-cancel-button",
+                    onclick: move |_| oncancel.call(()),
+                    "Cancel Staking"
+                }
+            }
+        }
+    }
 }
 
 /// Modal component to display staking success details
@@ -17,6 +79,7 @@ fn StakeSuccessModal(
     signature: String,
     stake_amount: f64,
     validator_name: String,
+    was_hardware_wallet: bool,
     onclose: EventHandler<()>,
 ) -> Element {
     // Explorer links for multiple explorers
@@ -34,6 +97,13 @@ fn StakeSuccessModal(
                 onclick: move |e| e.stop_propagation(),
                 
                 h2 { class: "modal-title", "Stake Account Created Successfully!" }
+
+                if was_hardware_wallet {
+                    div {
+                        class: "success-message",
+                        "🔐 Staking transaction completed successfully with your hardware wallet!"
+                    }
+                }
                 
                 div {
                     class: "tx-icon-container",
@@ -175,6 +245,10 @@ pub fn StakeModal(
     let mut success_amount = use_signal(|| 0.0);
     let mut success_validator = use_signal(|| "".to_string());
 
+    // Hardware wallet prompting states
+    let mut show_hardware_approval = use_signal(|| false);
+    let mut was_hardware_transaction = use_signal(|| false);
+
     // Load validators on component mount
     use_effect(move || {
         spawn(async move {
@@ -286,6 +360,7 @@ pub fn StakeModal(
                 signature: success_signature(),
                 stake_amount: success_amount(),
                 validator_name: success_validator(),
+                was_hardware_wallet: was_hardware_transaction(),  // ADD THIS LINE
                 onclose: move |_| {
                     show_success_modal.set(false);
                     // Call onsuccess when the user closes the modal
@@ -306,6 +381,17 @@ pub fn StakeModal(
             div {
                 class: "modal-content stake-modal",
                 onclick: move |e| e.stop_propagation(),
+                style: "position: relative;", // Needed for absolute positioning of overlay
+
+                // Hardware approval overlay - shown when waiting for hardware confirmation
+                if show_hardware_approval() {
+                    HardwareApprovalOverlay {
+                        oncancel: move |_| {
+                            show_hardware_approval.set(false);
+                            staking.set(false);
+                        }
+                    }
+                }
 
                 // Header with toggle
                 div {
@@ -476,11 +562,7 @@ pub fn StakeModal(
                         class: "stake-info-section",
                         div {
                             class: "info-message warning",
-                            "⚠️ Staked SOL will take 2-3 days to unstake. Make sure you have enough SOL for transaction fees."
-                        }
-                        div {
-                            class: "info-message",
-                            "💡 Staking rewards are typically paid out every epoch (~2-3 days)."
+                            "Staked SOL will take 2-3 days to unstake. Make sure you have enough SOL for transaction fees."
                         }
                         if hardware_wallet.is_some() {
                             div {
@@ -682,9 +764,16 @@ pub fn StakeModal(
                                 };
                             
                                 staking.set(true);
+
+                                // Show hardware approval overlay if using hardware wallet
+                                if hardware_wallet.is_some() {
+                                    show_hardware_approval.set(true);
+                                    was_hardware_transaction.set(true);
+                                } else {
+                                    was_hardware_transaction.set(false);
+                                }
                             
-                                // Import the staking module
-                                use crate::staking::create_stake_account;
+                                
                             
                                 let wallet_clone = wallet.clone();
                                 let hardware_wallet_clone = hardware_wallet.clone();
@@ -702,6 +791,7 @@ pub fn StakeModal(
                                         Ok(stake_info) => {
                                             println!("Successfully created stake account: {:?}", stake_info);
                                             staking.set(false);
+                                            show_hardware_approval.set(false);
                                             
                                             // Set success modal data
                                             success_signature.set(stake_info.transaction_signature);
@@ -713,6 +803,7 @@ pub fn StakeModal(
                                             println!("Staking error: {}", e);
                                             error_message.set(Some(e.to_string()));
                                             staking.set(false);
+                                            show_hardware_approval.set(false);
                                         }
                                     }
                                 });

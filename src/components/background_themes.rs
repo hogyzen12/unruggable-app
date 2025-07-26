@@ -13,7 +13,7 @@ impl BackgroundTheme {
         vec![
             BackgroundTheme {
                 name: "Seeker x Unruggable".to_string(),
-                url: "https://raw.githubusercontent.com/hogyzen12/unruggable-app/refs/heads/main/assets/bg.jpeg".to_string(),
+                url: "https://raw.githubusercontent.com/hogyzen12/unruggable-app/refs/heads/main/public/bg.jpeg".to_string(),
                 description: "Special edition for the launch of Solana Seeker.".to_string(),
             },
             BackgroundTheme {
