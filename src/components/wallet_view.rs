@@ -46,6 +46,11 @@ const ICON_JUP: Asset = asset!("/assets/icons/jupLogo.png");
 const ICON_JLP: Asset = asset!("/assets/icons/jlpLogo.png");
 const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
 
+// Action button SVG icons
+const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
+const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
+const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
+
 // JupiterToken struct with PartialEq and Eq for use_memo
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct JupiterToken {
@@ -1085,7 +1090,12 @@ pub fn WalletView() -> Element {
                         onclick: move |_| show_receive_modal.set(true),
                         div {
                             class: "action-icon",
-                            "💰"
+                            img {
+                                src: "{ICON_RECEIVE}",
+                                alt: "Receive",
+                                width: "24",
+                                height: "24",
+                            }
                         }
                         span {
                             class: "action-label",
@@ -1097,7 +1107,12 @@ pub fn WalletView() -> Element {
                         onclick: move |_| show_send_modal.set(true),
                         div {
                             class: "action-icon",
-                            "💸"
+                            img {
+                                src: "{ICON_SEND}",
+                                alt: "Send",
+                                width: "24",
+                                height: "24",
+                            }
                         }
                         span {
                             class: "action-label",
@@ -1109,36 +1124,41 @@ pub fn WalletView() -> Element {
                         onclick: move |_| show_stake_modal.set(true),
                         div {
                             class: "action-icon",
-                            "🏛️"
+                            img {
+                                src: "{ICON_STAKE}",
+                                alt: "Stake",
+                                width: "24",
+                                height: "24",
+                            }
                         }
                         span {
                             class: "action-label",
                             "Stake"
                         }
                     }
-                    button {
-                        class: "action-button",
-                        div {
-                            class: "action-icon",
-                            "🔄"
-                        }
-                        span {
-                            class: "action-label",
-                            "Swap"
-                        }
-                    }
-                    button {
-                        class: "action-button",
-                        onclick: move |_| show_history_modal.set(true),
-                        div {
-                            class: "action-icon history-icon",
-                            "📜"
-                        }
-                        span {
-                            class: "action-label",
-                            "History"
-                        }
-                    }
+                    //button {
+                    //    class: "action-button",
+                    //    div {
+                    //        class: "action-icon",
+                    //        "🔄"
+                    //    }
+                    //    span {
+                    //        class: "action-label",
+                    //        "Swap"
+                    //    }
+                    //}
+                    //button {
+                    //    class: "action-button",
+                    //    onclick: move |_| show_history_modal.set(true),
+                    //    div {
+                    //        class: "action-icon history-icon",
+                    //        "📜"
+                    //    }
+                    //    span {
+                    //        class: "action-label",
+                    //        "History"
+                    //    }
+                    //}
                 }
             }
             

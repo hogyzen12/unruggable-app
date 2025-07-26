@@ -196,6 +196,15 @@ body {
     background-color: transparent;
 }
 
+/* Simplified Action buttons - replace your existing action button styles */
+
+.action-buttons {
+    display: flex;
+    justify-content: space-around;
+    padding: 30px 40px;
+    background-color: transparent;
+}
+
 .action-button {
     display: flex;
     flex-direction: column;
@@ -205,17 +214,42 @@ body {
     background: none;
     border: none;
     color: #9ca3af;
+    transition: all 0.2s ease;
 }
 
 .action-icon {
     width: 50px;
     height: 50px;
-    background-color: #1f2937;
+    background-color: rgba(31, 41, 55, 0.6); /* Semi-transparent dark background */
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 24px;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(10px); /* Glass effect */
+}
+
+/* SVG icon styling - much simpler */
+.action-icon img {
+    width: 24px;
+    height: 24px;
+    filter: invert(0.6); /* Makes SVG gray */
+    transition: filter 0.2s ease;
+}
+
+/* Simple hover effect */
+.action-button:hover .action-icon {
+    background-color: rgba(31, 41, 55, 0.8);
+    transform: scale(1.05);
+}
+
+.action-button:hover .action-icon img {
+    filter: invert(1); /* Makes SVG white on hover */
+}
+
+.action-label {
+    font-size: 14px;
+    color: #9ca3af;
 }
 
 .action-label {
