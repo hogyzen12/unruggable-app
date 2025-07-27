@@ -256,6 +256,9 @@ pub fn WalletView() -> Element {
     let mut selected_token_balance = use_signal(|| 0.0);
     let mut selected_token_decimals = use_signal(|| None as Option<u8>);
 
+    //Wallet address expand
+    let mut address_expanded = use_signal(|| false);
+
     fn get_token_price_change(
         symbol: &str, 
         changes_map: &HashMap<String, (Option<f64>, Option<f64>)>
@@ -582,6 +585,18 @@ pub fn WalletView() -> Element {
     // Calculate USD value using current SOL price
     let usd_balance = balance() * sol_price();
 
+    let (start, middle, end) = if full_address != "No Wallet" && full_address.len() > 8 {
+        (
+            &full_address[..4],
+            &full_address[4..full_address.len() - 4],
+            &full_address[full_address.len() - 4..],
+        )
+    } else {
+        ("", full_address.as_str(), "")
+    };
+
+    let short_address = format!("{}...{}", start, end);    
+
     rsx! {
         div {
             class: "wallet-container-dynamic",
@@ -649,15 +664,32 @@ pub fn WalletView() -> Element {
                             "No Wallet"
                         }
                     }
+                
                     div {
-                        class: "header-address-display highlight-address",
-                        "data-address": "{full_address}",
-                        if full_address != "No Wallet" {
-                            "{full_address}"
-                        } else {
-                            "---"
+                        class: {
+                            let mut class = "header-address-display expandable".to_string();
+                            if address_expanded() {
+                                class.push_str(" expanded");
+                            }
+                            class
+                        },
+                        onclick: move |_| {
+                            address_expanded.set(!address_expanded());
+                        },
+                        div {
+                            class: "short-address",
+                            hidden: address_expanded(),
+                            "{short_address}"
+                        }
+                        div {
+                            class: "full-address",
+                            hidden: !address_expanded(),
+                            span { class: "highlight", "{start}" }
+                            span { class: "subtle", "{middle}" }
+                            span { class: "highlight", "{end}" }
                         }
                     }
+                    
                 }
 
                 // Right side - Menu icon
