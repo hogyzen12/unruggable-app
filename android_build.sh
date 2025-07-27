@@ -9,11 +9,11 @@ emulator -avd Pixel_6_API34  -netdelay none -netspeed full
 dxalpha build --platform android
 dxalpha bundle --platform android
 
-hogyzen12@anons-MacBook-Pro unruggable-app % find ./target -name "*.apk"   
-
+hogyzen12@anons-MBP unruggable-app % find ./target -name "*.apk"
+./target/dx/unruggable/release/android/app/app/build/outputs/apk/debug/app-debug.apk
 ./target/dx/unruggable/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
 
-hogyzen12@anons-MacBook-Pro unruggable-app % adb install -r ./target/dx/unruggable/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
+hogyzen12@anons-MacBook-Pro unruggable-app % adb install -r ./target/dx/unruggable/release/android/app/app/build/outputs/apk/debug/app-debug.apk
 Performing Streamed Install
 Success 
 
