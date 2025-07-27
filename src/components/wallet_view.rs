@@ -27,7 +27,7 @@ use crate::currency_utils::{
     get_current_currency_code
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
@@ -248,6 +248,13 @@ pub fn WalletView() -> Element {
 
     //Currency
     let mut show_currency_modal = use_signal(|| false);
+
+    //Tokens
+    let mut show_send_token_modal = use_signal(|| false);
+    let mut selected_token_symbol = use_signal(|| "".to_string());
+    let mut selected_token_mint = use_signal(|| "".to_string());
+    let mut selected_token_balance = use_signal(|| 0.0);
+    let mut selected_token_decimals = use_signal(|| None as Option<u8>);
 
     fn get_token_price_change(
         symbol: &str, 
@@ -994,6 +1001,59 @@ pub fn WalletView() -> Element {
                 }
             }
             
+            if show_send_token_modal() {
+                SendTokenModal {
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    token_symbol: selected_token_symbol(),
+                    token_mint: selected_token_mint(),
+                    token_balance: selected_token_balance(),
+                    token_decimals: selected_token_decimals(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| {
+                        show_send_token_modal.set(false);
+                        selected_token_symbol.set("".to_string());
+                        selected_token_mint.set("".to_string());
+                        selected_token_balance.set(0.0);
+                        selected_token_decimals.set(None);
+                    },
+                    onsuccess: move |signature| {
+                        show_send_token_modal.set(false);
+                        selected_token_symbol.set("".to_string());
+                        selected_token_mint.set("".to_string());
+                        selected_token_balance.set(0.0);
+                        selected_token_decimals.set(None);
+                        println!("Token transaction successful: {}", signature);
+                        
+                        // Refresh balances after successful transaction
+                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
+                            let address = wallet.address.clone();
+                            let rpc_url = custom_rpc();
+                            
+                            spawn(async move {
+                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
+                                    Ok(sol_balance) => {
+                                        balance.set(sol_balance);
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to refresh balance after token send: {}", e);
+                                    }
+                                }
+                            });
+                        }
+                    },
+                    onhardware: move |event: HardwareWalletEvent| {
+                        hardware_connected.set(event.connected);
+                        hardware_pubkey.set(event.pubkey);
+                        
+                        // If disconnected, also set the hardware_wallet to None
+                        if !event.connected {
+                            hardware_wallet.set(None);
+                        }
+                    },
+                }
+            }
+            
             if show_receive_modal() {
                 ReceiveModal {
                     wallet: current_wallet.clone(),
@@ -1227,12 +1287,31 @@ pub fn WalletView() -> Element {
                                 onclick: {
                                     let token_symbol = token.symbol.clone();
                                     let token_mint = token.mint.clone();
+                                    let token_balance = token.balance;
                                     move |_| {
                                         if token_symbol == "SOL" {
+                                            // Open SOL send modal (existing behavior)
                                             show_send_modal.set(true);
                                         } else {
+                                            // Open token send modal for SPL tokens
+                                            selected_token_symbol.set(token_symbol.clone());
+                                            selected_token_mint.set(token_mint.clone());
+                                            selected_token_balance.set(token_balance);
+                                            
+                                            // Set decimals based on known tokens, default to 6
+                                            let decimals = match token_symbol.as_str() {
+                                                "USDC" | "USDT" => Some(6),
+                                                "JLP" => Some(6),
+                                                "JUP" => Some(6),
+                                                "JTO" => Some(9),
+                                                "BONK" => Some(5),
+                                                _ => Some(6), // Default for most SPL tokens
+                                            };
+                                            selected_token_decimals.set(decimals);
+                                            
+                                            show_send_token_modal.set(true);
+                                            
                                             println!("Send {} (mint: {}) clicked", token_symbol, token_mint);
-                                            // TODO: Implement token send modal
                                         }
                                     }
                                 },

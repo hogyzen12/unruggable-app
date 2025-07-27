@@ -15,6 +15,11 @@ use reqwest::Client;
 use std::error::Error;
 use std::str::FromStr;
 use serde_json::{Value, json};
+use spl_token::instruction as token_instruction;
+use spl_associated_token_account::{
+    get_associated_token_address,
+    instruction::create_associated_token_account,
+};
 
 /// Transaction client for sending transactions
 pub struct TransactionClient {
@@ -218,6 +223,190 @@ impl TransactionClient {
         
         // Send the transaction
         self.send_transaction(&encoded_transaction).await
+    }
+
+    // Send SPL token transaction using wallet
+    pub async fn send_spl_token(
+        &self,
+        from_wallet: &Wallet,
+        to_address: &str,
+        amount: f64,
+        token_mint: &str,
+    ) -> Result<String, Box<dyn Error>> {
+        let signer = SignerType::from_wallet(from_wallet.clone());
+        self.send_spl_token_with_signer(&signer, to_address, amount, token_mint).await
+    }
+
+    /// Send SPL token transaction using any signer type
+    pub async fn send_spl_token_with_signer(
+        &self,
+        signer: &dyn TransactionSigner,
+        to_address: &str,
+        amount: f64,
+        token_mint: &str,
+    ) -> Result<String, Box<dyn Error>> {
+        // Check Jito settings
+        let jito_settings = get_current_jito_settings();
+        
+        let from_pubkey_str = signer.get_public_key().await?;
+        let from_pubkey = Pubkey::from_str(&from_pubkey_str)?;
+        let to_pubkey = Pubkey::from_str(to_address)?;
+        let mint_pubkey = Pubkey::from_str(token_mint)?;
+        
+        println!("Sending {} tokens from {} to {} (mint: {})", 
+            amount, from_pubkey, to_pubkey, mint_pubkey);
+        
+        // Get token info to determine decimals
+        let token_decimals = self.get_token_decimals(&mint_pubkey).await
+            .unwrap_or(6); // Default to 6 decimals if we can't fetch
+            
+        // Convert amount to token units (accounting for decimals)
+        let amount_units = (amount * 10_f64.powi(token_decimals as i32)) as u64;
+        
+        println!("Token amount in units: {} (decimals: {})", amount_units, token_decimals);
+        
+        // Get associated token accounts
+        let from_token_account = get_associated_token_address(&from_pubkey, &mint_pubkey);
+        let to_token_account = get_associated_token_address(&to_pubkey, &mint_pubkey);
+        
+        println!("From token account: {}", from_token_account);
+        println!("To token account: {}", to_token_account);
+        
+        // Get recent blockhash
+        let recent_blockhash = self.get_recent_blockhash().await?;
+        println!("Using blockhash: {}", recent_blockhash);
+        
+        // Check if destination token account exists
+        let mut instructions = Vec::new();
+        
+        if !self.account_exists(&to_token_account).await? {
+            println!("Creating destination token account: {}", to_token_account);
+            
+            // Create associated token account for recipient
+            let create_ata_instruction = create_associated_token_account(
+                &from_pubkey, // Payer (sender pays for account creation)
+                &to_pubkey,   // Owner of the new account
+                &mint_pubkey, // Token mint
+                &spl_token::id(), // Token program ID
+            );
+            
+            instructions.push(create_ata_instruction);
+        }
+        
+        // Create the token transfer instruction
+        let transfer_instruction = token_instruction::transfer(
+            &spl_token::id(),                    // Token program ID
+            &from_token_account,                 // Source token account
+            &to_token_account,                   // Destination token account  
+            &from_pubkey,                        // Authority (owner of source account)
+            &[&from_pubkey],                     // Signers
+            amount_units,                        // Amount in token units
+        )?;
+        
+        instructions.push(transfer_instruction);
+        
+        // Apply Jito modifications if JitoTx is enabled
+        if jito_settings.jito_tx {
+            println!("JitoTx is enabled, applying Jito modifications");
+            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+        }
+        
+        // Create a message with all instructions
+        let mut message = Message::new(&instructions, Some(&from_pubkey));
+        message.recent_blockhash = recent_blockhash;
+        
+        // Create a VersionedTransaction with empty signatures
+        let mut transaction = VersionedTransaction {
+            signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+            message: VersionedMessage::Legacy(message),
+        };
+        
+        println!("Number of signatures expected: {}", transaction.message.header().num_required_signatures);
+        
+        // Serialize the transaction message for signing
+        let message_bytes = transaction.message.serialize();
+        
+        // Sign the message with our signer
+        let signature_bytes = signer.sign_message(&message_bytes).await?;
+        
+        // Convert to solana signature (expect exactly 64 bytes)
+        if signature_bytes.len() != 64 {
+            return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()).into());
+        }
+        
+        let mut sig_array = [0u8; 64];
+        sig_array.copy_from_slice(&signature_bytes);
+        let solana_signature = SolanaSignature::from(sig_array);
+        
+        // Assign the signature to the transaction
+        if transaction.signatures.len() != 1 {
+            return Err(format!("Expected 1 signature slot, found {}", transaction.signatures.len()).into());
+        }
+        transaction.signatures[0] = solana_signature;
+        
+        // Serialize the entire transaction with signature
+        let serialized_transaction = bincode::serialize(&transaction)?;
+        let encoded_transaction = bs58::encode(serialized_transaction).into_string();
+        
+        println!("Serialized SPL token transaction: {} bytes", encoded_transaction.len());
+        
+        // Send the transaction
+        self.send_transaction(&encoded_transaction).await
+    }
+
+    /// Get token decimals for a given mint
+    async fn get_token_decimals(&self, mint_pubkey: &Pubkey) -> Result<u8, Box<dyn Error>> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [
+                mint_pubkey.to_string(),
+                {
+                    "encoding": "jsonParsed"
+                }
+            ]
+        });
+
+        let response = self.client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await?;
+
+        let json: Value = response.json().await?;
+        
+        if let Some(account_data) = json["result"]["value"]["data"]["parsed"]["info"]["decimals"].as_u64() {
+            Ok(account_data as u8)
+        } else {
+            Err("Failed to get token decimals".into())
+        }
+    }
+
+    /// Check if an account exists
+    async fn account_exists(&self, account_pubkey: &Pubkey) -> Result<bool, Box<dyn Error>> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [
+                account_pubkey.to_string(),
+                {
+                    "encoding": "base64"
+                }
+            ]
+        });
+
+        let response = self.client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await?;
+
+        let json: Value = response.json().await?;
+        
+        // Account exists if the result value is not null
+        Ok(!json["result"]["value"].is_null())
     }
 
     /// Confirm transaction status
