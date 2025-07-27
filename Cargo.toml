@@ -40,6 +40,7 @@ dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011" }
 serialport = "4.3.0"
 tokio-serial = "5.4.4"
 solana-client = { version = "2.1"}
+arboard = "3.2"
 
 # Android-specific dependencies
 [target.'cfg(target_os = "android")'.dependencies]

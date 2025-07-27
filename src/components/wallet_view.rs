@@ -37,6 +37,8 @@ use crate::components::background_themes::BackgroundTheme;
 use crate::components::modals::BackgroundModal;
 use std::sync::Arc;
 use std::collections::HashMap;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+use arboard::Clipboard as SystemClipboard;
 
 // Define the assets for icons
 const ICON_32: Asset = asset!("/assets/icons/32x32.png");
@@ -675,7 +677,28 @@ pub fn WalletView() -> Element {
                         },
                         onclick: move |_| {
                             address_expanded.set(!address_expanded());
-                        },
+                        
+                            let address_to_copy = full_address.clone();
+                        
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                log::info!("Clipboard copy not supported on web platform.");
+                            }
+                        
+                            #[cfg(target_os = "android")]
+                            {
+                                log::info!("Clipboard copy not supported on Android platform.");
+                            }
+                        
+                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                            {
+                                std::thread::spawn(move || {
+                                    if let Ok(mut clipboard) = SystemClipboard::new() {
+                                        let _ = clipboard.set_text(address_to_copy);
+                                    }
+                                });
+                            }
+                        },                                                                                                                                                                             
                         div {
                             class: "short-address",
                             hidden: address_expanded(),

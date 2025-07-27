@@ -1,6 +1,8 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::error::Error;
 
 const DEFAULT_RPC_URL: &str = "https://serene-stylish-mound.solana-mainnet.quiknode.pro/5489821bcd1547d9cd7b2d81f90c086e36e0e9f7/";
 
@@ -34,19 +36,17 @@ struct RpcContext {
 pub async fn get_balance(address: &str, rpc_url: Option<&str>) -> Result<f64, String> {
     let client = Client::new();
     let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
-    
+
     let request = RpcRequest {
         jsonrpc: "2.0".to_string(),
         id: 1,
         method: "getBalance".to_string(),
         params: vec![
             serde_json::Value::String(address.to_string()),
-            serde_json::json!({
-                "commitment": "finalized"
-            })
+            serde_json::json!({ "commitment": "finalized" }),
         ],
     };
-    
+
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -54,20 +54,17 @@ pub async fn get_balance(address: &str, rpc_url: Option<&str>) -> Result<f64, St
         .send()
         .await
         .map_err(|e| format!("Failed to send request: {}", e))?;
-    
+
     if !response.status().is_success() {
         return Err(format!("RPC error: {}", response.status()));
     }
-    
-    let json: serde_json::Value = response.json().await
-        .map_err(|e| format!("Failed to parse response: {}", e))?;
-    
-    // Check for errors in the response
+
+    let json: Value = response.json().await.map_err(|e| format!("Failed to parse response: {}", e))?;
+
     if let Some(error) = json.get("error") {
         return Err(format!("RPC error: {:?}", error));
     }
-    
-    // Parse the result
+
     if let Some(result) = json.get("result") {
         if let Some(value) = result.get("value") {
             if let Some(val) = value.as_u64() {
@@ -75,8 +72,32 @@ pub async fn get_balance(address: &str, rpc_url: Option<&str>) -> Result<f64, St
             }
         }
     }
-    
+
     Err(format!("Failed to parse balance from response: {:?}", json))
+}
+
+pub async fn get_minimum_balance_for_rent_exemption(
+    account_size: usize,
+    rpc_url: Option<&str>,
+) -> Result<u64, Box<dyn Error>> {
+    let client = Client::new();
+    let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
+
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getMinimumBalanceForRentExemption",
+        "params": [account_size]
+    });
+
+    let response = client
+        .post(url)
+        .json(&request)
+        .send()
+        .await?;
+
+    let json: Value = response.json().await?;
+    Ok(json["result"].as_u64().ok_or("Invalid rent exemption response")?)
 }
 
 #[derive(Debug, Deserialize)]

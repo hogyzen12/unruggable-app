@@ -8,12 +8,12 @@ use solana_sdk::{
     hash::Hash,
     commitment_config::CommitmentConfig,
 };
-use solana_client::rpc_client::RpcClient;
 use crate::wallet::{Wallet, WalletInfo};
 use crate::hardware::HardwareWallet;
 use crate::signing::{TransactionSigner, software::SoftwareSigner, hardware::HardwareSigner};
 use crate::storage::get_current_jito_settings;
 use crate::transaction::TransactionClient;
+use crate::rpc::{ get_balance, get_minimum_balance_for_rent_exemption };
 use std::sync::Arc;
 use std::str::FromStr;
 use std::error::Error;
@@ -97,8 +97,7 @@ impl std::error::Error for StakingError {}
 /// Enhanced staking client that supports Jito transactions
 pub struct StakingClient {
     transaction_client: TransactionClient,
-    rpc_client: RpcClient,
-    rpc_url: String, // Add our own copy of rpc_url
+    rpc_url: String, // Keep this if needed for raw JSON-RPC fallback
 }
 
 impl StakingClient {
@@ -107,7 +106,6 @@ impl StakingClient {
         let url = rpc_url.unwrap_or("https://serene-stylish-mound.solana-mainnet.quiknode.pro/5489821bcd1547d9cd7b2d81f90c086e36e0e9f7/");
         Self {
             transaction_client: TransactionClient::new(Some(url)),
-            rpc_client: RpcClient::new_with_commitment(url, CommitmentConfig::confirmed()),
             rpc_url: url.to_string(),
         }
     }
@@ -232,20 +230,22 @@ impl StakingClient {
         let authority_pubkey = Pubkey::from_str(&authority_pubkey_str)
             .map_err(|_| StakingError::WalletError("Invalid wallet address".to_string()))?;
 
-        // Check balance
-        let balance_lamports = self.rpc_client.get_balance(&authority_pubkey)
+        let balance_lamports = get_balance(&authority_pubkey.to_string(), Some(&self.rpc_url)).await
             .map_err(|e| StakingError::RpcError(format!("Failed to get balance: {}", e)))?;
         
-        // Get rent exemption for stake account
-        let rent_exemption = self.rpc_client.get_minimum_balance_for_rent_exemption(200) // stake account size
+        let account_size = 200;
+
+        let rent_exemption = get_minimum_balance_for_rent_exemption(account_size, Some(&self.rpc_url))
+            .await
             .map_err(|e| StakingError::RpcError(format!("Failed to get rent exemption: {}", e)))?;
-        
+
+    
         // Calculate total required including Jito tips if enabled
         let jito_settings = get_current_jito_settings();
         let jito_tip_amount = if jito_settings.jito_tx { 200_000 } else { 0 }; // 0.0002 SOL total for tips
         let total_required = stake_amount_lamports + rent_exemption + 5_000_000 + jito_tip_amount; // 0.005 SOL for fees + Jito tips
         
-        if balance_lamports < total_required {
+        if balance_lamports < (total_required as f64 / 1_000_000_000.0) {
             return Err(StakingError::InsufficientBalance(
                 format!("Need {} SOL but only have {} SOL (including Jito tips if enabled)", 
                     total_required as f64 / 1_000_000_000.0,

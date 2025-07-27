@@ -3335,8 +3335,10 @@ input:checked + .toggle-slider:before {
     visibility: hidden;
     max-width: 0;
     overflow: hidden;
+    user-select: none;
 }
 
+/* Expanded state */
 .header-address-display.expanded .short-address {
     opacity: 0;
     visibility: hidden;
@@ -3347,27 +3349,23 @@ input:checked + .toggle-slider:before {
 .header-address-display.expanded .full-address {
     opacity: 1;
     visibility: visible;
-    max-width: 1000px; /* Enough to show full addr */
+    max-width: 1000px;
     overflow: visible;
-}
-
-.header-address-display .highlight {
-    font-size: 13px;
-    font-weight: 600;
+    user-select: text;
+    font-size: 10.5px;
+    font-weight: 500;
     color: white;
+    gap: 0;
 }
 
-.header-address-display .subtle {
-    font-size: 10px;
-    font-weight: 400;
-    color: rgba(255, 255, 255, 0.6);
-    letter-spacing: -0.2px;
+/* Remove color emphasis on expanded address */
+.header-address-display.expanded .full-address .highlight,
+.header-address-display.expanded .full-address .subtle {
+    font-size: inherit;
+    font-weight: inherit;
+    color: inherit;
+    letter-spacing: normal;
 }
-
-
-
-
-
 
 .profile-icon {
     position: relative;
