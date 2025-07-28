@@ -313,8 +313,9 @@ pub fn BulkSendModal(
 
     rsx! {
         div {
-            class: "modal-overlay",
+            class: "modal-backdrop",  // Changed from "modal-overlay"
             onclick: move |_| onclose.call(()),
+            
             div {
                 class: "modal-content bulk-send-modal",
                 onclick: move |e| e.stop_propagation(),
@@ -331,150 +332,141 @@ pub fn BulkSendModal(
                     }
                 }
                 
-                div { class: "modal-header",
-                    h2 { "Bulk Send Tokens" }
-                    button {
-                        class: "modal-close",
-                        onclick: move |_| onclose.call(()),
-                        "×"
+                // Modal header with close button - matching other modals
+                h2 { 
+                    class: "modal-title", 
+                    "Bulk Send Tokens" 
+                }
+                
+                // Show error if any
+                if let Some(error) = error_message() {
+                    div {
+                        class: "error-message",
+                        "{error}"
+                    }
+                }
+
+                // From address field - matching other modals
+                div {
+                    class: "wallet-field",
+                    label { "From Address:" }
+                    div { class: "address-display", "{display_address}" }
+                }
+                
+                // Recipient address input - matching other modals
+                div {
+                    class: "wallet-field",
+                    label { "Recipient Address:" }
+                    input {
+                        value: "{recipient()}",
+                        oninput: move |e| {
+                            recipient.set(e.value());
+                            // Reset balance check when address changes
+                            recipient_balance.set(None);
+                            error_message.set(None);
+                        },
+                        placeholder: "Enter Solana address"
+                    }
+                    
+                    // Show recipient balance if checked
+                    if checking_balance() {
+                        div { 
+                            class: "recipient-balance checking",
+                            "Checking balance..."
+                        }
+                    } else if let Some(balance) = recipient_balance() {
+                        div { 
+                            class: "recipient-balance",
+                            "Recipient balance: {balance:.4} SOL"
+                        }
                     }
                 }
                 
-                div { class: "modal-body",
-                    // Show error if any
-                    if let Some(error) = error_message() {
-                        div {
-                            class: "error-message",
-                            "{error}"
-                        }
-                    }
-
-                    div {
-                        class: "wallet-field",
-                        label { "From Address:" }
-                        div { class: "address-display", "{display_address}" }
-                    }
+                // Selected tokens section
+                div { 
+                    class: "wallet-field",
+                    label { "Selected Tokens ({selected_tokens().len()}):" }
                     
-                    // Recipient address input
-                    div { class: "form-group",
-                        label { r#for: "recipient", "Recipient Address" }
-                        input {
-                            id: "recipient",
-                            class: "form-input",
-                            r#type: "text",
-                            placeholder: "Enter Solana wallet address",
-                            value: "{recipient()}",
-                            oninput: move |e| {
-                                recipient.set(e.value());
-                                // Reset balance check when address changes
-                                recipient_balance.set(None);
-                                error_message.set(None);
-                            }
-                        }
-                        
-                        // Show recipient balance if checked
-                        if checking_balance() {
-                            div { class: "balance-check loading",
-                                "Checking balance..."
-                            }
-                        } else if let Some(balance) = recipient_balance() {
-                            div { class: "balance-check",
-                                "Recipient balance: {balance:.4} SOL"
-                            }
-                        }
-                    }
-                    
-                    // Selected tokens list with amount inputs
-                    div { class: "selected-tokens-section",
-                        h3 { "Selected Tokens ({selected_tokens().len()})" }
-                        
-                        div { class: "selected-tokens-list",
-                            for token in selected_tokens().iter() {
-                                div {
-                                    key: "{token.mint}",
-                                    class: "bulk-token-item",
-                                    
-                                    div { class: "bulk-token-info",
-                                        div { class: "bulk-token-icon",
-                                            img {
-                                                src: "{token.icon_type}",
-                                                alt: "{token.symbol}",
-                                                width: "32",
-                                                height: "32",
-                                            }
+                    div { 
+                        class: "selected-tokens-list",
+                        for token in selected_tokens().iter() {
+                            div {
+                                key: "{token.mint}",
+                                class: "bulk-token-item",
+                                
+                                div { 
+                                    class: "bulk-token-info",
+                                    div { 
+                                        class: "bulk-token-icon",
+                                        img {
+                                            src: "{token.icon_type}",
+                                            alt: "{token.symbol}",
+                                            width: "32",
+                                            height: "32",
                                         }
-                                        div { class: "bulk-token-details",
-                                            div { class: "bulk-token-name",
-                                                "{token.name} ({token.symbol})"
-                                            }
-                                            div { class: "bulk-token-balance",
-                                                "Available: {token.balance} {token.symbol}"
+                                    }
+                                    div { 
+                                        class: "bulk-token-details",
+                                        div { 
+                                            class: "bulk-token-name",
+                                            "{token.name} ({token.symbol})"
+                                        }
+                                        div { 
+                                            class: "bulk-token-balance",
+                                            "Available: {token.balance} {token.symbol}"
+                                        }
+                                    }
+                                }
+                                
+                                div { 
+                                    class: "bulk-token-amount-input",
+                                    input {
+                                        class: "form-input amount-input",
+                                        r#type: "number",
+                                        step: "any",
+                                        min: "0",
+                                        max: "{token.balance}",
+                                        placeholder: "Amount",
+                                        value: token_amounts().get(&token.mint).cloned().unwrap_or_default(),
+                                        oninput: {
+                                            let mint = token.mint.clone();
+                                            move |e| {
+                                                let mut amounts = token_amounts();
+                                                amounts.insert(mint.clone(), e.value());
+                                                token_amounts.set(amounts);
                                             }
                                         }
                                     }
-                                    
-                                    div { class: "bulk-token-amount-input",
-                                        input {
-                                            class: "form-input amount-input",
-                                            r#type: "number",
-                                            step: "any",
-                                            min: "0",
-                                            max: "{token.balance}",
-                                            placeholder: "Amount",
-                                            value: token_amounts().get(&token.mint).cloned().unwrap_or_default(),
-                                            oninput: {
-                                                let mint = token.mint.clone();
-                                                move |e| {
-                                                    let mut amounts = token_amounts();
-                                                    amounts.insert(mint.clone(), e.value());
-                                                    token_amounts.set(amounts);
-                                                }
+                                    button {
+                                        class: "max-button",
+                                        onclick: {
+                                            let mint = token.mint.clone();
+                                            let balance = token.balance;
+                                            move |_| {
+                                                let mut amounts = token_amounts();
+                                                amounts.insert(mint.clone(), balance.to_string());
+                                                token_amounts.set(amounts);
                                             }
-                                        }
-                                        button {
-                                            class: "max-button",
-                                            onclick: {
-                                                let mint = token.mint.clone();
-                                                let balance = token.balance;
-                                                move |_| {
-                                                    let mut amounts = token_amounts();
-                                                    amounts.insert(mint.clone(), balance.to_string());
-                                                    token_amounts.set(amounts);
-                                                }
-                                            },
-                                            "MAX"
-                                        }
+                                        },
+                                        "MAX"
                                     }
                                 }
                             }
                         }
                     }
-                    
-                    // Fee estimation
-                    div { class: "fee-estimation",
-                        div { class: "fee-row",
-                            span { "Estimated Network Fees:" }
-                            span { 
-                                class: if sufficient_sol_for_fees() { "fee-amount" } else { "fee-amount insufficient" },
-                                "~{estimated_fee():.6} SOL"
-                            }
-                        }
-                        if !sufficient_sol_for_fees() {
-                            div { class: "fee-warning",
-                                "⚠️ Insufficient SOL for transaction fees"
-                            }
-                        }
-                    }
+                }
+                
 
-                    if hardware_wallet.is_some() {
-                        div {
-                            class: "info-message",
-                            "Your hardware wallet will prompt you to approve each token transaction"
-                        }
+
+                if hardware_wallet.is_some() {
+                    div {
+                        class: "info-message",
+                        "Your hardware wallet will prompt you to approve each token transaction"
                     }
                 }
                 
-                div { class: "modal-buttons",
+                div { 
+                    class: "modal-buttons",
                     button {
                         class: "modal-button cancel",
                         onclick: move |_| onclose.call(()),
@@ -482,7 +474,7 @@ pub fn BulkSendModal(
                     }
                     button {
                         class: "modal-button primary",
-                        disabled: sending() || !all_amounts_valid() || !sufficient_sol_for_fees() || recipient().trim().is_empty(),
+                        disabled: sending() || !all_amounts_valid() || recipient().trim().is_empty(),
                         onclick: move |_| {
                             if !sending() {
                                 sending.set(true);
