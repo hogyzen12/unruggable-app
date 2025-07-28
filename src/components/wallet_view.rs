@@ -27,7 +27,7 @@ use crate::currency_utils::{
     get_current_currency_code
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
@@ -39,6 +39,7 @@ use std::sync::Arc;
 use std::collections::HashMap;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use arboard::Clipboard as SystemClipboard;
+use std::collections::HashSet;
 
 // Define the assets for icons
 const ICON_32: Asset = asset!("/assets/icons/32x32.png");
@@ -260,6 +261,11 @@ pub fn WalletView() -> Element {
 
     //Wallet address expand
     let mut address_expanded = use_signal(|| false);
+
+    // Bulk send state management
+    let mut bulk_send_mode = use_signal(|| false);
+    let mut selected_tokens = use_signal(|| HashSet::<String>::new()); // Using mint addresses as keys
+    let mut show_bulk_send_modal = use_signal(|| false);
 
     fn get_token_price_change(
         symbol: &str, 
@@ -1164,6 +1170,45 @@ pub fn WalletView() -> Element {
                     onclose: move |_| show_currency_modal.set(false)
                 }
             }
+
+            if show_bulk_send_modal() {
+                BulkSendModal {
+                    selected_token_mints: selected_tokens(),
+                    all_tokens: tokens(),
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    current_balance: balance(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| {
+                        show_bulk_send_modal.set(false);
+                        bulk_send_mode.set(false);
+                        selected_tokens.set(HashSet::new());
+                    },
+                    onsuccess: move |signature| {
+                        show_bulk_send_modal.set(false);
+                        bulk_send_mode.set(false);
+                        selected_tokens.set(HashSet::new());
+                        println!("Bulk send transaction successful: {}", signature);
+                        
+                        // Refresh balances after successful transaction
+                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
+                            let address = wallet.address.clone();
+                            let rpc_url = custom_rpc();
+                            
+                            spawn(async move {
+                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
+                                    Ok(sol_balance) => {
+                                        balance.set(sol_balance);
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to refresh balance after bulk send: {}", e);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
                         
             // Main content container for balance, address, and actions
             div {
@@ -1253,6 +1298,39 @@ pub fn WalletView() -> Element {
                             "Stake"
                         }
                     }
+                    button {
+                        class: "action-button",
+                        onclick: move |_| {
+                            if bulk_send_mode() {
+                                // Exit bulk mode
+                                bulk_send_mode.set(false);
+                                selected_tokens.set(HashSet::new());
+                            } else {
+                                // Enter bulk send mode
+                                bulk_send_mode.set(true);
+                                selected_tokens.set(HashSet::new()); // Clear previous selections
+                            }
+                        },
+                        div {
+                            class: "action-icon",
+                            div {
+                                style: "font-size: 24px;",
+                                if bulk_send_mode() {
+                                    "❌" // Cancel icon when in bulk mode
+                                } else {
+                                    "📦" // Bulk send icon
+                                }
+                            }
+                        }
+                        span {
+                            class: "action-label",
+                            if bulk_send_mode() {
+                                "Cancel"
+                            } else {
+                                "Bulk Send"
+                            }
+                        }
+                    }
                     //button {
                     //    class: "action-button",
                     //    div {
@@ -1283,14 +1361,68 @@ pub fn WalletView() -> Element {
                 class: "tokens-section",
                 h3 {
                     class: "tokens-header",
-                    "Your Tokens"
+                    style: "display: flex; justify-content: space-between; align-items: center;",
+                    
+                    span {
+                        if bulk_send_mode() {
+                            "Select Tokens to Send"
+                        } else {
+                            "Your Tokens"
+                        }
+                    }
+                    
+                    // ONLY show send button when in bulk mode AND tokens are selected
+                    if bulk_send_mode() && !selected_tokens().is_empty() {
+                        button {
+                            class: "bulk-send-confirm-button",
+                            onclick: move |_| {
+                                show_bulk_send_modal.set(true);
+                            },
+                            "Send ({selected_tokens().len()})"
+                        }
+                    }
                 }
                 div {
                     class: "token-list",
                     for token in tokens() {
                         div {
                             key: "{token.mint}",
-                            class: "token-item",
+                            class: if bulk_send_mode() && selected_tokens().contains(&token.mint) {
+                                "token-item token-item-selected"
+                            } else {
+                                "token-item"
+                            },
+                            // Add click handler for bulk selection
+                            onclick: {
+                                let token_mint = token.mint.clone();
+                                let is_bulk_mode = bulk_send_mode();
+                                move |_| {
+                                    if is_bulk_mode {
+                                        let mut current_selected = selected_tokens();
+                                        if current_selected.contains(&token_mint) {
+                                            current_selected.remove(&token_mint);
+                                        } else {
+                                            current_selected.insert(token_mint.clone());
+                                        }
+                                        selected_tokens.set(current_selected);
+                                    }
+                                    // If not in bulk mode, do nothing (individual sends handled by button)
+                                }
+                            },
+                            
+                            // Add selection checkbox when in bulk mode
+                            if bulk_send_mode() {
+                                div {
+                                    class: "token-selection-checkbox",
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: selected_tokens().contains(&token.mint),
+                                        // Handle is managed by the parent onclick
+                                        onclick: move |e| e.stop_propagation(), // Prevent double handling
+                                    }
+                                }
+                            }
+                            
                             div {
                                 class: "token-info",
                                 div {
@@ -1336,51 +1468,49 @@ pub fn WalletView() -> Element {
                                     }
                                 }
                             }
-                            // Send button positioned absolutely - doesn't affect layout
-                            button {
-                                class: "token-send-button",
-                                onclick: {
-                                    let token_symbol = token.symbol.clone();
-                                    let token_mint = token.mint.clone();
-                                    let token_balance = token.balance;
-                                    move |_| {
-                                        if token_symbol == "SOL" {
-                                            // Open SOL send modal (existing behavior)
-                                            show_send_modal.set(true);
-                                        } else {
-                                            // Open token send modal for SPL tokens
-                                            selected_token_symbol.set(token_symbol.clone());
-                                            selected_token_mint.set(token_mint.clone());
-                                            selected_token_balance.set(token_balance);
-                                            
-                                            // Set decimals based on known tokens, default to 6
-                                            let decimals = match token_symbol.as_str() {
-                                                "USDC" | "USDT" => Some(6),
-                                                "JLP" => Some(6),
-                                                "JUP" => Some(6),
-                                                "JTO" => Some(9),
-                                                "BONK" => Some(5),
-                                                _ => Some(6), // Default for most SPL tokens
-                                            };
-                                            selected_token_decimals.set(decimals);
-                                            
-                                            show_send_token_modal.set(true);
-                                            
-                                            println!("Send {} (mint: {}) clicked", token_symbol, token_mint);
+                            
+                            // Individual send button - ONLY show when NOT in bulk mode
+                            if !bulk_send_mode() {
+                                button {
+                                    class: "token-send-button",
+                                    onclick: {
+                                        let token_symbol = token.symbol.clone();
+                                        let token_mint = token.mint.clone();
+                                        let token_balance = token.balance;
+                                        // Get token decimals based on known tokens
+                                        let token_decimals = match token.symbol.as_str() {
+                                            "SOL" => Some(9),
+                                            "USDC" | "USDT" => Some(6),
+                                            _ => Some(9), // Default to 9 decimals for most SPL tokens
+                                        };
+                                        
+                                        move |e| {
+                                            e.stop_propagation(); // Prevent triggering token selection
+                                            if token_symbol == "SOL" {
+                                                show_send_modal.set(true);
+                                            } else {
+                                                // Open individual token send modal
+                                                selected_token_symbol.set(token_symbol.clone());
+                                                selected_token_mint.set(token_mint.clone());
+                                                selected_token_balance.set(token_balance);
+                                                selected_token_decimals.set(token_decimals);
+                                                show_send_token_modal.set(true);
+                                            }
                                         }
-                                    }
-                                },
-                                title: "Send {token.symbol}",
-                                div {
-                                    class: "token-send-icon",
-                                    img {
-                                        src: "{ICON_SEND}",
-                                        alt: "Send",
-                                        width: "14",
-                                        height: "14",
+                                    },
+                                    title: "Send {token.symbol}",
+                                    div {
+                                        class: "token-send-icon",
+                                        img {
+                                            src: "{ICON_SEND}",
+                                            alt: "Send",
+                                            width: "14",
+                                            height: "14",
+                                        }
                                     }
                                 }
                             }
+                            
                             // Keep original token-values structure
                             div {
                                 class: "token-values",

@@ -1,5 +1,5 @@
 /// Token structure for wallet holdings
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Token {
     pub mint: String,      // Added to store the unique mint address
     pub symbol: String,
