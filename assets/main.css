@@ -3734,8 +3734,6 @@ body:has(.token-item-selected) .token-item:hover {
     display: block;
 }
 
-/* Add these styles to your main.css for the bulk send modal */
-
 /* Bulk Send Modal Specific Styles */
 .bulk-send-modal {
     max-width: 520px; /* Slightly wider for token list */
@@ -3803,11 +3801,17 @@ body:has(.token-item-selected) .token-item:hover {
 }
 
 /* Amount input section */
+.bulk-token-amount-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 120px;
+}
+
 .bulk-token-amount-input {
     display: flex;
     align-items: center;
     gap: 8px;
-    min-width: 120px;
 }
 
 .amount-input {
@@ -3815,6 +3819,28 @@ body:has(.token-item-selected) .token-item:hover {
     padding: 6px 8px !important;
     font-size: 14px !important;
     text-align: right;
+    border: 1px solid #2a2a2a !important;
+    transition: border-color 0.2s;
+}
+
+.amount-input:focus {
+    border-color: #6366f1 !important;
+}
+
+.amount-input.error {
+    border-color: #ef4444 !important;
+    background-color: rgba(239, 68, 68, 0.1) !important;
+}
+
+.token-amount-error {
+    font-size: 11px;
+    color: #ef4444;
+    margin-top: 2px;
+    padding: 2px 4px;
+    background-color: rgba(239, 68, 68, 0.1);
+    border-radius: 3px;
+    max-width: 120px;
+    word-wrap: break-word;
 }
 
 .max-button {

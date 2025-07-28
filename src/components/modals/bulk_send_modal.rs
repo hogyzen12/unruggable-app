@@ -199,6 +199,7 @@ pub fn BulkSendModal(
     let mut recipient_balance = use_signal(|| None as Option<f64>);
     let mut checking_balance = use_signal(|| false);
     let mut token_amounts = use_signal(|| std::collections::HashMap::<String, String>::new());
+    let mut token_amount_errors = use_signal(|| std::collections::HashMap::<String, String>::new());
     
     // Success modal state
     let mut show_success_modal = use_signal(|| false);
@@ -226,16 +227,43 @@ pub fn BulkSendModal(
     // Validate all amounts using use_memo
     let all_amounts_valid = use_memo(move || {
         let amounts = token_amounts();
-        selected_tokens().iter().all(|token| {
+        let mut errors = std::collections::HashMap::<String, String>::new();
+        let mut all_valid = true;
+        
+        for token in selected_tokens().iter() {
             if let Some(amount_str) = amounts.get(&token.mint) {
-                if let Ok(amount) = amount_str.parse::<f64>() {
-                    amount > 0.0 && amount <= token.balance
-                } else {
-                    false
+                if amount_str.trim().is_empty() {
+                    // Empty is okay, just not valid for submission
+                    continue;
                 }
-            } else {
-                false
+                
+                match amount_str.parse::<f64>() {
+                    Ok(amount) => {
+                        if amount <= 0.0 {
+                            errors.insert(token.mint.clone(), "Amount must be greater than 0".to_string());
+                            all_valid = false;
+                        } else if amount > token.balance {
+                            errors.insert(token.mint.clone(), format!("Max available: {:.6} {}", token.balance, token.symbol));
+                            all_valid = false;
+                        }
+                        // Amount is valid - remove any existing error
+                    }
+                    Err(_) => {
+                        errors.insert(token.mint.clone(), "Invalid number format".to_string());
+                        all_valid = false;
+                    }
+                }
             }
+        }
+        
+        // Update the errors signal
+        token_amount_errors.set(errors);
+        
+        // Only valid if all tokens have amounts and all are valid
+        all_valid && selected_tokens().iter().all(|token| {
+            amounts.get(&token.mint)
+                .map(|s| !s.trim().is_empty() && s.parse::<f64>().is_ok())
+                .unwrap_or(false)
         })
     });
 
@@ -419,36 +447,55 @@ pub fn BulkSendModal(
                                 }
                                 
                                 div { 
-                                    class: "bulk-token-amount-input",
-                                    input {
-                                        class: "form-input amount-input",
-                                        r#type: "number",
-                                        step: "any",
-                                        min: "0",
-                                        max: "{token.balance}",
-                                        placeholder: "Amount",
-                                        value: token_amounts().get(&token.mint).cloned().unwrap_or_default(),
-                                        oninput: {
-                                            let mint = token.mint.clone();
-                                            move |e| {
-                                                let mut amounts = token_amounts();
-                                                amounts.insert(mint.clone(), e.value());
-                                                token_amounts.set(amounts);
+                                    class: "bulk-token-amount-section",
+                                    div {
+                                        class: "bulk-token-amount-input",
+                                        input {
+                                            class: if token_amount_errors().contains_key(&token.mint) {
+                                                "form-input amount-input error"
+                                            } else {
+                                                "form-input amount-input"
+                                            },
+                                            r#type: "number",
+                                            step: "any",
+                                            min: "0",
+                                            max: "{token.balance}",
+                                            placeholder: "Amount",
+                                            value: token_amounts().get(&token.mint).cloned().unwrap_or_default(),
+                                            oninput: {
+                                                let mint = token.mint.clone();
+                                                move |e| {
+                                                    let mut amounts = token_amounts();
+                                                    amounts.insert(mint.clone(), e.value());
+                                                    token_amounts.set(amounts);
+                                                    // Trigger validation by accessing all_amounts_valid
+                                                    let _ = all_amounts_valid();
+                                                }
                                             }
                                         }
+                                        button {
+                                            class: "max-button",
+                                            onclick: {
+                                                let mint = token.mint.clone();
+                                                let balance = token.balance;
+                                                move |_| {
+                                                    let mut amounts = token_amounts();
+                                                    amounts.insert(mint.clone(), balance.to_string());
+                                                    token_amounts.set(amounts);
+                                                    // Trigger validation
+                                                    let _ = all_amounts_valid();
+                                                }
+                                            },
+                                            "MAX"
+                                        }
                                     }
-                                    button {
-                                        class: "max-button",
-                                        onclick: {
-                                            let mint = token.mint.clone();
-                                            let balance = token.balance;
-                                            move |_| {
-                                                let mut amounts = token_amounts();
-                                                amounts.insert(mint.clone(), balance.to_string());
-                                                token_amounts.set(amounts);
-                                            }
-                                        },
-                                        "MAX"
+                                    
+                                    // Show individual token amount error
+                                    if let Some(error) = token_amount_errors().get(&token.mint) {
+                                        div {
+                                            class: "token-amount-error",
+                                            "{error}"
+                                        }
                                     }
                                 }
                             }
