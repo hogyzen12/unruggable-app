@@ -18,6 +18,7 @@ Performing Streamed Install
 Success 
 
 dx build --platform ios && dx build --platform macos && dx build --platform android
+dxalpha build --platform ios && dxalpha build --platform macos && dxalpha build --platform android
 
 dx bundle --platform ios
 dx bundle --platform macos

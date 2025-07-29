@@ -398,6 +398,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-channel"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "924ed96dd52d1b75e9c1a3e6275715fd320f5f9439fb5a4a11fa51f4221158d2"
+dependencies = [
+ "concurrent-queue",
+ "event-listener-strategy",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
 name = "async-compression"
 version = "0.4.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2120,7 +2132,7 @@ version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330c60081dcc4c72131f8eb70510f1ac07223e5d4163db481a04a0befcffa412"
 dependencies = [
- "libloading 0.7.4",
+ "libloading 0.8.8",
 ]
 
 [[package]]
@@ -3824,7 +3836,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.53.2",
 ]
 
 [[package]]
@@ -7914,7 +7926,7 @@ version = "2.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f7cf2d0e4f5fabb789a45d1201791d3704bc5317b05dc98e0913d66927a3241"
 dependencies = [
- "async-channel",
+ "async-channel 1.9.0",
  "bytes",
  "crossbeam-channel",
  "dashmap 5.5.3",
@@ -9603,7 +9615,9 @@ name = "unruggable"
 version = "0.1.0"
 dependencies = [
  "android_logger",
+ "anyhow",
  "arboard",
+ "async-channel 2.5.0",
  "async-trait",
  "base64 0.22.1",
  "bincode",
@@ -9616,7 +9630,7 @@ dependencies = [
  "jni",
  "lazy_static",
  "log",
- "ndk-context",
+ "once_cell",
  "openssl",
  "qrcode",
  "rand 0.8.5",
