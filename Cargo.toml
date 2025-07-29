@@ -6,8 +6,8 @@ edition = "2021"
 
 [dependencies]
 # Core dependencies for all platforms
-#ALPHA
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011",  features = ["fullstack", "router"] }
+#ALPHA - passing all builds & bundles + device deployment
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011",  features = ["fullstack", "router", "mobile"] }
 #FFI local/custom
 #dioxus = { git = "https://github.com/hogyzen12/dioxus", branch = "main", features = ["router"] }
 #STABLE - fails android

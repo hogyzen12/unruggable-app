@@ -7,7 +7,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
 source "$SCRIPT_DIR/android.env"
 
 # Paths
-APP_NAME="mobile"
+APP_NAME="unruggable"
 AAB_FILE="./dist/android/${APP_NAME}-release.aab"     # Updated path based on android.bundle.sh output
 OUTPUT_APKS="./dist/android/${APP_NAME}appdev01.apks" # Output APKS to the same directory
 

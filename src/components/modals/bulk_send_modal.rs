@@ -2,9 +2,11 @@
 
 use dioxus::prelude::*;
 use crate::components::common::Token;
-use crate::wallet::WalletInfo;
+use crate::wallet::{Wallet, WalletInfo};
 use crate::hardware::HardwareWallet;
 use crate::components::modals::send_modal::HardwareWalletEvent;
+use crate::transaction::TransactionClient;
+use crate::signing::{SignerType, hardware::HardwareSigner};
 use std::sync::Arc;
 use std::collections::HashSet;
 
@@ -502,8 +504,6 @@ pub fn BulkSendModal(
                         }
                     }
                 }
-                
-
 
                 if hardware_wallet.is_some() {
                     div {
@@ -557,26 +557,74 @@ pub fn BulkSendModal(
                                         show_hardware_approval.set(false);
                                         return;
                                     }
-
-                                    println!("Would send {} tokens to {}", selected_for_send.len(), recipient_address);
+                                
+                                    println!("Sending bulk transaction with {} tokens to {}", selected_for_send.len(), recipient_address);
                                     for item in &selected_for_send {
                                         println!("  {} {} ({})", item.amount, item.token.symbol, item.token.mint);
                                     }
                                     
-                                    // TODO: Implement actual bulk send transaction logic
-                                    // This would involve creating multiple transactions or a single transaction
-                                    // with multiple instructions
-                                    
-                                    // For now, simulate success
-                                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                                    
-                                    // Hide hardware approval overlay
-                                    show_hardware_approval.set(false);
-                                    
-                                    // Set the transaction signature and show success modal
-                                    transaction_signature.set("bulk_send_simulation_success".to_string());
-                                    sending.set(false);
-                                    show_success_modal.set(true);
+                                    let client = TransactionClient::new(rpc_url.as_deref());
+                                
+                                    // Determine signer type based on available wallet
+                                    let result = if let Some(ref hw) = hardware_wallet_clone {
+                                        // Use hardware wallet signer
+                                        let hw_signer = HardwareSigner::from_wallet(hw.clone());
+                                        client.send_bulk_tokens_with_signer(&hw_signer, &recipient_address, selected_for_send).await
+                                    } else if let Some(wallet_info) = wallet_info {
+                                        // Use software wallet signer
+                                        match Wallet::from_wallet_info(&wallet_info) {
+                                            Ok(wallet) => {
+                                                let signer = SignerType::from_wallet(wallet);
+                                                client.send_bulk_tokens_with_signer(&signer, &recipient_address, selected_for_send).await
+                                            }
+                                            Err(e) => {
+                                                error_message.set(Some(format!("Failed to load wallet: {}", e)));
+                                                sending.set(false);
+                                                show_hardware_approval.set(false);
+                                                return;
+                                            }
+                                        }
+                                    } else {
+                                        error_message.set(Some("No wallet available".to_string()));
+                                        sending.set(false);
+                                        show_hardware_approval.set(false);
+                                        return;
+                                    };
+                                
+                                    // Handle the transaction result
+                                    match result {
+                                        Ok(signature) => {
+                                            println!("Bulk transaction sent successfully: {}", signature);
+                                            
+                                            // Hide hardware approval overlay
+                                            show_hardware_approval.set(false);
+                                            
+                                            // If hardware wallet was used, disconnect it and notify parent
+                                            if let Some(ref hw) = hardware_wallet_clone {
+                                                hw.disconnect().await;
+                                                // Note: You might want to add hardware wallet event handling here
+                                                // similar to how it's done in send_modal.rs
+                                            }
+                                            
+                                            // Set the transaction signature and show success modal
+                                            transaction_signature.set(signature);
+                                            sending.set(false);
+                                            show_success_modal.set(true);
+                                        }
+                                        Err(e) => {
+                                            let error_msg = if e.to_string().contains("too large") {
+                                                format!("Transaction too large. Please reduce the number of tokens or send in smaller batches. Error: {}", e)
+                                            } else if e.to_string().contains("Insufficient") {
+                                                format!("Insufficient balance for transaction fees or token amounts. Error: {}", e)
+                                            } else {
+                                                format!("Transaction failed: {}", e)
+                                            };
+                                            
+                                            error_message.set(Some(error_msg));
+                                            sending.set(false);
+                                            show_hardware_approval.set(false);
+                                        }
+                                    }
                                 });
                             }
                         },

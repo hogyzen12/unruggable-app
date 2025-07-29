@@ -11,7 +11,7 @@ if [ -z "${CI-}" ]; then
 fi
 
 # --- Configuration ---
-APP_NAME="mobile"
+APP_NAME="unruggable"
 # Relative path to the root of the Dioxus-generated Android project
 ANDROID_PROJECT_DIR="target/dx/${APP_NAME}/release/android"
 # Relative path to the desired output directory for the AAB
