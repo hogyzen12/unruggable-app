@@ -164,17 +164,11 @@ body {
     font-size: 20px;
 }
 
-/* Balance section */
-.balance-section {
-    text-align: center;
-    padding: 40px 20px;
-}
-
 .balance-amount {
-    font-size: 48px;
-    font-weight: 300;
+    font-size: 22px;
+    font-weight: 10;
     color: white;
-    margin-bottom: 8px;
+    margin-bottom: 4px;
 }
 
 .balance-change {
@@ -192,16 +186,7 @@ body {
 .action-buttons {
     display: flex;
     justify-content: space-around;
-    padding: 30px 40px;
-    background-color: transparent;
-}
-
-/* Simplified Action buttons - replace your existing action button styles */
-
-.action-buttons {
-    display: flex;
-    justify-content: space-around;
-    padding: 30px 40px;
+    padding: 10px 40px;
     background-color: transparent;
 }
 
@@ -263,15 +248,15 @@ body {
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-radius: 20px 20px 0 0;
-    padding: 20px;
-    min-height: 400px;
+    padding: 10px 20px 20px 20px; /* Change from 20px to 24px 20px 20px 20px */
+    min-height: 70vh;
 }
 
 .tokens-header {
     color: #ffffff;
     font-size: 18px;
     font-weight: 600;
-    margin-bottom: 20px;
+    margin-bottom: 12px; /* Change from 20px to 12px */
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
@@ -1598,20 +1583,6 @@ body {
 .hardware-reconnect-notice::before {
     content: "⚠️";
     font-size: 18px;
-}
-
-/* Updated balance section styling for a cleaner look */
-.balance-section {
-    text-align: center;
-    padding: 30px 20px 20px; /* Increased top padding for better spacing */
-}
-
-.balance-amount {
-    font-size: 52px; /* Larger font for the main balance */
-    font-weight: 300;
-    color: white;
-    margin-bottom: 12px;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* Subtle text shadow for depth */
 }
 
 .balance-sol-row {
@@ -3228,27 +3199,14 @@ input:checked + .toggle-slider:before {
 /* Enhanced balance section styling - moved higher and bolder */
 .balance-section-enhanced {
     text-align: center;
-    padding: 15px 20px 20px; /* Reduced top padding from 30px to 15px to move it higher */
+    padding: 10px 20px 20px; /* Reduced top padding from 30px to 15px to move it higher */
 }
 
 .balance-amount-bold {
-    font-size: 58px; /* Increased from 52px for more prominence */
-    font-weight: 700; /* Increased from 300 to 700 for much bolder text */
+    font-size: 48px;
+    font-weight: 300;
     color: white;
-    margin-bottom: 8px; /* Reduced margin for tighter spacing */
-    text-shadow: 0 3px 6px rgba(0, 0, 0, 0.3); /* Enhanced shadow for more depth */
-    letter-spacing: -1px; /* Tighter letter spacing for cleaner look */
-}
-
-/* Alternative version with even bolder styling */
-.balance-amount-ultra-bold {
-    font-size: 62px;
-    font-weight: 800; /* Ultra bold */
-    color: white;
-    margin-bottom: 8px;
-    text-shadow: 0 4px 8px rgba(0, 0, 0, 0.4);
-    letter-spacing: -1.5px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+    margin-bottom: 4px; /* Change from 8px or 12px */
 }
 
 /* Keep the existing balance-sol styling the same */
@@ -3570,7 +3528,7 @@ input:checked + .toggle-slider:before {
 .tokens-header {
     color: #6b7280;
     font-size: 16px;
-    margin-bottom: 20px;
+    margin-bottom: 12px; /* Change from 20px to 12px */
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -3690,7 +3648,7 @@ input:checked + .toggle-slider:before {
 .tokens-header {
     color: #6b7280;
     font-size: 16px;
-    margin-bottom: 20px;
+    margin-bottom: 12px; /* Change from 20px to 12px */
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -3898,4 +3856,35 @@ body:has(.token-item-selected) .token-item:hover {
 
 .selected-tokens-list::-webkit-scrollbar-thumb:hover {
     background: #6b7280;
+}
+
+/* Portfolio change styling */
+.portfolio-change-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-top: 8px;
+}
+
+.portfolio-change {
+    font-size: 16px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-weight: 600;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+.portfolio-change.positive {
+    color: #10b981; /* Green for positive */
+    background-color: rgba(16, 185, 129, 0.15);
+}
+
+.portfolio-change.negative {
+    color: #ef4444; /* Red for negative */
+    background-color: rgba(239, 68, 68, 0.15);
+}
+
+.portfolio-change.neutral {
+    color: #9ca3af; /* Gray for neutral */
+    background-color: rgba(156, 163, 175, 0.15);
 }

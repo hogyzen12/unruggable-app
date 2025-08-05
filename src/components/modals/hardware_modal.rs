@@ -53,7 +53,7 @@ pub fn HardwareWalletModal(
                 if !connected() {
                     div {
                         class: "info-message",
-                        "Connect your UnRuGgAbLe hardware wallet via USB"
+                        "Connect your Unruggable hardware wallet via USB"
                     }
                     
                     div { class: "modal-buttons",

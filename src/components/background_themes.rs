@@ -12,6 +12,11 @@ impl BackgroundTheme {
     pub fn get_presets() -> Vec<BackgroundTheme> {
         vec![
             BackgroundTheme {
+                name: "Solana Summer".to_string(),
+                url: "https://raw.githubusercontent.com/hogyzen12/unruggable-app/refs/heads/main/assets/icons/bg.png".to_string(),
+                description: "Minimalist special edition for the Solana mobile hackathon.".to_string(),
+            },    
+            BackgroundTheme {
                 name: "Seeker x Unruggable".to_string(),
                 url: "https://raw.githubusercontent.com/hogyzen12/unruggable-app/refs/heads/main/public/bg.jpeg".to_string(),
                 description: "Special edition for the launch of Solana Seeker.".to_string(),

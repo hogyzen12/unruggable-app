@@ -40,6 +40,7 @@ use std::collections::HashMap;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use arboard::Clipboard as SystemClipboard;
 use std::collections::HashSet;
+use rand::{thread_rng, Rng};
 
 // Define the assets for icons
 const ICON_32: Asset = asset!("/assets/icons/32x32.png");
@@ -55,6 +56,7 @@ const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
 const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
 const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
 const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
+const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
 
 // JupiterToken struct with PartialEq and Eq for use_memo
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -288,8 +290,9 @@ pub fn WalletView() -> Element {
             return *percentage;
         }
         
-        // No match found, use default
-        3.0
+        // No match found, generate random between 0.0 and 7.0
+        let mut rng = thread_rng();
+        rng.gen_range(0.0..7.0)
     }
 
     // Load wallets from storage on component mount
@@ -1228,6 +1231,54 @@ pub fn WalletView() -> Element {
                             }
                         }
                     }
+                    // ADD THIS: Portfolio % change section
+                    if !prices_loading() {
+                        div {
+                            class: "portfolio-change-row",
+                            span {
+                                class: {
+                                    // Calculate weighted average % change for portfolio
+                                    let tokens_list = tokens.read();
+                                    let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                    
+                                    if total_value > 0.0 {
+                                        let weighted_change = tokens_list.iter().fold(0.0, |acc, token| {
+                                            let weight = token.value_usd / total_value;
+                                            acc + (token.price_change * weight)
+                                        });
+                                        
+                                        if weighted_change >= 0.0 {
+                                            "portfolio-change positive"
+                                        } else {
+                                            "portfolio-change negative"
+                                        }
+                                    } else {
+                                        "portfolio-change neutral"
+                                    }
+                                },
+                                {
+                                    // Calculate and display the weighted average % change
+                                    let tokens_list = tokens.read();
+                                    let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                    
+                                    if total_value > 0.0 {
+                                        let weighted_change = tokens_list.iter().fold(0.0, |acc, token| {
+                                            let weight = token.value_usd / total_value;
+                                            acc + (token.price_change * weight)
+                                        });
+                                        
+                                        if weighted_change >= 0.0 {
+                                            format!("+{:.1}%", weighted_change)
+                                        } else {
+                                            format!("{:.1}%", weighted_change)
+                                        }
+                                    } else {
+                                        "0.0%".to_string()
+                                    }
+                                }
+                            }
+                        }
+                    }
                     // SOL balance row - clean and simple, no USD value
                     //div {
                     //    class: "balance-sol-row",
@@ -1313,12 +1364,17 @@ pub fn WalletView() -> Element {
                         },
                         div {
                             class: "action-icon",
-                            div {
-                                style: "font-size: 24px;",
-                                if bulk_send_mode() {
-                                    "❌" // Cancel icon when in bulk mode
-                                } else {
-                                    "📦" // Bulk send icon
+                            if bulk_send_mode() {
+                                div {
+                                    style: "font-size: 24px;",
+                                    "❌" // Keep cancel emoji
+                                }
+                            } else {
+                                img {
+                                    src: "{ICON_BULK}",
+                                    alt: "Bulk Send",
+                                    width: "24",
+                                    height: "24",
                                 }
                             }
                         }
