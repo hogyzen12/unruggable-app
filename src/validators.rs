@@ -51,13 +51,13 @@ struct RpcResponse<T> {
 fn get_static_validators() -> Vec<ValidatorInfo> {
     vec![
         ValidatorInfo {
-            identity: "YOUR_VALIDATOR_IDENTITY_HERE".to_string(), // Replace with your actual validator identity
-            vote_account: "YOUR_VOTE_ACCOUNT_HERE".to_string(), // Replace with your actual vote account
+            identity: "UNrgBLmc8JT6A3dxXY9DWeHvDezt2DZQbhg1KPQfqEL".to_string(), // Replace with your actual validator identity
+            vote_account: "unRgBLTLNXdBmenHXNPAg3AMn3KWcV3Mk4eoZBmTrdk".to_string(), // Replace with your actual vote account
             name: "Unruggable Validator".to_string(),
-            description: "The official Unruggable wallet validator - high performance, low commission".to_string(),
+            description: "Support us and keep Unruggable open source and free.".to_string(),
             commission: 5.0,
-            active_stake: 0.0,
-            skip_rate: 2.5, // Static estimate - skip rate not available via RPC
+            active_stake: 100.0,
+            skip_rate: 0.5,
             is_default: true,
         },
         ValidatorInfo {
