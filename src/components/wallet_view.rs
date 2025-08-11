@@ -43,20 +43,34 @@ use std::collections::HashSet;
 use rand::{thread_rng, Rng};
 
 // Define the assets for icons
-const ICON_32: Asset = asset!("/assets/icons/32x32.png");
-const ICON_SOL: Asset = asset!("/assets/icons/solanaLogo.png");
-const ICON_USDC: Asset = asset!("/assets/icons/usdcLogo.png");
-const ICON_USDT: Asset = asset!("/assets/icons/usdtLogo.png");
-const ICON_JTO: Asset = asset!("/assets/icons/jtoLogo.png");
-const ICON_JUP: Asset = asset!("/assets/icons/jupLogo.png");
-const ICON_JLP: Asset = asset!("/assets/icons/jlpLogo.png");
-const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
+//const ICON_32: Asset = asset!("/assets/icons/32x32.png");
+//const ICON_SOL: Asset = asset!("/assets/icons/solanaLogo.png");
+//const ICON_USDC: Asset = asset!("/assets/icons/usdcLogo.png");
+//const ICON_USDT: Asset = asset!("/assets/icons/usdtLogo.png");
+//const ICON_JTO: Asset = asset!("/assets/icons/jtoLogo.png");
+//const ICON_JUP: Asset = asset!("/assets/icons/jupLogo.png");
+//const ICON_JLP: Asset = asset!("/assets/icons/jlpLogo.png");
+//const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
 
 // Action button SVG icons
-const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
-const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
-const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
-const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
+//const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
+//const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
+//const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
+//const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
+
+const ICON_32:     &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
+const ICON_SOL:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
+const ICON_USDC:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/usdcLogo.png";
+const ICON_USDT:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/usdtLogo.png";
+const ICON_JTO:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jtoLogo.png";
+const ICON_JUP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jupLogo.png";
+const ICON_JLP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jlpLogo.png";
+const ICON_BONK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
+const ICON_RECEIVE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/receive.svg";
+const ICON_SEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/send.svg";
+const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/stake.svg";
+const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bulk.svg";
+
 
 // JupiterToken struct with PartialEq and Eq for use_memo
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -11,6 +11,3 @@ platform-tools/
 **/*.rs.bk
 dist/android/unruggableappdev01.apks
 dist/android/unruggable-release.aab
-dist/android/unruggable-release.aab
-dist/android/unruggable-release.aab
-dist/android/unruggableappdev01.apks

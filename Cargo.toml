@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 # Core dependencies for all platforms
 #ALPHA - passing all builds & bundles + device deployment
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011",  features = ["fullstack", "router", "mobile"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011",  features = ["mobile", "router"] }
 #FFI local/custom
 #dioxus = { git = "https://github.com/hogyzen12/dioxus", rev = "120eca1", features = ["router"] }
 #STABLE - fails android
@@ -52,12 +52,26 @@ anyhow = "1.0.98"
 async-channel = "2.3.1"
 once_cell = "1.21.3"
 
+[package.metadata.cargo-apple.ios]
+frameworks = [ "WebKit" ]
+
+[package.metadata.bundle]
+name = "unruggable"             # keeps your .app path as .../unruggable.app
+identifier = "com.unruggable.app"   # ← MUST match your provisioning profile's App ID
+resources = ["assets/**/**"]
+icon = ["assets/icon.png"]
+category = "Utility"
+short_description = "unruggable"
+long_description = """
+unruggable for iphone.
+"""
+osx_frameworks = ["WebKit"]
+
 [features]
 default = ["mobile"]
 web = ["dioxus/web"]
 desktop = ["dioxus/desktop"]
 mobile = ["dioxus/mobile"]
-server = ["dioxus/server"]
 
 [profile]
 
