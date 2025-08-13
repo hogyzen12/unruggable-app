@@ -1425,6 +1425,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dialoguer"
+version = "0.10.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59c6f2989294b9a498d3ad5491a79c6deb604617378e1cdc4bfc1c1361fe2f87"
+dependencies = [
+ "console",
+ "shell-words",
+ "tempfile",
+ "zeroize",
+]
+
+[[package]]
 name = "digest"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2993,6 +3005,19 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hidapi"
+version = "2.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03b876ecf37e86b359573c16c8366bc3eba52b689884a0fc42ba3f67203d2a8b"
+dependencies = [
+ "cc",
+ "cfg-if",
+ "libc",
+ "pkg-config",
+ "windows-sys 0.48.0",
+]
 
 [[package]]
 name = "histogram"
@@ -5883,6 +5908,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "shell-words"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24188a676b6ae68c3b2cb3a01be17fbf7240ce009799bb56d5b1409051e78fde"
+
+[[package]]
 name = "shlex"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7183,6 +7214,30 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d219c657ea454d0a0f90ecb6c7ca2f62151f5b52082bb717d3c5aa5e4ea64bd0"
 dependencies = [
  "num_cpus",
+]
+
+[[package]]
+name = "solana-remote-wallet"
+version = "2.3.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fe4453541415b21c79fae84980d82854f1d6a19c13a09f6eba75aa273a7c1c0"
+dependencies = [
+ "console",
+ "dialoguer",
+ "hidapi",
+ "log",
+ "num-derive",
+ "num-traits",
+ "parking_lot",
+ "qstring",
+ "semver",
+ "solana-derivation-path",
+ "solana-offchain-message",
+ "solana-pubkey",
+ "solana-signature",
+ "solana-signer",
+ "thiserror 2.0.12",
+ "uriparse",
 ]
 
 [[package]]
@@ -8870,9 +8925,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.47.0"
+version = "1.47.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "43864ed400b6043a4757a25c7a64a8efde741aed79a056a2fb348a406701bb35"
+checksum = "89e49afdadebb872d3145a5638b59eb0691ea23e46ca484037cfab3b76b95038"
 dependencies = [
  "backtrace",
  "bytes",
@@ -9312,12 +9367,14 @@ dependencies = [
  "dioxus",
  "ed25519-dalek 2.2.0",
  "hex",
+ "hidapi",
  "image 0.24.9",
  "jni",
  "lazy_static",
  "log",
  "once_cell",
  "openssl",
+ "parking_lot",
  "qrcode",
  "rand 0.8.5",
  "reqwest",
@@ -9327,6 +9384,9 @@ dependencies = [
  "sha2 0.10.9",
  "solana-account-decoder",
  "solana-client",
+ "solana-derivation-path",
+ "solana-offchain-message",
+ "solana-remote-wallet",
  "solana-sdk",
  "solana-stake-interface",
  "spl-associated-token-account",
@@ -9940,6 +10000,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75283be5efb2831d37ea142365f009c02ec203cd29a3ebecbc093d52315b66d0"
 dependencies = [
  "windows-targets 0.42.2",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.48.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "677d2418bec65e3338edb076e806bc1ec15693c5d0104683f2efe857f61056a9"
+dependencies = [
+ "windows-targets 0.48.5",
 ]
 
 [[package]]

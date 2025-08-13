@@ -1,6 +1,6 @@
 Android will crash - use the scripts to force enviroments.
 sh scripts/android.build.sh - build for android apk cleanly
-sh scripts/android.bundle.sh&& sh scripts/android.update.sh
+sh scripts/android.bundle.sh && sh scripts/android.update.sh
 
 bundle and push to device. APK available for release as well.
 
