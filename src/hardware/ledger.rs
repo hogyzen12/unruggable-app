@@ -156,8 +156,52 @@ impl LedgerConnection {
         log::info!("🔌 Disconnected from Ledger device");
     }
 
-    /// Sign a message with the Ledger - we'll implement this later when needed
-    pub async fn sign_message(&self, _message: &[u8]) -> Result<Vec<u8>, LedgerError> {
-        Err(LedgerError("Ledger signing not yet implemented".to_string()))
+    /// Sign a message with the Ledger - implementing the real signing from main.rs
+    pub async fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, LedgerError> {
+        if self.pubkey.is_none() {
+            return Err(LedgerError("Not connected to Ledger device".to_string()));
+        }
+
+        log::info!("🔄 Attempting to sign transaction with Ledger...");
+
+        // Create fresh HID context for signing (exactly like main.rs)
+        let mut hidapi = HidApi::new()
+            .map_err(|e| LedgerError(format!("HID init error: {}", e)))?;
+
+        hidapi.refresh_devices()
+            .map_err(|e| LedgerError(format!("HID refresh failed: {}", e)))?;
+
+        // Check for Ledger presence
+        if !hidapi.device_list().any(|d| d.vendor_id() == 0x2c97) {
+            return Err(LedgerError(
+                "No Ledger at HID layer. Unlock device, open Solana app, quit Ledger Live.".to_string()
+            ));
+        }
+
+        // Create RemoteWalletManager for signing
+        let usb = Arc::new(Mutex::new(hidapi));
+        let manager: Rc<RemoteWalletManager> = RemoteWalletManager::new(usb);
+        let _ = manager.try_connect_polling(&Duration::from_secs(3));
+
+        let devices = manager.list_devices();
+        if devices.is_empty() {
+            return Err(LedgerError(
+                "Ledger visible but no remote wallet. Ensure Solana app is open and ready.".to_string()
+            ));
+        }
+
+        let dev = &devices[0];
+        let ledger = manager.get_ledger(&dev.host_device_path)
+            .map_err(|e| LedgerError(format!("Ledger connection error: {}", e)))?;
+
+        // Sign the message using the Ledger (exactly like main.rs)
+        let path = DerivationPath::new_bip44(Some(0), Some(0));
+        let signature = ledger.sign_message(&path, message)
+            .map_err(|e| LedgerError(format!("Ledger sign error: {}", e)))?;
+
+        log::info!("✅ Successfully signed transaction with Ledger");
+
+        // Return the signature as bytes
+        Ok(signature.as_ref().to_vec())
     }
 }

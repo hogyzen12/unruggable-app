@@ -13,6 +13,7 @@ use protocol::{Command, Response};
 use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use async_trait::async_trait;
 
 // Add these new types for future Ledger support
 #[derive(Debug, Clone, PartialEq)]
@@ -310,7 +311,7 @@ impl HardwareWallet {
         }
     }
 
-    /// Sign a message with the connected device (simplified - ESP32 only for now)
+    /// Sign a message with the connected device (enhanced - supports both devices)
     pub async fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
         let device_type = self.device_type.lock().await.clone();
         
@@ -324,8 +325,20 @@ impl HardwareWallet {
                 }
             }
             Some(HardwareDeviceType::Ledger) => {
-                // For now, just return an error - we'll implement this later
-                Err("Ledger signing not yet implemented".into())
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                {
+                    let ledger_guard = self.ledger_connection.lock().await;
+                    match ledger_guard.as_ref() {
+                        Some(connection) => {
+                            connection.sign_message(message).await.map_err(|e| e.into())
+                        }
+                        None => Err("Ledger not connected".into()),
+                    }
+                }
+                #[cfg(any(target_os = "android", target_os = "ios"))]
+                {
+                    Err("Ledger signing not available on mobile platforms".into())
+                }
             }
             None => Err("No hardware wallet connected".into()),
         }
