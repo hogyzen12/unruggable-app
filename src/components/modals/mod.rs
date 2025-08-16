@@ -9,6 +9,7 @@ pub mod stake_modal;
 pub mod background_modal;
 pub mod currency_modal;
 pub mod bulk_send_modal;
+pub mod swap_modal;
 
 pub use wallet_modal::WalletModal;
 pub use rpc_modal::RpcModal;
@@ -21,3 +22,4 @@ pub use stake_modal::StakeModal;
 pub use background_modal::BackgroundModal;
 pub use currency_modal::CurrencyModal;
 pub use bulk_send_modal::BulkSendModal;
+pub use swap_modal::SwapModal;

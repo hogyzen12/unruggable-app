@@ -2,7 +2,8 @@
 export APP_DEV_NAME=$(xcrun security find-identity -v -p codesigning | grep "Apple Development: " | sed -E 's/.*"([^"]+)".*/\1/')
 
 # Find the provisioning profile from ~/Library/MobileDevice/Provisioning\ Profiles
-export PROVISION_FILE=$(ls ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles | grep mobileprovision)
+#export PROVISION_FILE=$(ls ~/Library/Developer/Xcode/UserData/Provisioning\ Profiles | grep mobileprovision)
+export PROVISION_FILE="c1432e8e-1969-4fc8-b556-2e4dda9aaf32.mobileprovision"
 
 # Convert the provisioning profile to json so we can use jq to extract the important bits
 security cms -D \

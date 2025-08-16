@@ -1,0 +1,280 @@
+/* SWAP MODAL - BUILT FROM SCRATCH - UNIQUE CLASSES */
+
+/* Main swap modal container */
+.swap-modal {
+    max-width: 380px;
+    background-color: #1a1a1a;
+    border-radius: 16px;
+    padding: 20px;
+    width: 92%;
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+/* Trading section container (Selling/Buying) */
+.swap-trading-section {
+    background-color: #0f1419;
+    border-radius: 12px;
+    border: 1px solid #2a2a2a;
+    margin-bottom: 12px;
+    padding: 16px;
+}
+
+/* Header area with title and balance info */
+.swap-trading-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.swap-trading-title {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.swap-trading-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.swap-currency-symbol {
+    color: #9ca3af;
+    font-size: 12px;
+}
+
+.swap-balance-text {
+    color: #9ca3af;
+    font-size: 11px;
+}
+
+/* THE MAIN ROW - CRITICAL INLINE LAYOUT FIX */
+.swap-trading-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    min-height: 40px;
+    gap: 16px;
+}
+
+/* LEFT SIDE: Token icon + dropdown - FIXED POSITIONING */
+.swap-token-side {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    min-width: 120px;
+}
+
+.swap-token-image {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+}
+
+.swap-token-picker {
+    background: transparent;
+    border: none;
+    color: #ffffff;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    outline: none;
+    appearance: none;
+    padding: 4px 20px 4px 4px;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 4px center;
+    background-repeat: no-repeat;
+    background-size: 12px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    min-width: 60px;
+    height: 32px;
+    line-height: 32px;
+}
+
+.swap-token-picker option {
+    background-color: #1a1a1a;
+    color: white;
+}
+
+/* RIGHT SIDE: Amount input + USD value - FIXED ALIGNMENT */
+.swap-amount-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: center;
+    flex: 1;
+    text-align: right;
+    min-height: 40px;
+}
+
+.swap-amount-field {
+    background: transparent;
+    border: none;
+    color: #ffffff;
+    font-size: 24px;
+    font-weight: 700;
+    text-align: right;
+    width: 100%;
+    outline: none;
+    padding: 0;
+    margin: 0;
+    -webkit-appearance: none;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.2;
+    height: 28px;
+}
+
+.swap-amount-field::placeholder {
+    color: #6b7280;
+    font-weight: 600;
+}
+
+.swap-amount-readonly {
+    color: #9ca3af !important;
+    cursor: not-allowed;
+}
+
+.swap-amount-usd {
+    color: #9ca3af;
+    font-size: 12px;
+    text-align: right;
+    margin-top: 2px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    line-height: 1;
+}
+
+/* Swap direction arrow button */
+.swap-arrow-container {
+    display: flex;
+    justify-content: center;
+    margin: 8px 0;
+    position: relative;
+    z-index: 10;
+}
+
+.swap-arrow-button {
+    background-color: #374151;
+    border: 2px solid #4b5563;
+    border-radius: 50%;
+    width: 44px;
+    height: 44px;
+    color: #ffffff;
+    font-size: 18px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.swap-arrow-button:hover,
+.swap-arrow-button:active {
+    background-color: #4b5563;
+    border-color: #6b7280;
+    transform: rotate(180deg);
+}
+
+/* Rate and fee information */
+.swap-rate-section {
+    background-color: #0f1419;
+    border-radius: 8px;
+    border: 1px solid #2a2a2a;
+    padding: 12px 16px;
+    margin-bottom: 24px;
+}
+
+.swap-rate-row {
+    color: #9ca3af;
+    font-size: 14px;
+    margin-bottom: 4px;
+}
+
+.swap-rate-row:last-child {
+    margin-bottom: 0;
+}
+
+/* Modal buttons */
+.modal-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.modal-button {
+    flex: 1;
+    padding: 16px 24px;
+    border-radius: 12px;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.modal-button.secondary {
+    background-color: #dc2626;
+    color: white;
+}
+
+.modal-button.secondary:hover {
+    background-color: #b91c1c;
+}
+
+.modal-button.primary {
+    background-color: #6366f1;
+    color: white;
+}
+
+.modal-button.primary:hover:not(:disabled) {
+    background-color: #5046e5;
+}
+
+.modal-button.primary:disabled {
+    background-color: #374151;
+    color: #9ca3af;
+    cursor: not-allowed;
+}
+
+/* Error messages */
+.error-message {
+    padding: 12px;
+    background-color: #7f1d1d;
+    border: 1px solid #dc2626;
+    color: #fca5a5;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-size: 14px;
+}
+
+/* iPhone responsive design */
+@media (max-width: 480px) {
+    .swap-modal {
+        width: 95%;
+        padding: 18px;
+        margin: 8px;
+    }
+    
+    .swap-trading-row {
+        gap: 12px;
+    }
+    
+    .swap-amount-field {
+        font-size: 24px;
+    }
+    
+    .modal-buttons {
+        flex-direction: column;
+        gap: 12px;
+    }
+}

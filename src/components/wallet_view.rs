@@ -27,7 +27,7 @@ use crate::currency_utils::{
     get_current_currency_code
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
@@ -282,6 +282,8 @@ pub fn WalletView() -> Element {
     let mut bulk_send_mode = use_signal(|| false);
     let mut selected_tokens = use_signal(|| HashSet::<String>::new()); // Using mint addresses as keys
     let mut show_bulk_send_modal = use_signal(|| false);
+
+    let mut show_swap_modal = use_signal(|| false);
 
     fn get_token_price_change(
         symbol: &str, 
@@ -1131,6 +1133,45 @@ pub fn WalletView() -> Element {
                     },
                 }
             }
+
+            if show_bulk_send_modal() {
+                BulkSendModal {
+                    selected_token_mints: selected_tokens(),
+                    all_tokens: tokens(),
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    current_balance: balance(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| {
+                        show_bulk_send_modal.set(false);
+                        bulk_send_mode.set(false);
+                        selected_tokens.set(HashSet::new());
+                    },
+                    onsuccess: move |signature| {
+                        show_bulk_send_modal.set(false);
+                        bulk_send_mode.set(false);
+                        selected_tokens.set(HashSet::new());
+                        println!("Bulk send transaction successful: {}", signature);
+                        
+                        // Refresh balances after successful transaction
+                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
+                            let address = wallet.address.clone();
+                            let rpc_url = custom_rpc();
+                            
+                            spawn(async move {
+                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
+                                    Ok(sol_balance) => {
+                                        balance.set(sol_balance);
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to refresh balance after bulk send: {}", e);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
             
             if show_receive_modal() {
                 ReceiveModal {
@@ -1171,6 +1212,22 @@ pub fn WalletView() -> Element {
                 }
             }
 
+            if show_swap_modal() {
+                SwapModal {
+                    tokens: tokens(),  // Use tokens() instead of filtered_tokens
+                    wallet: current_wallet.clone(),  // Use current_wallet instead of current_wallet_opt()
+                    hardware_wallet: hardware_wallet(),  // Use hardware_wallet() to get the value
+                    current_balance: balance(),  // Use balance() instead of sol_balance()
+                    custom_rpc: custom_rpc(),  // Use custom_rpc() instead of custom_rpc_url()
+                    onclose: move |_| show_swap_modal.set(false),
+                    onsuccess: move |signature| {
+                        show_swap_modal.set(false);
+                        // You can add success handling here if needed
+                        println!("Swap successful: {}", signature);
+                    }
+                }
+            }
+
             if show_background_modal() {
                 BackgroundModal {
                     current_background: selected_background(),
@@ -1187,46 +1244,7 @@ pub fn WalletView() -> Element {
                     onclose: move |_| show_currency_modal.set(false)
                 }
             }
-
-            if show_bulk_send_modal() {
-                BulkSendModal {
-                    selected_token_mints: selected_tokens(),
-                    all_tokens: tokens(),
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    current_balance: balance(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| {
-                        show_bulk_send_modal.set(false);
-                        bulk_send_mode.set(false);
-                        selected_tokens.set(HashSet::new());
-                    },
-                    onsuccess: move |signature| {
-                        show_bulk_send_modal.set(false);
-                        bulk_send_mode.set(false);
-                        selected_tokens.set(HashSet::new());
-                        println!("Bulk send transaction successful: {}", signature);
-                        
-                        // Refresh balances after successful transaction
-                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
-                            let address = wallet.address.clone();
-                            let rpc_url = custom_rpc();
-                            
-                            spawn(async move {
-                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                    Ok(sol_balance) => {
-                                        balance.set(sol_balance);
-                                    }
-                                    Err(e) => {
-                                        println!("Failed to refresh balance after bulk send: {}", e);
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-                        
+                                    
             // Main content container for balance, address, and actions
             div {
                 class: "main-content",
@@ -1293,15 +1311,6 @@ pub fn WalletView() -> Element {
                             }
                         }
                     }
-                    // SOL balance row - clean and simple, no USD value
-                    //div {
-                    //    class: "balance-sol-row",
-                    //    span {
-                    //        class: "balance-sol",
-                    //        "{balance:.4} SOL"
-                    //    }
-                    //}
-                    // Display price refresh error if any
                     if let Some(error) = price_error() {
                         div {
                             class: "price-error",
@@ -1327,40 +1336,6 @@ pub fn WalletView() -> Element {
                         span {
                             class: "action-label",
                             "Receive"
-                        }
-                    }
-                    button {
-                        class: "action-button",
-                        onclick: move |_| show_send_modal.set(true),
-                        div {
-                            class: "action-icon",
-                            img {
-                                src: "{ICON_SEND}",
-                                alt: "Send",
-                                width: "24",
-                                height: "24",
-                            }
-                        }
-                        span {
-                            class: "action-label",
-                            "Send"
-                        }
-                    }
-                    button {
-                        class: "action-button",
-                        onclick: move |_| show_stake_modal.set(true),
-                        div {
-                            class: "action-icon",
-                            img {
-                                src: "{ICON_STAKE}",
-                                alt: "Stake",
-                                width: "24",
-                                height: "24",
-                            }
-                        }
-                        span {
-                            class: "action-label",
-                            "Stake"
                         }
                     }
                     button {
@@ -1401,15 +1376,53 @@ pub fn WalletView() -> Element {
                             }
                         }
                     }
+                    button {
+                        class: "action-button",
+                        onclick: move |_| show_stake_modal.set(true),
+                        div {
+                            class: "action-icon",
+                            img {
+                                src: "{ICON_STAKE}",
+                                alt: "Stake",
+                                width: "24",
+                                height: "24",
+                            }
+                        }
+                        span {
+                            class: "action-label",
+                            "Stake"
+                        }
+                    }                    
+                    button {
+                        class: "action-button",
+                        onclick: move |_| {
+                            println!("🔄 Swap button clicked!"); // Add logging for debugging
+                            show_swap_modal.set(true);
+                        },
+                        div {
+                            class: "action-icon",
+                            "🔄"
+                        }
+                        span {
+                            class: "action-label",
+                            "Swap"
+                        }
+                    }
                     //button {
                     //    class: "action-button",
+                    //    onclick: move |_| show_send_modal.set(true),
                     //    div {
                     //        class: "action-icon",
-                    //        "🔄"
+                    //        img {
+                    //            src: "{ICON_SEND}",
+                    //            alt: "Send",
+                    //            width: "24",
+                    //            height: "24",
+                    //        }
                     //    }
                     //    span {
                     //        class: "action-label",
-                    //        "Swap"
+                    //        "Send"
                     //    }
                     //}
                     //button {
