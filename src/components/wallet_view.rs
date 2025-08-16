@@ -1217,7 +1217,7 @@ pub fn WalletView() -> Element {
                     tokens: tokens(),  // Use tokens() instead of filtered_tokens
                     wallet: current_wallet.clone(),  // Use current_wallet instead of current_wallet_opt()
                     hardware_wallet: hardware_wallet(),  // Use hardware_wallet() to get the value
-                    current_balance: balance(),  // Use balance() instead of sol_balance()
+                    //current_balance: balance(),  // Use balance() instead of sol_balance()
                     custom_rpc: custom_rpc(),  // Use custom_rpc() instead of custom_rpc_url()
                     onclose: move |_| show_swap_modal.set(false),
                     onsuccess: move |signature| {
