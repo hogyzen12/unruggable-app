@@ -3858,14 +3858,6 @@ body:has(.token-item-selected) .token-item:hover {
     background: #6b7280;
 }
 
-/* Portfolio change styling */
-.portfolio-change-row {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    margin-top: 8px;
-}
-
 .portfolio-change {
     font-size: 16px;
     padding: 4px 12px;
@@ -4253,4 +4245,370 @@ body:has(.token-item-selected) .token-item:hover {
 .swap-modal .swap-token-dropdown:focus {
     outline: none !important;
     color: #a5f3fc !important;
+}
+
+/* CSS for the expandable price changes feature */
+
+.token-price-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.token-price-container:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.token-price {
+    font-size: 12px;
+    font-weight: 500;
+    color: #666;
+}
+
+.price-expand-indicator {
+    font-size: 8px;
+    color: #888;
+    transition: transform 0.2s ease;
+    user-select: none;
+}
+
+.token-changes-expanded {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+    padding: 4px 0;
+    animation: slideDown 0.2s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        transform: translateY(-5px);
+    }
+    to {
+        opacity: 1;
+        max-height: 50px;
+        transform: translateY(0);
+    }
+}
+
+.token-change {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 3px 6px;
+    border-radius: 4px;
+    line-height: 1;
+    min-width: fit-content;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.token-change.positive {
+    background-color: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+}
+
+.token-change.negative {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.token-change:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure the token price info section has proper layout */
+.token-price-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .token-price-container:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .token-price {
+        color: #a1a1aa;
+    }
+
+    .price-expand-indicator {
+        color: #6b7280;
+    }
+
+    .token-change.positive {
+        background-color: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .token-change.negative {
+        background-color: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+}
+
+/* Make sure stablecoins don't show cursor pointer when they can't expand */
+.token-item .token-price-container:has(.price-expand-indicator) {
+    cursor: pointer;
+}
+
+.token-item .token-price-container:not(:has(.price-expand-indicator)) {
+    cursor: default;
+}
+
+/* CSS for Portfolio Multi-Timeframe Changes */
+
+.portfolio-change-section {
+    margin-top: 8px;
+}
+
+.portfolio-change-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 6px;
+    transition: background-color 0.2s ease;
+}
+
+.portfolio-change-container:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.portfolio-expand-indicator {
+    font-size: 10px;
+    color: #888;
+    transition: transform 0.2s ease;
+    user-select: none;
+    opacity: 0.7;
+}
+
+.portfolio-changes-expanded {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 8px;
+    padding: 8px 0;
+    animation: slideDown 0.2s ease-out;
+}
+
+.portfolio-change-detail {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 6px;
+    line-height: 1;
+    min-width: fit-content;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.portfolio-change-detail.positive {
+    background-color: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.4);
+}
+
+.portfolio-change-detail.negative {
+    background-color: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.4);
+}
+
+.portfolio-change-detail.neutral {
+    background-color: rgba(156, 163, 175, 0.2);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.4);
+}
+
+.portfolio-change-detail:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+/* Existing portfolio-change styles (keep these for the main display) */
+.portfolio-change.positive {
+    background-color: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.portfolio-change.negative {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.portfolio-change.neutral {
+    background-color: rgba(156, 163, 175, 0.15);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.3);
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .portfolio-change-container:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .portfolio-expand-indicator {
+        color: #6b7280;
+    }
+
+    .portfolio-change-detail.positive {
+        background-color: rgba(34, 197, 94, 0.25);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.5);
+    }
+
+    .portfolio-change-detail.negative {
+        background-color: rgba(239, 68, 68, 0.25);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.5);
+    }
+
+    .portfolio-change-detail.neutral {
+        background-color: rgba(156, 163, 175, 0.25);
+        color: #d1d5db;
+        border: 1px solid rgba(156, 163, 175, 0.5);
+    }
+
+    .portfolio-change.positive {
+        background-color: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .portfolio-change.negative {
+        background-color: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .portfolio-change.neutral {
+        background-color: rgba(156, 163, 175, 0.2);
+        color: #d1d5db;
+        border: 1px solid rgba(156, 163, 175, 0.4);
+    }
+}
+
+/* Animation for the expanded section */
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        max-height: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        max-height: 80px;
+        transform: translateY(0);
+    }
+}
+
+/* CSS for Portfolio Multi-Timeframe Changes - Reusing Token Styles */
+
+.portfolio-change-row {
+    display: flex;
+    justify-content: center;
+    margin-top: 4px;
+}
+
+.portfolio-price-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: background-color 0.2s ease;
+}
+
+.portfolio-price-container:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+/* Existing portfolio-change styles (keep these for the main display) */
+.portfolio-change.positive {
+    background-color: rgba(34, 197, 94, 0.15);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.3);
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.portfolio-change.negative {
+    background-color: rgba(239, 68, 68, 0.15);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.portfolio-change.neutral {
+    background-color: rgba(156, 163, 175, 0.15);
+    color: #9ca3af;
+    border: 1px solid rgba(156, 163, 175, 0.3);
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+    .portfolio-price-container:hover {
+        background-color: rgba(255, 255, 255, 0.05);
+    }
+
+    .portfolio-change.positive {
+        background-color: rgba(34, 197, 94, 0.2);
+        color: #4ade80;
+        border: 1px solid rgba(34, 197, 94, 0.4);
+    }
+
+    .portfolio-change.negative {
+        background-color: rgba(239, 68, 68, 0.2);
+        color: #f87171;
+        border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    .portfolio-change.neutral {
+        background-color: rgba(156, 163, 175, 0.2);
+        color: #d1d5db;
+        border: 1px solid rgba(156, 163, 175, 0.4);
+    }
 }

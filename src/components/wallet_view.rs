@@ -82,7 +82,6 @@ struct JupiterToken {
     tags: Vec<String>,
 }
 
-// Helper function to fetch token prices from the Pyth Network
 async fn fetch_token_prices(
     mut token_prices: Signal<HashMap<String, f64>>,
     mut prices_loading: Signal<bool>,
@@ -90,42 +89,58 @@ async fn fetch_token_prices(
     mut sol_price: Signal<f64>,
     mut daily_change: Signal<f64>,
     mut daily_change_percent: Signal<f64>,
+    mut token_changes: Signal<HashMap<String, (Option<f64>, Option<f64>)>>,
+    mut multi_timeframe_data: Signal<HashMap<String, prices::MultiTimeframePriceData>>, // NEW: Add this
 ) {
     prices_loading.set(true);
     price_error.set(None);
 
-    // Call the prices module to fetch current prices
-    match prices::get_prices().await {
-        Ok(prices) => {
-            // Update token prices
-            token_prices.set(prices.clone());
+    // Use the new cached function
+    match prices::get_cached_prices_and_changes().await {
+        Ok((current_prices, multi_data)) => {
+            println!("✅ Got prices and multi-timeframe data");
+            
+            // Set the multi-timeframe data signal
+            multi_timeframe_data.set(multi_data.clone());
+            
+            // Convert to old format for backward compatibility
+            let mut old_format_changes = HashMap::new();
+            for (token, data) in &multi_data {
+                old_format_changes.insert(token.clone(), (data.change_1d_amount, data.change_1d_percentage));
+                
+                // Print all timeframes for debugging
+                println!("📊 {}: 1D={:+.1}%, 3D={:+.1}%, 7D={:+.1}%", 
+                         token,
+                         data.change_1d_percentage.unwrap_or(0.0),
+                         data.change_3d_percentage.unwrap_or(0.0),
+                         data.change_7d_percentage.unwrap_or(0.0));
+            }
+            
+            // Set both signals
+            token_changes.set(old_format_changes);
+            token_prices.set(current_prices.clone());
 
-            // Update SOL price and calculate change values
-            if let Some(new_sol_price) = prices.get("SOL") {
-                // Calculate absolute change - comparing to the previous price
+            // Update SOL price
+            if let Some(new_sol_price) = current_prices.get("SOL") {
                 let old_price = sol_price();
                 let price_diff = new_sol_price - old_price;
                 
-                // Only update change values if we have a previous price (not first load)
                 if old_price > 0.0 {
                     daily_change.set(price_diff);
                     daily_change_percent.set((price_diff / old_price) * 100.0);
                 } else {
-                    // Default to 1% change for first load
-                    daily_change.set(new_sol_price * 0.01);
-                    daily_change_percent.set(1.0);
+                    daily_change.set(0.0);
+                    daily_change_percent.set(0.0);
                 }
                 
-                // Update SOL price value
                 sol_price.set(*new_sol_price);
             }
             
-            println!("Successfully updated token prices: {:?}", prices);
+            println!("✅ Successfully updated all price data with cache");
         },
         Err(e) => {
-            // Handle error without crashing the app
             price_error.set(Some(format!("Failed to fetch prices: {}", e)));
-            println!("Error fetching token prices: {}", e);
+            println!("❌ Error fetching prices: {}", e);
         }
     }
     
@@ -225,6 +240,7 @@ pub fn WalletView() -> Element {
     let mut show_receive_modal = use_signal(|| false);
     let mut show_history_modal = use_signal(|| false);
     let mut show_stake_modal = use_signal(|| false);
+    let mut show_swap_modal = use_signal(|| false);
 
     // Hardware wallet state
     let mut hardware_wallet = use_signal(|| None as Option<Arc<HardwareWallet>>);
@@ -283,33 +299,9 @@ pub fn WalletView() -> Element {
     let mut selected_tokens = use_signal(|| HashSet::<String>::new()); // Using mint addresses as keys
     let mut show_bulk_send_modal = use_signal(|| false);
 
-    let mut show_swap_modal = use_signal(|| false);
-
-    fn get_token_price_change(
-        symbol: &str, 
-        changes_map: &HashMap<String, (Option<f64>, Option<f64>)>
-    ) -> f64 {
-        // Try exact match first
-        if let Some((_, Some(percentage))) = changes_map.get(symbol) {
-            return *percentage;
-        }
-        
-        // Try uppercase
-        let uppercase = symbol.to_uppercase();
-        if let Some((_, Some(percentage))) = changes_map.get(&uppercase) {
-            return *percentage;
-        }
-        
-        // Try lowercase
-        let lowercase = symbol.to_lowercase();
-        if let Some((_, Some(percentage))) = changes_map.get(&lowercase) {
-            return *percentage;
-        }
-        
-        // No match found, generate random between 0.0 and 7.0
-        let mut rng = thread_rng();
-        rng.gen_range(0.0..7.0)
-    }
+    let mut multi_timeframe_data = use_signal(|| HashMap::<String, prices::MultiTimeframePriceData>::new());
+    let mut expanded_tokens = use_signal(|| HashSet::<String>::new());
+    let mut portfolio_expanded = use_signal(|| false);
 
     // Load wallets from storage on component mount
     use_effect(move || {
@@ -341,21 +333,6 @@ pub fn WalletView() -> Element {
             }
         });
     });
-
-    // Create a separate effect for fetching historical data less frequently
-    use_effect(move || {
-        spawn(async move {
-            // Initial fetch of historical changes
-            fetch_historical_changes(token_prices, token_changes).await;
-            
-            // Then fetch every 15 minutes (much less frequent than current prices)
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(900)).await;
-                fetch_historical_changes(token_prices, token_changes).await;
-            }
-        });
-    });
-
     
     async fn fetch_historical_changes(
         token_prices: Signal<HashMap<String, f64>>,
@@ -379,19 +356,74 @@ pub fn WalletView() -> Element {
         }
     }
 
-    // Fetch token prices periodically
+    fn get_token_price_change(
+        symbol: &str, 
+        changes_map: &HashMap<String, (Option<f64>, Option<f64>)>
+    ) -> f64 {
+        println!("Looking up price change for {}", symbol);
+        println!("Available tokens in changes_map: {:?}", changes_map.keys().collect::<Vec<_>>());
+        
+        // Try exact match first - get the PERCENTAGE (second value in tuple)
+        if let Some((_, Some(percentage))) = changes_map.get(symbol) {
+            println!("✅ Found exact match for {}: {:.4}%", symbol, percentage);
+            return *percentage;
+        }
+        
+        // Try uppercase
+        let uppercase = symbol.to_uppercase();
+        if let Some((_, Some(percentage))) = changes_map.get(&uppercase) {
+            println!("✅ Found uppercase match for {}: {:.4}%", symbol, percentage);
+            return *percentage;
+        }
+        
+        // Try lowercase
+        let lowercase = symbol.to_lowercase();
+        if let Some((_, Some(percentage))) = changes_map.get(&lowercase) {
+            println!("✅ Found lowercase match for {}: {:.4}%", symbol, percentage);
+            return *percentage;
+        }
+        
+        // Check if we have the data but it's None
+        if changes_map.contains_key(symbol) {
+            println!("❌ {} found in map but percentage is None", symbol);
+            return 0.0; // Return 0% instead of random
+        }
+        
+        println!("❌ {} not found in changes_map at all", symbol);
+        
+        // Instead of random values, return 0.0 and log the issue
+        // This will make it obvious when historical data is missing
+        0.0
+    }
+
     use_effect(move || {
         spawn(async move {
             // Initial fetch
-            fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent).await;
+            fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent, token_changes, multi_timeframe_data).await;
             
             // Then fetch every 2 minutes (120 seconds)
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-                fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent).await;
+                fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent, token_changes, multi_timeframe_data).await;
             }
         });
     });
+
+    // 5. Helper function to extract multi-timeframe data
+    fn get_multi_timeframe_changes(
+        symbol: &str,
+        multi_data: &HashMap<String, prices::MultiTimeframePriceData>
+    ) -> (f64, f64, f64) {
+        if let Some(data) = multi_data.get(symbol) {
+            (
+                data.change_1d_percentage.unwrap_or(0.0),
+                data.change_3d_percentage.unwrap_or(0.0),
+                data.change_7d_percentage.unwrap_or(0.0)
+            )
+        } else {
+            (0.0, 0.0, 0.0)
+        }
+    }
 
     // Fetch balance and token accounts when wallet changes or hardware wallet connects
     use_effect(move || {
@@ -479,24 +511,14 @@ pub fn WalletView() -> Element {
                                     }
                                 });
                             
-                                let symbol = metadata.symbol.as_str();
-                                println!("PRICE DEBUG: Looking up price change for {}", symbol);
-                                println!("PRICE DEBUG: token_changes_snapshot keys: {:?}", token_changes_snapshot.keys().collect::<Vec<_>>());
-                                let price_change = get_token_price_change(symbol, &token_changes_snapshot);
-                                println!("PRICE DEBUG: Got price change for {}: {}", symbol, price_change);
-                                
-                                // Use this price_change variable here
-                                let value_usd = account.amount * price;
-                                let icon_type = match metadata.symbol.as_str() {
-                                    "USDC" => ICON_USDC.to_string(),
-                                    "USDT" => ICON_USDT.to_string(),
-                                    "JTO" => ICON_JTO.to_string(),
-                                    "JUP" => ICON_JUP.to_string(),
-                                    "JLP" => ICON_JLP.to_string(),
-                                    "BONK" => ICON_BONK.to_string(),
-                                    _ => ICON_32.to_string(),
-                                };
-                                
+                            let symbol = metadata.symbol.as_str();
+                            
+                            // Get multi-timeframe changes
+                            let multi_data_snapshot = multi_timeframe_data.read().clone();
+                            let (change_1d, change_3d, change_7d) = get_multi_timeframe_changes(symbol, &multi_data_snapshot);
+                            
+                            println!("Creating token {}: 1D={:.1}%, 3D={:.1}%, 7D={:.1}%", symbol, change_1d, change_3d, change_7d);
+                            
                             let value_usd = account.amount * price;
                             let icon_type = match metadata.symbol.as_str() {
                                 "USDC" => ICON_USDC.to_string(),
@@ -516,18 +538,20 @@ pub fn WalletView() -> Element {
                                 balance: account.amount,
                                 value_usd,
                                 price,
-                                price_change,
+                                price_change: change_1d,  // Keep for backward compatibility
+                                price_change_1d: change_1d,
+                                price_change_3d: change_3d,
+                                price_change_7d: change_7d,
                             }
                         })
                         .collect::<Vec<Token>>();
-                    
-                    println!("Processed tokens for address {}: {:?}", address, new_tokens);
-                    
+
                     // Get the most recent SOL price
                     let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
-                    
-                    // Get SOL percentage change from historical data                    
-                    let sol_price_change = get_token_price_change("SOL", &token_changes_snapshot);
+
+                    // Get multi-timeframe changes  
+                    let multi_data_snapshot = multi_timeframe_data.read().clone();
+                    let (sol_change_1d, sol_change_3d, sol_change_7d) = get_multi_timeframe_changes("SOL", &multi_data_snapshot);
 
                     let mut all_tokens = vec![Token {
                         mint: "So11111111111111111111111111111111111111112".to_string(),
@@ -537,7 +561,10 @@ pub fn WalletView() -> Element {
                         balance: balance(),
                         value_usd: balance() * current_sol_price,
                         price: current_sol_price,
-                        price_change: sol_price_change,
+                        price_change: sol_change_1d,  // Keep for backward compatibility
+                        price_change_1d: sol_change_1d,
+                        price_change_3d: sol_change_3d,
+                        price_change_7d: sol_change_7d,
                     }];
                     all_tokens.extend(new_tokens);
                     
@@ -549,10 +576,9 @@ pub fn WalletView() -> Element {
                     // Get the most recent SOL price
                     let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
                     
-                    // Get SOL percentage change from historical data (if available)
-                    let token_changes_snapshot = token_changes.read().clone();
-                    // Get SOL percentage change from historical data
-                    let sol_price_change = get_token_price_change("SOL", &token_changes_snapshot);
+                    // Get multi-timeframe changes
+                    let multi_data_snapshot = multi_timeframe_data.read().clone();
+                    let (sol_change_1d, sol_change_3d, sol_change_7d) = get_multi_timeframe_changes("SOL", &multi_data_snapshot);
                     
                     tokens.set(vec![Token {
                         mint: "So11111111111111111111111111111111111111112".to_string(),
@@ -562,7 +588,10 @@ pub fn WalletView() -> Element {
                         balance: balance(),
                         value_usd: balance() * current_sol_price,
                         price: current_sol_price,
-                        price_change: sol_price_change,
+                        price_change: sol_change_1d,
+                        price_change_1d: sol_change_1d,
+                        price_change_3d: sol_change_3d,
+                        price_change_7d: sol_change_7d,
                     }]);
                 }
             }
@@ -1263,54 +1292,205 @@ pub fn WalletView() -> Element {
                             }
                         }
                     }
-                    // ADD THIS: Portfolio % change section
+                    
+                    // Portfolio % change section with expandable multi-timeframe (just like tokens)
                     if !prices_loading() {
                         div {
                             class: "portfolio-change-row",
-                            span {
-                                class: {
-                                    // Calculate weighted average % change for portfolio
-                                    let tokens_list = tokens.read();
-                                    let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                    
-                                    if total_value > 0.0 {
-                                        let weighted_change = tokens_list.iter().fold(0.0, |acc, token| {
-                                            let weight = token.value_usd / total_value;
-                                            acc + (token.price_change * weight)
-                                        });
-                                        
-                                        if weighted_change >= 0.0 {
-                                            "portfolio-change positive"
-                                        } else {
-                                            "portfolio-change negative"
-                                        }
-                                    } else {
-                                        "portfolio-change neutral"
-                                    }
+                            // Clickable container for expansion (same style as token prices)
+                            div {
+                                class: "portfolio-price-container",
+                                onclick: move |_| {
+                                    portfolio_expanded.set(!portfolio_expanded());
                                 },
-                                {
-                                    // Calculate and display the weighted average % change
-                                    let tokens_list = tokens.read();
-                                    let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                    
-                                    if total_value > 0.0 {
-                                        let weighted_change = tokens_list.iter().fold(0.0, |acc, token| {
-                                            let weight = token.value_usd / total_value;
-                                            acc + (token.price_change * weight)
-                                        });
+                                
+                                // Default 1D change display
+                                span {
+                                    class: {
+                                        // Calculate weighted average % change for portfolio (1D)
+                                        let tokens_list = tokens.read();
+                                        let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
                                         
-                                        if weighted_change >= 0.0 {
-                                            format!("+{:.1}%", weighted_change)
+                                        if total_value > 0.0 {
+                                            let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                let weight = token.value_usd / total_value;
+                                                acc + (token.price_change_1d * weight)
+                                            });
+                                            
+                                            if weighted_change_1d >= 0.0 {
+                                                "portfolio-change positive"
+                                            } else {
+                                                "portfolio-change negative"
+                                            }
                                         } else {
-                                            format!("{:.1}%", weighted_change)
+                                            "portfolio-change neutral"
                                         }
+                                    },
+                                    {
+                                        // Calculate and display the weighted average % change (1D)
+                                        let tokens_list = tokens.read();
+                                        let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                        
+                                        if total_value > 0.0 {
+                                            let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                let weight = token.value_usd / total_value;
+                                                acc + (token.price_change_1d * weight)
+                                            });
+                                            
+                                            if weighted_change_1d >= 0.0 {
+                                                format!("+{}%", weighted_change_1d.round() as i32)
+                                            } else {
+                                                format!("{}%", weighted_change_1d.round() as i32)
+                                            }
+                                        } else {
+                                            "0%".to_string()
+                                        }
+                                    }
+                                }
+                                
+                                // Expand indicator (same as tokens)
+                                span {
+                                    class: "price-expand-indicator",
+                                    if portfolio_expanded() {
+                                        "▼"
                                     } else {
-                                        "0.0%".to_string()
+                                        "▶"
+                                    }
+                                }
+                            }
+                            
+                            // Expandable multi-timeframe portfolio changes (same style as tokens)
+                            if portfolio_expanded() {
+                                div {
+                                    class: "token-changes-expanded",
+                                    span {
+                                        class: {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_1d * weight)
+                                                });
+                                                
+                                                if weighted_change_1d >= 0.0 {
+                                                    "token-change positive"
+                                                } else {
+                                                    "token-change negative"
+                                                }
+                                            } else {
+                                                "token-change neutral"
+                                            }
+                                        },
+                                        title: "1 Day Portfolio Change",
+                                        {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_1d * weight)
+                                                });
+                                                
+                                                if weighted_change_1d >= 0.0 {
+                                                    format!("1D: +{}%", weighted_change_1d.round() as i32)
+                                                } else {
+                                                    format!("1D: {}%", weighted_change_1d.round() as i32)
+                                                }
+                                            } else {
+                                                "1D: 0%".to_string()
+                                            }
+                                        }
+                                    }
+                                    span {
+                                        class: {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_3d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_3d * weight)
+                                                });
+                                                
+                                                if weighted_change_3d >= 0.0 {
+                                                    "token-change positive"
+                                                } else {
+                                                    "token-change negative"
+                                                }
+                                            } else {
+                                                "token-change neutral"
+                                            }
+                                        },
+                                        title: "3 Day Portfolio Change",
+                                        {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_3d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_3d * weight)
+                                                });
+                                                
+                                                if weighted_change_3d >= 0.0 {
+                                                    format!("3D: +{}%", weighted_change_3d.round() as i32)
+                                                } else {
+                                                    format!("3D: {}%", weighted_change_3d.round() as i32)
+                                                }
+                                            } else {
+                                                "3D: 0%".to_string()
+                                            }
+                                        }
+                                    }
+                                    span {
+                                        class: {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_7d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_7d * weight)
+                                                });
+                                                
+                                                if weighted_change_7d >= 0.0 {
+                                                    "token-change positive"
+                                                } else {
+                                                    "token-change negative"
+                                                }
+                                            } else {
+                                                "token-change neutral"
+                                            }
+                                        },
+                                        title: "7 Day Portfolio Change",
+                                        {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_7d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_7d * weight)
+                                                });
+                                                
+                                                if weighted_change_7d >= 0.0 {
+                                                    format!("7D: +{}%", weighted_change_7d.round() as i32)
+                                                } else {
+                                                    format!("7D: {}%", weighted_change_7d.round() as i32)
+                                                }
+                                            } else {
+                                                "7D: 0%".to_string()
+                                            }
+                                        }
                                     }
                                 }
                             }
                         }
                     }
+                    
                     if let Some(error) = price_error() {
                         div {
                             class: "price-error",
@@ -1361,7 +1541,7 @@ pub fn WalletView() -> Element {
                             } else {
                                 img {
                                     src: "{ICON_BULK}",
-                                    alt: "Bulk Send",
+                                    alt: "Send",
                                     width: "24",
                                     height: "24",
                                 }
@@ -1372,7 +1552,7 @@ pub fn WalletView() -> Element {
                             if bulk_send_mode() {
                                 "Cancel"
                             } else {
-                                "Bulk Send"
+                                "Send"
                             }
                         }
                     }
@@ -1467,6 +1647,7 @@ pub fn WalletView() -> Element {
                 }
                 div {
                     class: "token-list",
+                    // Find the token display section in your wallet_view.rs and replace it with this improved version:
                     for token in tokens() {
                         div {
                             key: "{token.mint}",
@@ -1489,7 +1670,6 @@ pub fn WalletView() -> Element {
                                         }
                                         selected_tokens.set(current_selected);
                                     }
-                                    // If not in bulk mode, do nothing (individual sends handled by button)
                                 }
                             },
                             
@@ -1500,8 +1680,7 @@ pub fn WalletView() -> Element {
                                     input {
                                         r#type: "checkbox",
                                         checked: selected_tokens().contains(&token.mint),
-                                        // Handle is managed by the parent onclick
-                                        onclick: move |e| e.stop_propagation(), // Prevent double handling
+                                        onclick: move |e| e.stop_propagation(),
                                     }
                                 }
                             }
@@ -1532,20 +1711,92 @@ pub fn WalletView() -> Element {
                                     }
                                     div {
                                         class: "token-price-info",
-                                        span {
-                                            class: "token-price",
-                                            "${token.price:.2}"
-                                        }
-                                        span {
-                                            class: if token.price_change >= 0.0 {
-                                                "token-change positive"
-                                            } else {
-                                                "token-change negative"
+                                        // Clickable price section
+                                        div {
+                                            class: "token-price-container",
+                                            onclick: {
+                                                let token_mint = token.mint.clone();
+                                                let is_stablecoin = matches!(token.symbol.as_str(), "USDC" | "USDT");
+                                                move |e| {
+                                                    e.stop_propagation();
+                                                    // Only allow expansion for non-stablecoins
+                                                    if !is_stablecoin {
+                                                        let mut current_expanded = expanded_tokens();
+                                                        if current_expanded.contains(&token_mint) {
+                                                            current_expanded.remove(&token_mint);
+                                                        } else {
+                                                            current_expanded.insert(token_mint.clone());
+                                                        }
+                                                        expanded_tokens.set(current_expanded);
+                                                    }
+                                                }
                                             },
-                                            if token.price_change >= 0.0 {
-                                                "+{token.price_change:.1}%"
-                                            } else {
-                                                "{token.price_change:.1}%"
+                                            span {
+                                                class: "token-price",
+                                                "${token.price:.2}"
+                                            }
+                                            // Show expand indicator for non-stablecoins
+                                            if !matches!(token.symbol.as_str(), "USDC" | "USDT") {
+                                                span {
+                                                    class: "price-expand-indicator",
+                                                    if expanded_tokens().contains(&token.mint) {
+                                                        "▼"
+                                                    } else {
+                                                        "▶"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        
+                                        // Expandable price changes (only for non-stablecoins)
+                                        if !matches!(token.symbol.as_str(), "USDC" | "USDT") && expanded_tokens().contains(&token.mint) {
+                                            div {
+                                                class: "token-changes-expanded",
+                                                span {
+                                                    class: if token.price_change_1d >= 0.0 {
+                                                        "token-change positive"
+                                                    } else {
+                                                        "token-change negative"
+                                                    },
+                                                    title: "1 Day Change",
+                                                    {
+                                                        if token.price_change_1d >= 0.0 {
+                                                            format!("1D: +{}%", token.price_change_1d.round() as i32)
+                                                        } else {
+                                                            format!("1D: {}%", token.price_change_1d.round() as i32)
+                                                        }
+                                                    }
+                                                }
+                                                span {
+                                                    class: if token.price_change_3d >= 0.0 {
+                                                        "token-change positive"
+                                                    } else {
+                                                        "token-change negative"
+                                                    },
+                                                    title: "3 Day Change", 
+                                                    {
+                                                        if token.price_change_3d >= 0.0 {
+                                                            format!("3D: +{}%", token.price_change_3d.round() as i32)
+                                                        } else {
+                                                            format!("3D: {}%", token.price_change_3d.round() as i32)
+                                                        }
+                                                    }
+                                                }
+                                                span {
+                                                    class: if token.price_change_7d >= 0.0 {
+                                                        "token-change positive"
+                                                    } else {
+                                                        "token-change negative"
+                                                    },
+                                                    title: "7 Day Change",
+                                                    {
+                                                        if token.price_change_7d >= 0.0 {
+                                                            format!("7D: +{}%", token.price_change_7d.round() as i32)
+                                                        } else {
+                                                            format!("7D: {}%", token.price_change_7d.round() as i32)
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -1560,19 +1811,17 @@ pub fn WalletView() -> Element {
                                         let token_symbol = token.symbol.clone();
                                         let token_mint = token.mint.clone();
                                         let token_balance = token.balance;
-                                        // Get token decimals based on known tokens
                                         let token_decimals = match token.symbol.as_str() {
                                             "SOL" => Some(9),
                                             "USDC" | "USDT" => Some(6),
-                                            _ => Some(9), // Default to 9 decimals for most SPL tokens
+                                            _ => Some(9),
                                         };
                                         
                                         move |e| {
-                                            e.stop_propagation(); // Prevent triggering token selection
+                                            e.stop_propagation();
                                             if token_symbol == "SOL" {
                                                 show_send_modal.set(true);
                                             } else {
-                                                // Open individual token send modal
                                                 selected_token_symbol.set(token_symbol.clone());
                                                 selected_token_mint.set(token_mint.clone());
                                                 selected_token_balance.set(token_balance);
@@ -1594,7 +1843,6 @@ pub fn WalletView() -> Element {
                                 }
                             }
                             
-                            // Keep original token-values structure
                             div {
                                 class: "token-values",
                                 div {

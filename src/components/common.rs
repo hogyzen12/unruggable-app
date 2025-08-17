@@ -9,4 +9,7 @@ pub struct Token {
     pub value_usd: f64,
     pub price: f64,
     pub price_change: f64,
+    pub price_change_1d: f64,
+    pub price_change_3d: f64,
+    pub price_change_7d: f64,
 }
