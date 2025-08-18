@@ -654,31 +654,105 @@ pub fn StakeModal(
                                 button {
                                     class: "modal-button merge-simple",
                                     disabled: merging(),
-                                    onclick: move |_| {
-                                        println!("🔗 DEBUG: Merge button clicked!");
-                                        println!("🔗 DEBUG: Available merge groups: {}", merge_groups().len());
+                                    onclick: {
+                                        // Clone props outside the closure to avoid move issues
+                                        let wallet_for_merge = wallet.clone();
+                                        let hardware_wallet_for_merge = hardware_wallet.clone();
+                                        let custom_rpc_for_merge = custom_rpc.clone();
                                         
-                                        for (i, group) in merge_groups().iter().enumerate() {
-                                            println!("  Group {}: {} - {} accounts, {:.6} SOL", 
-                                                i + 1, 
-                                                group.merge_type, 
-                                                group.accounts.len(),
-                                                group.total_amount as f64 / 1_000_000_000.0
-                                            );
+                                        move |_| {
+                                            println!("🔗 DEBUG: Merge button clicked!");
+                                            println!("🔗 DEBUG: Available merge groups: {}", merge_groups().len());
+                                            
+                                            for (i, group) in merge_groups().iter().enumerate() {
+                                                println!("  Group {}: {} - {} accounts, {:.6} SOL", 
+                                                    i + 1, 
+                                                    group.merge_type, 
+                                                    group.accounts.len(),
+                                                    group.total_amount as f64 / 1_000_000_000.0
+                                                );
+                                            }
+                                            
+                                            merging.set(true);
+                                            
+                                            // Clone for the async block
+                                            let wallet_clone = wallet_for_merge.clone();
+                                            let hardware_wallet_clone = hardware_wallet_for_merge.clone();
+                                            let custom_rpc_clone = custom_rpc_for_merge.clone();
+                                            let merge_groups_clone = merge_groups();
+                                            
+                                            // Clone signals that need to be mutable
+                                            let mut merging_clone = merging.clone();
+                                            let mut stake_accounts_clone = stake_accounts.clone();
+                                            let mut error_message_clone = error_message.clone();
+                                            let mut show_hardware_approval_clone = show_hardware_approval.clone();
+                                            
+                                            // Show hardware approval overlay if using hardware wallet
+                                            if hardware_wallet_for_merge.is_some() {
+                                                show_hardware_approval.set(true);
+                                            }
+                                            
+                                            spawn(async move {
+                                                // Get the first merge group for now (simplest implementation)
+                                                if let Some(first_group) = merge_groups_clone.first() {
+                                                    println!("🔗 Processing merge group with {} accounts", first_group.accounts.len());
+                                                    
+                                                    match staking::merge_stake_accounts(
+                                                        first_group,
+                                                        wallet_clone.as_ref(),
+                                                        hardware_wallet_clone,
+                                                        custom_rpc_clone.as_deref(),
+                                                    ).await {
+                                                        Ok(signature) => {
+                                                            println!("✅ Merge completed: {}", signature);
+                                                            
+                                                            // Hide hardware approval overlay if it was shown
+                                                            show_hardware_approval_clone.set(false);
+                                                            
+                                                            // Clear stake accounts to trigger refresh on next scan
+                                                            stake_accounts_clone.set(Vec::new());
+                                                            
+                                                            // Show success message
+                                                            error_message_clone.set(Some(format!(
+                                                                "✅ Successfully merged {} accounts! Transaction: {}", 
+                                                                first_group.accounts.len(), 
+                                                                signature
+                                                            )));
+                                                            
+                                                            // Clear the message after 5 seconds
+                                                            let mut error_message_clear = error_message_clone.clone();
+                                                            spawn(async move {
+                                                                tokio::time::sleep(std::time::Duration::from_millis(5_000)).await;
+                                                                error_message_clear.set(None);
+                                                            });
+                                                        }
+                                                        Err(e) => {
+                                                            println!("❌ Merge failed: {}", e);
+                                                            
+                                                            // Hide hardware approval overlay if it was shown
+                                                            show_hardware_approval_clone.set(false);
+                                                            
+                                                            error_message_clone.set(Some(format!("❌ Merge failed: {}", e)));
+                                                            
+                                                            // Clear error message after 10 seconds
+                                                            let mut error_message_clear = error_message_clone.clone();
+                                                            spawn(async move {
+                                                                tokio::time::sleep(std::time::Duration::from_millis(10_000)).await;
+                                                                error_message_clear.set(None);
+                                                            });
+                                                        }
+                                                    }
+                                                } else {
+                                                    println!("❌ No merge groups available");
+                                                    error_message_clone.set(Some("❌ No merge opportunities found".to_string()));
+                                                }
+                                                
+                                                merging_clone.set(false);
+                                            });
                                         }
-                                        
-                                        merging.set(true);
-                                        
-                                        // For now, just show the placeholder message
-                                        spawn(async move {
-                                            // Simulate some processing time
-                                            std::thread::sleep(std::time::Duration::from_millis(1000));
-                                            println!("🔗 DEBUG: Merge functionality coming soon!");
-                                            merging.set(false);
-                                        });
                                     },
                                     if merging() {
-                                        "🔄 Analyzing..."
+                                        "🔄 Merging..."
                                     } else {
                                         "🔗 Merge Stake Accounts ({merge_groups().len()})"
                                     }
@@ -904,48 +978,55 @@ pub fn StakeModal(
                             button {
                                 class: "modal-button secondary",
                                 disabled: loading_stakes(),
-                                onclick: move |_| {
-                                    // Manually trigger refresh
-                                    loading_stakes.set(true);
-                                    error_message.set(None);
-
-                                    let wallet_clone = wallet.clone();
-                                    let hardware_wallet_clone = hardware_wallet.clone();
-                                    let custom_rpc_clone = custom_rpc.clone();
-
-                                    spawn(async move {
-                                        // Get wallet address
-                                        let wallet_address = if let Some(hw) = &hardware_wallet_clone {
-                                            match hw.get_public_key().await {
-                                                Ok(addr) => addr,
-                                                Err(e) => {
-                                                    error_message.set(Some(format!("Failed to get hardware wallet address: {}", e)));
+                                onclick: {
+                                    // Clone props outside the closure to avoid move issues
+                                    let wallet_for_refresh = wallet.clone();
+                                    let hardware_wallet_for_refresh = hardware_wallet.clone();
+                                    let custom_rpc_for_refresh = custom_rpc.clone();
+                                    
+                                    move |_| {
+                                        // Manually trigger refresh
+                                        loading_stakes.set(true);
+                                        error_message.set(None);
+                        
+                                        let wallet_clone = wallet_for_refresh.clone();
+                                        let hardware_wallet_clone = hardware_wallet_for_refresh.clone();
+                                        let custom_rpc_clone = custom_rpc_for_refresh.clone();
+                        
+                                        spawn(async move {
+                                            // Get wallet address
+                                            let wallet_address = if let Some(hw) = &hardware_wallet_clone {
+                                                match hw.get_public_key().await {
+                                                    Ok(addr) => addr,
+                                                    Err(e) => {
+                                                        error_message.set(Some(format!("Failed to get hardware wallet address: {}", e)));
+                                                        loading_stakes.set(false);
+                                                        return;
+                                                    }
+                                                }
+                                            } else if let Some(w) = &wallet_clone {
+                                                w.address.clone()
+                                            } else {
+                                                error_message.set(Some("No wallet available".to_string()));
+                                                loading_stakes.set(false);
+                                                return;
+                                            };
+                        
+                                            // Scan for stake accounts
+                                            match staking::scan_stake_accounts(&wallet_address, custom_rpc_clone.as_deref()).await {
+                                                Ok(accounts) => {
+                                                    println!("✅ Refreshed: Found {} stake accounts", accounts.len());
+                                                    stake_accounts.set(accounts);
                                                     loading_stakes.set(false);
-                                                    return;
+                                                }
+                                                Err(e) => {
+                                                    println!("❌ Refresh error: {}", e);
+                                                    error_message.set(Some(format!("Failed to refresh: {}", e)));
+                                                    loading_stakes.set(false);
                                                 }
                                             }
-                                        } else if let Some(w) = &wallet_clone {
-                                            w.address.clone()
-                                        } else {
-                                            error_message.set(Some("No wallet available".to_string()));
-                                            loading_stakes.set(false);
-                                            return;
-                                        };
-
-                                        // Scan for stake accounts
-                                        match staking::scan_stake_accounts(&wallet_address, custom_rpc_clone.as_deref()).await {
-                                            Ok(accounts) => {
-                                                println!("Refreshed: Found {} stake accounts", accounts.len());
-                                                stake_accounts.set(accounts);
-                                                loading_stakes.set(false);
-                                            }
-                                            Err(e) => {
-                                                println!("Error refreshing stake accounts: {}", e);
-                                                error_message.set(Some(format!("Failed to refresh stake accounts: {}", e)));
-                                                loading_stakes.set(false);
-                                            }
-                                        }
-                                    });
+                                        });
+                                    }
                                 },
                                 if loading_stakes() {
                                     "🔄 Refreshing..."
