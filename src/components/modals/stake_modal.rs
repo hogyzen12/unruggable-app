@@ -3,6 +3,7 @@ use crate::wallet::WalletInfo;
 use crate::hardware::HardwareWallet;
 use crate::validators::{ValidatorInfo, get_recommended_validators};
 use crate::staking::{self, DetailedStakeAccount, StakeAccountState};
+use crate::staking::{find_mergeable_stake_accounts, MergeGroup};
 use std::sync::Arc;
 use crate::signing::hardware::HardwareSigner;
 use crate::staking::create_stake_account;
@@ -248,6 +249,8 @@ pub fn StakeModal(
     // Hardware wallet prompting states
     let mut show_hardware_approval = use_signal(|| false);
     let mut was_hardware_transaction = use_signal(|| false);
+    let mut merge_groups = use_signal(|| Vec::<MergeGroup>::new());
+    let mut merging = use_signal(|| false);
 
     // Load validators on component mount
     use_effect(move || {
@@ -347,6 +350,20 @@ pub fn StakeModal(
             });
         } else {
             println!("ℹ️ DEBUG: Mode is not MyStakes, current mode: {:?}", current_mode);
+        }
+    });
+
+    use_effect(move || {
+        let accounts = stake_accounts();
+        if !accounts.is_empty() {
+            println!("🔍 DEBUG: Calculating merge opportunities for {} accounts", accounts.len());
+            // Use current epoch 835 for now (from your logs)
+            let current_epoch = 835;
+            let groups = find_mergeable_stake_accounts(&accounts, current_epoch);
+            println!("🔗 DEBUG: Found {} merge groups", groups.len());
+            merge_groups.set(groups);
+        } else {
+            merge_groups.set(Vec::new());
         }
     });
 
@@ -622,6 +639,49 @@ pub fn StakeModal(
                                 div {
                                     class: "summary-value",
                                     "{stake_accounts().len()}"
+                                }
+                            }
+                        }
+
+                        // Simple merge button (only show if merge opportunities exist)
+                        if !merge_groups().is_empty() {
+                            div {
+                                class: "merge-simple-section",
+                                div {
+                                    class: "merge-simple-info",
+                                    "🔗 Found {merge_groups().len()} merge opportunities to consolidate your stake accounts"
+                                }
+                                button {
+                                    class: "modal-button merge-simple",
+                                    disabled: merging(),
+                                    onclick: move |_| {
+                                        println!("🔗 DEBUG: Merge button clicked!");
+                                        println!("🔗 DEBUG: Available merge groups: {}", merge_groups().len());
+                                        
+                                        for (i, group) in merge_groups().iter().enumerate() {
+                                            println!("  Group {}: {} - {} accounts, {:.6} SOL", 
+                                                i + 1, 
+                                                group.merge_type, 
+                                                group.accounts.len(),
+                                                group.total_amount as f64 / 1_000_000_000.0
+                                            );
+                                        }
+                                        
+                                        merging.set(true);
+                                        
+                                        // For now, just show the placeholder message
+                                        spawn(async move {
+                                            // Simulate some processing time
+                                            std::thread::sleep(std::time::Duration::from_millis(1000));
+                                            println!("🔗 DEBUG: Merge functionality coming soon!");
+                                            merging.set(false);
+                                        });
+                                    },
+                                    if merging() {
+                                        "🔄 Analyzing..."
+                                    } else {
+                                        "🔗 Merge Stake Accounts ({merge_groups().len()})"
+                                    }
                                 }
                             }
                         }

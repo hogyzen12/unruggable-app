@@ -18,6 +18,7 @@ use crate::rpc::{get_stake_accounts_by_owner, get_epoch_info, StakeAccountRpcDat
 use std::sync::Arc;
 use std::str::FromStr;
 use std::error::Error;
+use std::collections::HashMap;
 use bincode;
 use bs58;
 use reqwest::Client;
@@ -47,6 +48,35 @@ pub struct DetailedStakeAccount {
     pub validator_name: String,
     pub activation_epoch: Option<u64>,
     pub deactivation_epoch: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MergeGroup {
+    pub accounts: Vec<DetailedStakeAccount>,
+    pub merge_type: MergeType,
+    pub total_amount: u64,
+    pub validator_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum MergeType {
+    TwoDeactivated,
+    InactiveIntoActivating,
+    TwoActivated { voter_pubkey: String },
+    TwoActivatingSameEpoch { voter_pubkey: String, activation_epoch: u64 },
+}
+
+impl std::fmt::Display for MergeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MergeType::TwoDeactivated => write!(f, "Merge Deactivated Accounts"),
+            MergeType::InactiveIntoActivating => write!(f, "Merge into Activating Account"),
+            MergeType::TwoActivated { .. } => write!(f, "Merge Active Accounts"),
+            MergeType::TwoActivatingSameEpoch { activation_epoch, .. } => {
+                write!(f, "Merge Activating Accounts (Epoch {})", activation_epoch)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -513,4 +543,178 @@ pub async fn get_stake_account_info(
     // This is a placeholder - you would implement actual stake account parsing here
     // For now, we'll return None
     Ok(None)
+}
+
+/// Find all possible merge groups from a list of stake accounts
+pub fn find_mergeable_stake_accounts(
+    accounts: &[DetailedStakeAccount],
+    current_epoch: u64,
+) -> Vec<MergeGroup> {
+    let mut merge_groups = Vec::new();
+    
+    println!("🔍 Analyzing {} accounts for merge opportunities...", accounts.len());
+    
+    // Group accounts by validator (they must be delegated to the same validator to merge)
+    let mut by_validator: HashMap<String, Vec<&DetailedStakeAccount>> = HashMap::new();
+    
+    for account in accounts {
+        let validator_key = account.validator_name.clone();
+        by_validator.entry(validator_key).or_insert_with(Vec::new).push(account);
+    }
+    
+    for (validator_name, validator_accounts) in by_validator {
+        if validator_accounts.len() < 2 {
+            continue; // Need at least 2 accounts to merge
+        }
+        
+        println!("🏛️  Checking {} accounts for validator: {}", validator_accounts.len(), validator_name);
+        
+        // 1. Find two deactivated stakes
+        let deactivated: Vec<&DetailedStakeAccount> = validator_accounts
+            .iter()
+            .filter(|acc| acc.state == StakeAccountState::Uninitialized)
+            .copied()
+            .collect();
+        
+        if deactivated.len() >= 2 {
+            // Group all deactivated accounts for this validator
+            let total_amount: u64 = deactivated.iter()
+                .map(|acc| acc.balance.saturating_sub(acc.rent_exempt_reserve))
+                .sum();
+            
+            let deactivated_accounts: Vec<DetailedStakeAccount> = deactivated.iter().map(|&acc| acc.clone()).collect();
+            let account_count = deactivated_accounts.len();
+            
+            merge_groups.push(MergeGroup {
+                accounts: deactivated_accounts,
+                merge_type: MergeType::TwoDeactivated,
+                total_amount,
+                validator_name: validator_name.clone(),
+            });
+            
+            println!("✅ Found deactivated merge group: {} accounts", account_count);
+        }
+        
+        // 2. Find inactive stake into activating stake during activation epoch
+        let activating_this_epoch: Vec<&DetailedStakeAccount> = validator_accounts
+            .iter()
+            .filter(|acc| {
+                acc.state == StakeAccountState::Initialized &&
+                acc.activation_epoch == Some(current_epoch)
+            })
+            .copied()
+            .collect();
+        
+        let inactive: Vec<&DetailedStakeAccount> = validator_accounts
+            .iter()
+            .filter(|acc| acc.state == StakeAccountState::Initialized && acc.activation_epoch.is_none())
+            .copied()
+            .collect();
+        
+        for activating_acc in &activating_this_epoch {
+            for inactive_acc in &inactive {
+                let total_amount = activating_acc.balance.saturating_sub(activating_acc.rent_exempt_reserve) +
+                                   inactive_acc.balance.saturating_sub(inactive_acc.rent_exempt_reserve);
+                
+                merge_groups.push(MergeGroup {
+                    accounts: vec![(*activating_acc).clone(), (*inactive_acc).clone()],
+                    merge_type: MergeType::InactiveIntoActivating,
+                    total_amount,
+                    validator_name: validator_name.clone(),
+                });
+                
+                println!("✅ Found inactive->activating merge pair");
+            }
+        }
+        
+        // 3. Find two activated stakes (same validator, must have same vote credits - simplified)
+        let activated: Vec<&DetailedStakeAccount> = validator_accounts
+            .iter()
+            .filter(|acc| acc.state == StakeAccountState::Delegated)
+            .copied()
+            .collect();
+        
+        if activated.len() >= 2 {
+            // For simplicity, we'll group all activated accounts for the same validator
+            // In a real implementation, you'd check vote credits observed
+            let total_amount: u64 = activated.iter()
+                .map(|acc| acc.balance.saturating_sub(acc.rent_exempt_reserve))
+                .sum();
+            
+            // Use the first 8 chars of validator name as a simplified "voter pubkey"
+            let voter_pubkey = validator_name.chars().take(16).collect::<String>();
+            
+            let activated_accounts: Vec<DetailedStakeAccount> = activated.iter().map(|&acc| acc.clone()).collect();
+            let account_count = activated_accounts.len();
+            
+            merge_groups.push(MergeGroup {
+                accounts: activated_accounts,
+                merge_type: MergeType::TwoActivated { voter_pubkey },
+                total_amount,
+                validator_name: validator_name.clone(),
+            });
+            
+            println!("✅ Found activated merge group: {} accounts", account_count);
+        }
+        
+        // 4. Find two activating accounts with same activation epoch
+        let mut activating_by_epoch: HashMap<u64, Vec<&DetailedStakeAccount>> = HashMap::new();
+        
+        for account in &validator_accounts {
+            if account.state == StakeAccountState::Initialized {
+                if let Some(epoch) = account.activation_epoch {
+                    if epoch == current_epoch { // Only during activation epoch
+                        activating_by_epoch.entry(epoch).or_insert_with(Vec::new).push(account);
+                    }
+                }
+            }
+        }
+        
+        for (epoch, epoch_accounts) in activating_by_epoch {
+            if epoch_accounts.len() >= 2 {
+                let total_amount: u64 = epoch_accounts.iter()
+                    .map(|acc| acc.balance.saturating_sub(acc.rent_exempt_reserve))
+                    .sum();
+                
+                let voter_pubkey = validator_name.chars().take(16).collect::<String>();
+                
+                let epoch_accounts_cloned: Vec<DetailedStakeAccount> = epoch_accounts.iter().map(|&acc| acc.clone()).collect();
+                let account_count = epoch_accounts_cloned.len();
+                
+                merge_groups.push(MergeGroup {
+                    accounts: epoch_accounts_cloned,
+                    merge_type: MergeType::TwoActivatingSameEpoch { 
+                        voter_pubkey, 
+                        activation_epoch: epoch 
+                    },
+                    total_amount,
+                    validator_name: validator_name.clone(),
+                });
+                
+                println!("✅ Found activating same-epoch merge group: {} accounts for epoch {}", 
+                    account_count, epoch);
+            }
+        }
+    }
+    
+    println!("🎯 Found {} merge opportunities total", merge_groups.len());
+    merge_groups
+}
+
+/// Placeholder for merge operation - to be implemented
+pub async fn merge_stake_accounts(
+    merge_group: &MergeGroup,
+    wallet_info: Option<&WalletInfo>,
+    hardware_wallet: Option<Arc<HardwareWallet>>,
+    rpc_url: Option<&str>,
+) -> Result<String, StakingError> {
+    println!("🔄 MERGE OPERATION: Would merge {} accounts", merge_group.accounts.len());
+    println!("🔄 MERGE TYPE: {}", merge_group.merge_type);
+    println!("🔄 TOTAL AMOUNT: {:.6} SOL", merge_group.total_amount as f64 / 1_000_000_000.0);
+    
+    // TODO: Implement actual merge transaction logic
+    // For now, return a placeholder transaction signature
+    Err(StakingError::TransactionFailed(
+        "Merge functionality not yet implemented - coming soon!".to_string()
+    ))
 }
