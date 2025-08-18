@@ -14,6 +14,7 @@ use crate::signing::{TransactionSigner, software::SoftwareSigner, hardware::Hard
 use crate::storage::get_current_jito_settings;
 use crate::transaction::TransactionClient;
 use crate::rpc::{ get_balance, get_minimum_balance_for_rent_exemption };
+use crate::rpc::{get_stake_accounts_by_owner, get_epoch_info, StakeAccountRpcData, EpochInfo};
 use std::sync::Arc;
 use std::str::FromStr;
 use std::error::Error;
@@ -391,14 +392,117 @@ pub async fn create_stake_account(
     staking_client.create_stake_account_with_jito(signer.as_ref(), validator_vote_account, stake_amount_sol).await
 }
 
-/// Scan for stake accounts (placeholder function to satisfy stake_modal.rs)
+/// Convert RPC stake account data to DetailedStakeAccount format
+fn convert_rpc_to_detailed_stake_account(
+    rpc_data: &StakeAccountRpcData,
+    current_epoch: u64,
+) -> Result<DetailedStakeAccount, StakingError> {
+    let pubkey = Pubkey::from_str(&rpc_data.pubkey)
+        .map_err(|_| StakingError::RpcError("Invalid stake account pubkey".to_string()))?;
+    
+    let balance = rpc_data.account.lamports;
+    let rent_exempt_reserve = rpc_data.account.data.parsed.info.meta.rent_exempt_reserve
+        .parse::<u64>()
+        .unwrap_or(0);
+    
+    // Extract activation and deactivation epochs
+    let (activation_epoch, deactivation_epoch, validator_name) = if let Some(stake_details) = &rpc_data.account.data.parsed.info.stake {
+        let activation_epoch = stake_details.delegation.activation_epoch
+            .parse::<u64>()
+            .ok();
+        let deactivation_epoch = stake_details.delegation.deactivation_epoch
+            .parse::<u64>()
+            .ok()
+            .filter(|&epoch| epoch != u64::MAX); // Filter out max value (means no deactivation)
+        
+        // For now, use vote account as validator name (you could enhance this with a lookup)
+        let validator_name = format!("Validator {}", &stake_details.delegation.voter[0..8]);
+        
+        (activation_epoch, deactivation_epoch, validator_name)
+    } else {
+        (None, None, "Unknown Validator".to_string())
+    };
+    
+    // Determine stake account state
+    let state = if let Some(stake_details) = &rpc_data.account.data.parsed.info.stake {
+        let activation_epoch_num = stake_details.delegation.activation_epoch
+            .parse::<u64>()
+            .unwrap_or(u64::MAX);
+        let deactivation_epoch_num = stake_details.delegation.deactivation_epoch
+            .parse::<u64>()
+            .unwrap_or(u64::MAX);
+        
+        if deactivation_epoch_num != u64::MAX && deactivation_epoch_num <= current_epoch {
+            StakeAccountState::Uninitialized // Deactivated
+        } else if activation_epoch_num <= current_epoch {
+            StakeAccountState::Delegated // Active
+        } else {
+            StakeAccountState::Initialized // Activating
+        }
+    } else {
+        StakeAccountState::Initialized
+    };
+    
+    Ok(DetailedStakeAccount {
+        pubkey,
+        balance,
+        rent_exempt_reserve,
+        state,
+        validator_name,
+        activation_epoch,
+        deactivation_epoch,
+    })
+}
+
+/// Scan for stake accounts using the new RPC function
 pub async fn scan_stake_accounts(
-    _wallet_address: &str,
-    _rpc_url: Option<&str>,
+    wallet_address: &str,
+    rpc_url: Option<&str>,
 ) -> Result<Vec<DetailedStakeAccount>, StakingError> {
-    // Placeholder implementation - return empty vec for now
-    // You can implement actual stake account scanning here later
-    Ok(Vec::new())
+    println!("🔍 Starting stake account scan for wallet: {}", wallet_address);
+    
+    // Get current epoch info to determine activation status
+    let epoch_info = get_epoch_info(rpc_url).await
+        .map_err(|e| StakingError::RpcError(format!("Failed to get epoch info: {}", e)))?;
+    
+    println!("📅 Current epoch: {}", epoch_info.epoch);
+    
+    // Get stake accounts using the new RPC function
+    let rpc_stake_accounts = get_stake_accounts_by_owner(wallet_address, rpc_url).await
+        .map_err(|e| StakingError::RpcError(format!("Failed to get stake accounts: {}", e)))?;
+    
+    println!("🎯 Found {} raw stake accounts from RPC", rpc_stake_accounts.len());
+    
+    // Convert RPC data to our detailed format
+    let mut detailed_accounts = Vec::new();
+    
+    for rpc_account in &rpc_stake_accounts {
+        match convert_rpc_to_detailed_stake_account(rpc_account, epoch_info.epoch) {
+            Ok(detailed) => {
+                detailed_accounts.push(detailed);
+            }
+            Err(e) => {
+                println!("⚠️  Failed to convert stake account {}: {}", rpc_account.pubkey, e);
+            }
+        }
+    }
+    
+    // Log summary
+    let total_staked: u64 = detailed_accounts.iter()
+        .map(|acc| acc.balance.saturating_sub(acc.rent_exempt_reserve))
+        .sum();
+    
+    let active_count = detailed_accounts.iter()
+        .filter(|acc| matches!(acc.state, StakeAccountState::Delegated))
+        .count();
+    
+    println!("📈 SUMMARY: {} accounts, {} active, {:.6} SOL total staked", 
+        detailed_accounts.len(), 
+        active_count, 
+        total_staked as f64 / 1_000_000_000.0
+    );
+    
+    Ok(detailed_accounts)
 }
 
 /// Get stake account information

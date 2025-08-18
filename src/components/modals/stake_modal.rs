@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::signing::hardware::HardwareSigner;
 use crate::staking::create_stake_account;
 
-#[derive(PartialEq, Clone)]
+#[derive(PartialEq, Clone, Debug)]
 enum ModalMode {
     Stake,
     MyStakes,
@@ -278,53 +278,77 @@ pub fn StakeModal(
     let custom_rpc_for_effect = custom_rpc.clone();
 
     // Load stake accounts when switching to My Stakes mode
-    {
+    use_effect(move || {
         let current_mode = mode();
-        use_effect(move || {
-            if current_mode == ModalMode::MyStakes && !loading_stakes() {
-                loading_stakes.set(true);
-                error_message.set(None);
+        println!("🔍 DEBUG: use_effect triggered with mode: {:?}", current_mode);
+        
+        if current_mode == ModalMode::MyStakes {
+            // Check if we're already loading or already have data
+            if loading_stakes() {
+                println!("⏳ DEBUG: Already loading, skipping...");
+                return;
+            }
+            
+            if !stake_accounts().is_empty() {
+                println!("📊 DEBUG: Already have {} accounts, skipping...", stake_accounts().len());
+                return;
+            }
+            
+            println!("🚀 DEBUG: Starting stake scan...");
+            loading_stakes.set(true);
+            error_message.set(None);
 
-                let wallet_clone = wallet_for_effect.clone();
-                let hardware_wallet_clone = hardware_wallet_for_effect.clone();
-                let custom_rpc_clone = custom_rpc_for_effect.clone();
+            let wallet_clone = wallet_for_effect.clone();
+            let hardware_wallet_clone = hardware_wallet_for_effect.clone();
+            let custom_rpc_clone = custom_rpc_for_effect.clone();
 
-                spawn(async move {
-                    // Get wallet address
-                    let wallet_address = if let Some(hw) = &hardware_wallet_clone {
-                        match hw.get_public_key().await {
-                            Ok(addr) => addr,
-                            Err(e) => {
-                                error_message.set(Some(format!("Failed to get hardware wallet address: {}", e)));
-                                loading_stakes.set(false);
-                                return;
-                            }
-                        }
-                    } else if let Some(w) = &wallet_clone {
-                        w.address.clone()
-                    } else {
-                        error_message.set(Some("No wallet available".to_string()));
-                        loading_stakes.set(false);
-                        return;
-                    };
-
-                    // Scan for stake accounts
-                    match staking::scan_stake_accounts(&wallet_address, custom_rpc_clone.as_deref()).await {
-                        Ok(accounts) => {
-                            println!("Found {} stake accounts", accounts.len());
-                            stake_accounts.set(accounts);
-                            loading_stakes.set(false);
+            spawn(async move {
+                println!("📡 DEBUG: In async block");
+                
+                // Get wallet address
+                let wallet_address = if let Some(hw) = &hardware_wallet_clone {
+                    match hw.get_public_key().await {
+                        Ok(addr) => {
+                            println!("✅ DEBUG: HW wallet address: {}", addr);
+                            addr
                         }
                         Err(e) => {
-                            println!("Error scanning stake accounts: {}", e);
-                            error_message.set(Some(format!("Failed to load stake accounts: {}", e)));
+                            println!("❌ DEBUG: HW wallet error: {}", e);
+                            error_message.set(Some(format!("Failed to get hardware wallet address: {}", e)));
                             loading_stakes.set(false);
+                            return;
                         }
                     }
-                });
-            }
-        });
-    }
+                } else if let Some(w) = &wallet_clone {
+                    println!("💼 DEBUG: SW wallet address: {}", w.address);
+                    w.address.clone()
+                } else {
+                    println!("❌ DEBUG: No wallet");
+                    error_message.set(Some("No wallet available".to_string()));
+                    loading_stakes.set(false);
+                    return;
+                };
+
+                println!("🔍 DEBUG: Calling scan_stake_accounts...");
+
+                // Scan for stake accounts
+                match staking::scan_stake_accounts(&wallet_address, custom_rpc_clone.as_deref()).await {
+                    Ok(accounts) => {
+                        println!("✅ DEBUG: Successfully got {} accounts - setting in UI", accounts.len());
+                        stake_accounts.set(accounts);
+                        loading_stakes.set(false);
+                    }
+                    Err(e) => {
+                        println!("❌ DEBUG: Scan error: {}", e);
+                        error_message.set(Some(format!("Failed to load stake accounts: {}", e)));
+                        loading_stakes.set(false);
+                    }
+                }
+            });
+        } else {
+            println!("ℹ️ DEBUG: Mode is not MyStakes, current mode: {:?}", current_mode);
+        }
+    });
 
     // Determine which address to show based on wallet type
     let display_address = if let Some(hw) = &hardware_wallet {
@@ -418,6 +442,7 @@ pub fn StakeModal(
                         button {
                             class: if mode() == ModalMode::MyStakes { "toggle-button active" } else { "toggle-button" },
                             onclick: move |_| {
+                                println!("🔘 BUTTON CLICKED: My Staked Sol");
                                 mode.set(ModalMode::MyStakes);
                                 error_message.set(None);
                             },
