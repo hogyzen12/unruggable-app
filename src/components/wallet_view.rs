@@ -27,7 +27,7 @@ use crate::currency_utils::{
     get_current_currency_code
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::components::common::Token;
 use crate::rpc;
@@ -1109,6 +1109,18 @@ pub fn WalletView() -> Element {
                     }
                 }
             }
+
+            // Show Transaction History modal
+            if show_history_modal() {
+                TransactionHistoryModal {
+                    // Use the already-computed address that respects hardware wallet overrides
+                    address: full_address.clone(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| {
+                        show_history_modal.set(false);
+                    }
+                }
+            }
             
             if show_send_token_modal() {
                 SendTokenModal {
@@ -1605,18 +1617,18 @@ pub fn WalletView() -> Element {
                     //        "Send"
                     //    }
                     //}
-                    //button {
-                    //    class: "action-button",
-                    //    onclick: move |_| show_history_modal.set(true),
-                    //    div {
-                    //        class: "action-icon history-icon",
-                    //        "📜"
-                    //    }
-                    //    span {
-                    //        class: "action-label",
-                    //        "History"
-                    //    }
-                    //}
+                    button {
+                        class: "action-button",
+                        onclick: move |_| show_history_modal.set(true),
+                        div {
+                            class: "action-icon history-icon",
+                            "📜"
+                        }
+                        span {
+                            class: "action-label",
+                            "History"
+                        }
+                    }
                 }
             }
             
