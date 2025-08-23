@@ -1,6 +1,11 @@
 Android will crash - use the scripts to force enviroments.
-sh scripts/android.build.sh - build for android apk cleanly
-sh scripts/android.bundle.sh && sh scripts/android.update.sh
+ - build for android apk cleanly
+sh scripts/android.build.sh && sh scripts/android.bundle.sh && sh scripts/android.update.sh && jarsigner -verbose \
+  -sigalg SHA256withRSA -digestalg SHA-256 \
+  -keystore ~/keys/unruggable-upload.jks \
+  "/Users/hogyzen12/coding-project-folders/unruggable-app/dist/android/unruggable-release.aab" \
+  unruggable-upload
+
 
 bundle and push to device. APK available for release as well.
 
