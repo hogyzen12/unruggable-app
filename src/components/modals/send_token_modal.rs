@@ -5,6 +5,8 @@ use crate::hardware::HardwareWallet;
 use crate::transaction::TransactionClient;
 use crate::signing::hardware::HardwareSigner;
 use crate::rpc;
+use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
+use solana_sdk::pubkey::Pubkey; // ← ADD THIS IMPORT
 use std::sync::Arc;
 
 // Import HardwareWalletEvent from send_modal instead of defining it again
@@ -194,6 +196,7 @@ pub fn SendTokenModal(
 ) -> Element {
     // Always declare all hooks at the top of the component - never conditionally
     let mut recipient = use_signal(|| "".to_string());
+    let mut resolved_recipient = use_signal(|| Option::<Pubkey>::None); // ← ADD THIS LINE
     let mut amount = use_signal(|| "".to_string());
     let mut sending = use_signal(|| false);
     let mut error_message = use_signal(|| None as Option<String>);
@@ -211,33 +214,30 @@ pub fn SendTokenModal(
     // Use decimals or default to 6 for most SPL tokens
     let decimals = token_decimals.unwrap_or(6);
 
-    // Use effect to check recipient balance when address changes
+    // Update recipient balance checking effect to use resolved recipient
     let custom_rpc_for_effect = custom_rpc.clone();
     use_effect(move || {
-        let recipient_addr = recipient();
-        let rpc_url = custom_rpc_for_effect.clone();
+        if let Some(resolved_pubkey) = *resolved_recipient.read() {
+            let recipient_addr = resolved_pubkey.to_string();
+            let rpc_url = custom_rpc_for_effect.clone();
 
-        if recipient_addr.len() > 30 {
-            if bs58::decode(&recipient_addr).into_vec().is_ok() {
-                checking_balance.set(true);
-                recipient_balance.set(None);
+            checking_balance.set(true);
+            recipient_balance.set(None);
 
-                spawn(async move {
-                    match rpc::get_balance(&recipient_addr, rpc_url.as_deref()).await {
-                        Ok(balance) => {
-                            recipient_balance.set(Some(balance));
-                        }
-                        Err(_) => {
-                            recipient_balance.set(None);
-                        }
+            spawn(async move {
+                match rpc::get_balance(&recipient_addr, rpc_url.as_deref()).await {
+                    Ok(balance) => {
+                        recipient_balance.set(Some(balance));
                     }
-                    checking_balance.set(false);
-                });
-            } else {
-                recipient_balance.set(None);
-            }
+                    Err(_) => {
+                        recipient_balance.set(None);
+                    }
+                }
+                checking_balance.set(false);
+            });
         } else {
             recipient_balance.set(None);
+            checking_balance.set(false);
         }
     });
 
@@ -329,15 +329,18 @@ pub fn SendTokenModal(
                     div { class: "address-display", "{display_address}" }
                 }
 
+                // ← REPLACE THE OLD RECIPIENT INPUT WITH THIS SNS-ENABLED VERSION:
                 div {
                     class: "wallet-field",
-                    label { "Recipient Address:" }
-                    input {
-                        value: "{recipient}",
-                        oninput: move |e| recipient.set(e.value()),
-                        placeholder: "Enter Solana address"
+                    AddressInput {
+                        value: recipient.read().clone(),
+                        on_change: move |val| recipient.set(val),
+                        on_resolved: move |pubkey| resolved_recipient.set(pubkey),
+                        label: "Send to:",
+                        placeholder: "Enter address or domain (e.g., recipient.sol)"
                     }
-                    // Show recipient balance if available
+                    
+                    // Keep the recipient balance display
                     if checking_balance() {
                         div {
                             class: "recipient-balance checking",
@@ -381,6 +384,15 @@ pub fn SendTokenModal(
                     button {
                         class: "modal-button primary",
                         onclick: move |_| {
+                            // ← VALIDATE RESOLVED RECIPIENT FIRST
+                            let recipient_pubkey = match resolved_recipient.read().as_ref() {
+                                Some(pubkey) => *pubkey,
+                                None => {
+                                    error_message.set(Some("Please enter a valid recipient address or domain".to_string()));
+                                    return;
+                                }
+                            };
+
                             error_message.set(None);
                             sending.set(true);
 
@@ -395,7 +407,7 @@ pub fn SendTokenModal(
                             // Clone values for async task
                             let hardware_wallet_clone = hardware_wallet.clone();
                             let wallet_info = wallet.clone();
-                            let recipient_address = recipient();
+                            let recipient_address = recipient_pubkey.to_string(); // ← USE RESOLVED PUBKEY
                             let amount_str = amount();
                             let rpc_url = custom_rpc.clone();
                             let token_mint_clone = token_mint.clone();
@@ -423,13 +435,7 @@ pub fn SendTokenModal(
                                     return;
                                 }
 
-                                // Validate recipient address
-                                if let Err(e) = bs58::decode(&recipient_address).into_vec() {
-                                    error_message.set(Some(format!("Invalid recipient address: {}", e)));
-                                    sending.set(false);
-                                    show_hardware_approval.set(false);
-                                    return;
-                                }
+                                // ← NO NEED TO VALIDATE recipient_address anymore since it's already a valid pubkey!
 
                                 let client = TransactionClient::new(rpc_url.as_deref());
 
@@ -495,7 +501,7 @@ pub fn SendTokenModal(
                                 }
                             });
                         },
-                        disabled: sending() || recipient().is_empty() || amount().is_empty(),
+                        disabled: sending() || resolved_recipient.read().is_none() || amount().is_empty(), // ← UPDATED VALIDATION
                         if sending() && !show_hardware_approval() { 
                             "Sending {token_symbol}..." 
                         } else { 

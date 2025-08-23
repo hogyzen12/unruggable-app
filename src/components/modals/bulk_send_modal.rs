@@ -7,6 +7,8 @@ use crate::hardware::HardwareWallet;
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::transaction::TransactionClient;
 use crate::signing::{SignerType, hardware::HardwareSigner};
+use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
+use solana_sdk::pubkey::Pubkey; // ← ADD THIS IMPORT
 use std::sync::Arc;
 use std::collections::HashSet;
 
@@ -196,6 +198,7 @@ pub fn BulkSendModal(
 ) -> Element {
     // State management - following the pattern from send_modal.rs
     let mut recipient = use_signal(|| "".to_string());
+    let mut resolved_recipient = use_signal(|| Option::<Pubkey>::None); // ← ADD THIS LINE
     let mut sending = use_signal(|| false);
     let mut error_message = use_signal(|| None as Option<String>);
     let mut recipient_balance = use_signal(|| None as Option<f64>);
@@ -274,33 +277,30 @@ pub fn BulkSendModal(
         current_balance >= estimated_fee()
     });
 
-    // Effect to check recipient balance - following send_modal pattern
+    // Update recipient balance checking effect to use resolved recipient
     let custom_rpc_for_effect = custom_rpc.clone();
     use_effect(move || {
-        let recipient_addr = recipient();
-        let rpc_url = custom_rpc_for_effect.clone();
+        if let Some(resolved_pubkey) = *resolved_recipient.read() {
+            let recipient_addr = resolved_pubkey.to_string();
+            let rpc_url = custom_rpc_for_effect.clone();
 
-        if recipient_addr.len() > 30 {
-            if bs58::decode(&recipient_addr).into_vec().is_ok() {
-                checking_balance.set(true);
-                recipient_balance.set(None);
+            checking_balance.set(true);
+            recipient_balance.set(None);
 
-                spawn(async move {
-                    match crate::rpc::get_balance(&recipient_addr, rpc_url.as_deref()).await {
-                        Ok(balance) => {
-                            recipient_balance.set(Some(balance));
-                        }
-                        Err(_) => {
-                            recipient_balance.set(None);
-                        }
+            spawn(async move {
+                match crate::rpc::get_balance(&recipient_addr, rpc_url.as_deref()).await {
+                    Ok(balance) => {
+                        recipient_balance.set(Some(balance));
                     }
-                    checking_balance.set(false);
-                });
-            } else {
-                recipient_balance.set(None);
-            }
+                    Err(_) => {
+                        recipient_balance.set(None);
+                    }
+                }
+                checking_balance.set(false);
+            });
         } else {
             recipient_balance.set(None);
+            checking_balance.set(false);
         }
     });
 
@@ -383,22 +383,23 @@ pub fn BulkSendModal(
                     div { class: "address-display", "{display_address}" }
                 }
                 
-                // Recipient address input - matching other modals
+                // ← REPLACE THE OLD RECIPIENT INPUT WITH THIS SNS-ENABLED VERSION:
                 div {
                     class: "wallet-field",
-                    label { "Recipient Address:" }
-                    input {
-                        value: "{recipient()}",
-                        oninput: move |e| {
-                            recipient.set(e.value());
-                            // Reset balance check when address changes
+                    AddressInput {
+                        value: recipient.read().clone(),
+                        on_change: move |val| {
+                            recipient.set(val);
+                            // Reset balance check and error when address changes
                             recipient_balance.set(None);
                             error_message.set(None);
                         },
-                        placeholder: "Enter Solana address"
+                        on_resolved: move |pubkey| resolved_recipient.set(pubkey),
+                        label: "Send all selected tokens to:",
+                        placeholder: "Enter address or domain (e.g., recipient.sol)"
                     }
                     
-                    // Show recipient balance if checked
+                    // Keep the recipient balance display
                     if checking_balance() {
                         div { 
                             class: "recipient-balance checking",
@@ -521,8 +522,17 @@ pub fn BulkSendModal(
                     }
                     button {
                         class: "modal-button primary",
-                        disabled: sending() || !all_amounts_valid() || recipient().trim().is_empty(),
+                        disabled: sending() || !all_amounts_valid() || resolved_recipient.read().is_none(), // ← UPDATED VALIDATION
                         onclick: move |_| {
+                            // ← VALIDATE RESOLVED RECIPIENT FIRST
+                            let recipient_pubkey = match resolved_recipient.read().as_ref() {
+                                Some(pubkey) => *pubkey,
+                                None => {
+                                    error_message.set(Some("Please enter a valid recipient address or domain".to_string()));
+                                    return;
+                                }
+                            };
+
                             if !sending() {
                                 sending.set(true);
                                 error_message.set(None);
@@ -538,7 +548,7 @@ pub fn BulkSendModal(
                                 // Clone values for async task
                                 let hardware_wallet_clone = hardware_wallet.clone();
                                 let wallet_info = wallet.clone();
-                                let recipient_address = recipient();
+                                let recipient_address = recipient_pubkey.to_string(); // ← USE RESOLVED PUBKEY
                                 let rpc_url = custom_rpc.clone();
                                 let selected_for_send: Vec<SelectedTokenForBulkSend> = selected_tokens()
                                     .iter()
@@ -550,13 +560,7 @@ pub fn BulkSendModal(
                                     .collect();
                                 
                                 spawn(async move {
-                                    // Validate recipient address
-                                    if let Err(e) = bs58::decode(&recipient_address).into_vec() {
-                                        error_message.set(Some(format!("Invalid recipient address: {}", e)));
-                                        sending.set(false);
-                                        show_hardware_approval.set(false);
-                                        return;
-                                    }
+                                    // ← NO NEED TO VALIDATE recipient_address anymore since it's already a valid pubkey!
                                 
                                     println!("Sending bulk transaction with {} tokens to {}", selected_for_send.len(), recipient_address);
                                     for item in &selected_for_send {
