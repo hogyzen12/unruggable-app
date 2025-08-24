@@ -24,8 +24,8 @@ enum Route {
     WalletView {},
 }
 
-const MAIN_CSS_URL: &str ="https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/main.css";
-//    const MAIN_CSS: Asset = asset!("/assets/main.css");
+//    const MAIN_CSS_URL: &str ="https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/main.css";
+const MAIN_CSS: Asset = asset!("/assets/main.css");
 
 fn main() {
     dioxus::launch(App);
@@ -42,9 +42,9 @@ fn App() -> Element {
     use_context_provider(|| sns_resolver);
 
     rsx! {
-        document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        //document::Link { rel: "stylesheet", href: MAIN_CSS }
+        //document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
+        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
+        document::Link { rel: "stylesheet", href: MAIN_CSS }
         Router::<Route> {}
     }
 }

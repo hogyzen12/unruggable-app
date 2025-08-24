@@ -35,6 +35,7 @@ use crate::prices;
 use crate::hardware::HardwareWallet;
 use crate::components::background_themes::BackgroundTheme;
 use crate::components::modals::BackgroundModal;
+use crate::prices::CandlestickData;
 use std::sync::Arc;
 use std::collections::HashMap;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -226,6 +227,173 @@ fn get_verified_tokens() -> HashMap<String, JupiterToken> {
     map
 }
 
+#[component]
+fn CandlestickChart(
+    data: Vec<CandlestickData>,
+    symbol: String,
+) -> Element {
+    println!("🎯 Rendering candlestick chart for {} with {} candles", symbol, data.len());
+    
+    if data.is_empty() {
+        return rsx! {
+            div {
+                class: "chart-error",
+                "No chart data available"
+            }
+        };
+    }
+
+    // Chart dimensions
+    let width = 300.0;
+    let height = 120.0;
+    let margin = 10.0;
+    let chart_width = width - (margin * 2.0);
+    let chart_height = height - (margin * 2.0);
+
+    // Find price range
+    let min_price = data.iter().map(|c| c.low).fold(f64::INFINITY, f64::min);
+    let max_price = data.iter().map(|c| c.high).fold(0.0, f64::max);
+    let price_range = max_price - min_price;
+    
+    println!("📊 Chart range: ${:.2} - ${:.2} (range: ${:.2})", min_price, max_price, price_range);
+
+    // Scale functions
+    let price_to_y = |price: f64| -> f64 {
+        if price_range > 0.0 {
+            margin + ((max_price - price) / price_range) * chart_height
+        } else {
+            height / 2.0
+        }
+    };
+
+    let index_to_x = |index: usize| -> f64 {
+        margin + (index as f64 / (data.len() - 1).max(1) as f64) * chart_width
+    };
+
+    // Candle width
+    let candle_width = if data.len() > 1 {
+        (chart_width / data.len() as f64 * 0.8).max(1.0).min(8.0)
+    } else {
+        4.0
+    };
+
+    rsx! {
+        div {
+            class: "candlestick-chart-container",
+            svg {
+                width: "{width}",
+                height: "{height}",
+                view_box: "0 0 {width} {height}",
+                style: "background: rgba(0, 0, 0, 0.3); border-radius: 8px;",
+                
+                // Background grid lines (optional)
+                defs {
+                    pattern {
+                        id: "grid-{symbol}",
+                        width: "20",
+                        height: "20",
+                        pattern_units: "userSpaceOnUse",
+                        path {
+                            d: "M 20 0 L 0 0 0 20",
+                            fill: "none",
+                            stroke: "rgba(255, 255, 255, 0.05)",
+                            stroke_width: "1",
+                        }
+                    }
+                }
+                rect {
+                    width: "{width}",
+                    height: "{height}",
+                    fill: "url(#grid-{symbol})",
+                }
+                
+                // Draw candlesticks
+                for (i, candle) in data.iter().enumerate() {
+                    {
+                        let x = index_to_x(i);
+                        let open_y = price_to_y(candle.open);
+                        let close_y = price_to_y(candle.close);
+                        let high_y = price_to_y(candle.high);
+                        let low_y = price_to_y(candle.low);
+                        
+                        let is_bullish = candle.close >= candle.open;
+                        let body_top = if is_bullish { close_y } else { open_y };
+                        let body_bottom = if is_bullish { open_y } else { close_y };
+                        let body_height = (body_bottom - body_top).abs().max(1.0);
+                        
+                        let color = if is_bullish { "#22c55e" } else { "#ef4444" };
+                        
+                        rsx! {
+                            g {
+                                key: "{i}",
+                                // High-Low line (wick)
+                                line {
+                                    x1: "{x}",
+                                    y1: "{high_y}",
+                                    x2: "{x}",
+                                    y2: "{low_y}",
+                                    stroke: "{color}",
+                                    stroke_width: "1",
+                                    opacity: "0.8",
+                                }
+                                // Candle body
+                                rect {
+                                    x: "{x - candle_width / 2.0}",
+                                    y: "{body_top}",
+                                    width: "{candle_width}",
+                                    height: "{body_height}",
+                                    fill: if is_bullish { "none" } else { color },
+                                    stroke: "{color}",
+                                    stroke_width: "1",
+                                    opacity: "0.9",
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                // Price labels (min/max)
+                text {
+                    x: "{margin}",
+                    y: "{margin - 2.0}",
+                    fill: "#888",
+                    font_size: "10",
+                    font_family: "monospace",
+                    "${max_price:.2}"
+                }
+                text {
+                    x: "{margin}",
+                    y: "{height - 2.0}",
+                    fill: "#888",
+                    font_size: "10",
+                    font_family: "monospace",
+                    "${min_price:.2}"
+                }
+            }
+            
+            // Chart summary below
+            div {
+                class: "chart-summary",
+                span {
+                    "30D Range: ${min_price:.2} - ${max_price:.2}"
+                }
+                span {
+                    {
+                        let latest = data.last().unwrap();
+                        let change = latest.close - data.first().unwrap().close;
+                        let change_pct = (change / data.first().unwrap().close) * 100.0;
+                        if change >= 0.0 {
+                            format!("30D: +{:.1}%", change_pct)
+                        } else {
+                            format!("30D: {:.1}%", change_pct)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Main wallet component
 #[component]
 pub fn WalletView() -> Element {
@@ -303,6 +471,10 @@ pub fn WalletView() -> Element {
     let mut expanded_tokens = use_signal(|| HashSet::<String>::new());
     let mut portfolio_expanded = use_signal(|| false);
 
+    // Dropdown charts on price tap
+    let mut chart_data = use_signal(|| HashMap::<String, Vec<CandlestickData>>::new());
+    let mut chart_loading = use_signal(|| HashSet::<String>::new());
+
     // Load wallets from storage on component mount
     use_effect(move || {
         let stored_wallets = load_wallets_from_storage();
@@ -353,6 +525,59 @@ pub fn WalletView() -> Element {
             Err(e) => {
                 println!("PRICE DEBUG: Error fetching historical changes: {}", e);
             }
+        }
+    }
+
+    // Replace your existing fetch_chart_data function with this enhanced version
+    async fn fetch_chart_data(
+        symbol: String,
+        mut chart_data: Signal<HashMap<String, Vec<CandlestickData>>>,
+        mut chart_loading: Signal<HashSet<String>>,
+    ) {
+        println!("🚀 Starting chart data fetch for {}", symbol);
+        
+        // Add to loading set
+        {
+            let mut loading_set = chart_loading();
+            loading_set.insert(symbol.clone());
+            chart_loading.set(loading_set);
+            println!("📊 Added {} to loading set", symbol);
+        }
+
+        match prices::get_candlestick_data(&symbol, 30).await { // Get 30 days of data
+            Ok(data) => {
+                println!("✅ Got {} candlesticks for {}", data.len(), symbol);
+                
+                // Log first few candlesticks for debugging
+                for (i, candle) in data.iter().take(3).enumerate() {
+                    println!("🕯️  Candle {}: O=${:.2} H=${:.2} L=${:.2} C=${:.2} T={}", 
+                            i, candle.open, candle.high, candle.low, candle.close, candle.timestamp);
+                }
+                
+                // Validate data quality
+                let valid_candles = data.iter().filter(|c| c.open > 0.0 && c.high > 0.0 && c.low > 0.0 && c.close > 0.0).count();
+                println!("📈 Valid candles: {}/{}", valid_candles, data.len());
+                
+                if valid_candles > 0 {
+                    let mut chart_map = chart_data();
+                    chart_map.insert(symbol.clone(), data);
+                    chart_data.set(chart_map);
+                    println!("💾 Saved chart data for {} to state", symbol);
+                } else {
+                    println!("❌ No valid candlestick data for {}", symbol);
+                }
+            },
+            Err(e) => {
+                println!("❌ Error fetching chart data for {}: {}", symbol, e);
+            }
+        }
+
+        // Remove from loading set
+        {
+            let mut loading_set = chart_loading();
+            loading_set.remove(&symbol);
+            chart_loading.set(loading_set);
+            println!("✅ Removed {} from loading set", symbol);
         }
     }
 
@@ -1304,211 +1529,6 @@ pub fn WalletView() -> Element {
                             }
                         }
                     }
-                    
-                    // Portfolio % change section with expandable multi-timeframe (just like tokens)
-                    if !prices_loading() {
-                        div {
-                            class: "portfolio-change-row",
-                            // Clickable container for expansion (same style as token prices)
-                            div {
-                                class: "portfolio-price-container",
-                                onclick: move |_| {
-                                    portfolio_expanded.set(!portfolio_expanded());
-                                },
-                                
-                                // Default 1D change display
-                                span {
-                                    class: {
-                                        // Calculate weighted average % change for portfolio (1D)
-                                        let tokens_list = tokens.read();
-                                        let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                        
-                                        if total_value > 0.0 {
-                                            let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
-                                                let weight = token.value_usd / total_value;
-                                                acc + (token.price_change_1d * weight)
-                                            });
-                                            
-                                            if weighted_change_1d >= 0.0 {
-                                                "portfolio-change positive"
-                                            } else {
-                                                "portfolio-change negative"
-                                            }
-                                        } else {
-                                            "portfolio-change neutral"
-                                        }
-                                    },
-                                    {
-                                        // Calculate and display the weighted average % change (1D)
-                                        let tokens_list = tokens.read();
-                                        let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                        
-                                        if total_value > 0.0 {
-                                            let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
-                                                let weight = token.value_usd / total_value;
-                                                acc + (token.price_change_1d * weight)
-                                            });
-                                            
-                                            if weighted_change_1d >= 0.0 {
-                                                format!("+{}%", weighted_change_1d.round() as i32)
-                                            } else {
-                                                format!("{}%", weighted_change_1d.round() as i32)
-                                            }
-                                        } else {
-                                            "0%".to_string()
-                                        }
-                                    }
-                                }
-                                
-                                // Expand indicator (same as tokens)
-                                span {
-                                    class: "price-expand-indicator",
-                                    if portfolio_expanded() {
-                                        "▼"
-                                    } else {
-                                        "▶"
-                                    }
-                                }
-                            }
-                            
-                            // Expandable multi-timeframe portfolio changes (same style as tokens)
-                            if portfolio_expanded() {
-                                div {
-                                    class: "token-changes-expanded",
-                                    span {
-                                        class: {
-                                            let tokens_list = tokens.read();
-                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                            
-                                            if total_value > 0.0 {
-                                                let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
-                                                    let weight = token.value_usd / total_value;
-                                                    acc + (token.price_change_1d * weight)
-                                                });
-                                                
-                                                if weighted_change_1d >= 0.0 {
-                                                    "token-change positive"
-                                                } else {
-                                                    "token-change negative"
-                                                }
-                                            } else {
-                                                "token-change neutral"
-                                            }
-                                        },
-                                        title: "1 Day Portfolio Change",
-                                        {
-                                            let tokens_list = tokens.read();
-                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                            
-                                            if total_value > 0.0 {
-                                                let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
-                                                    let weight = token.value_usd / total_value;
-                                                    acc + (token.price_change_1d * weight)
-                                                });
-                                                
-                                                if weighted_change_1d >= 0.0 {
-                                                    format!("1D: +{}%", weighted_change_1d.round() as i32)
-                                                } else {
-                                                    format!("1D: {}%", weighted_change_1d.round() as i32)
-                                                }
-                                            } else {
-                                                "1D: 0%".to_string()
-                                            }
-                                        }
-                                    }
-                                    span {
-                                        class: {
-                                            let tokens_list = tokens.read();
-                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                            
-                                            if total_value > 0.0 {
-                                                let weighted_change_3d = tokens_list.iter().fold(0.0, |acc, token| {
-                                                    let weight = token.value_usd / total_value;
-                                                    acc + (token.price_change_3d * weight)
-                                                });
-                                                
-                                                if weighted_change_3d >= 0.0 {
-                                                    "token-change positive"
-                                                } else {
-                                                    "token-change negative"
-                                                }
-                                            } else {
-                                                "token-change neutral"
-                                            }
-                                        },
-                                        title: "3 Day Portfolio Change",
-                                        {
-                                            let tokens_list = tokens.read();
-                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                            
-                                            if total_value > 0.0 {
-                                                let weighted_change_3d = tokens_list.iter().fold(0.0, |acc, token| {
-                                                    let weight = token.value_usd / total_value;
-                                                    acc + (token.price_change_3d * weight)
-                                                });
-                                                
-                                                if weighted_change_3d >= 0.0 {
-                                                    format!("3D: +{}%", weighted_change_3d.round() as i32)
-                                                } else {
-                                                    format!("3D: {}%", weighted_change_3d.round() as i32)
-                                                }
-                                            } else {
-                                                "3D: 0%".to_string()
-                                            }
-                                        }
-                                    }
-                                    span {
-                                        class: {
-                                            let tokens_list = tokens.read();
-                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                            
-                                            if total_value > 0.0 {
-                                                let weighted_change_7d = tokens_list.iter().fold(0.0, |acc, token| {
-                                                    let weight = token.value_usd / total_value;
-                                                    acc + (token.price_change_7d * weight)
-                                                });
-                                                
-                                                if weighted_change_7d >= 0.0 {
-                                                    "token-change positive"
-                                                } else {
-                                                    "token-change negative"
-                                                }
-                                            } else {
-                                                "token-change neutral"
-                                            }
-                                        },
-                                        title: "7 Day Portfolio Change",
-                                        {
-                                            let tokens_list = tokens.read();
-                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                            
-                                            if total_value > 0.0 {
-                                                let weighted_change_7d = tokens_list.iter().fold(0.0, |acc, token| {
-                                                    let weight = token.value_usd / total_value;
-                                                    acc + (token.price_change_7d * weight)
-                                                });
-                                                
-                                                if weighted_change_7d >= 0.0 {
-                                                    format!("7D: +{}%", weighted_change_7d.round() as i32)
-                                                } else {
-                                                    format!("7D: {}%", weighted_change_7d.round() as i32)
-                                                }
-                                            } else {
-                                                "7D: 0%".to_string()
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    if let Some(error) = price_error() {
-                        div {
-                            class: "price-error",
-                            "Price data error: {error}"
-                        }
-                    }
                 }
                 
                 div {
@@ -1659,7 +1679,6 @@ pub fn WalletView() -> Element {
                 }
                 div {
                     class: "token-list",
-                    // Find the token display section in your wallet_view.rs and replace it with this improved version:
                     for token in tokens() {
                         div {
                             key: "{token.mint}",
@@ -1723,21 +1742,29 @@ pub fn WalletView() -> Element {
                                     }
                                     div {
                                         class: "token-price-info",
-                                        // Clickable price section
+                                        // Clickable price section - UPDATED for charts
                                         div {
                                             class: "token-price-container",
                                             onclick: {
                                                 let token_mint = token.mint.clone();
+                                                let token_symbol = token.symbol.clone();
                                                 let is_stablecoin = matches!(token.symbol.as_str(), "USDC" | "USDT");
                                                 move |e| {
                                                     e.stop_propagation();
                                                     // Only allow expansion for non-stablecoins
                                                     if !is_stablecoin {
                                                         let mut current_expanded = expanded_tokens();
+                                                        let is_expanding = !current_expanded.contains(&token_mint);
+                                                        
                                                         if current_expanded.contains(&token_mint) {
                                                             current_expanded.remove(&token_mint);
                                                         } else {
                                                             current_expanded.insert(token_mint.clone());
+                                                            
+                                                            // Fetch chart data when expanding
+                                                            if is_expanding && !chart_data().contains_key(&token_symbol) {
+                                                                spawn(fetch_chart_data(token_symbol.clone(), chart_data, chart_loading));
+                                                            }
                                                         }
                                                         expanded_tokens.set(current_expanded);
                                                     }
@@ -1760,53 +1787,30 @@ pub fn WalletView() -> Element {
                                             }
                                         }
                                         
-                                        // Expandable price changes (only for non-stablecoins)
                                         if !matches!(token.symbol.as_str(), "USDC" | "USDT") && expanded_tokens().contains(&token.mint) {
                                             div {
-                                                class: "token-changes-expanded",
-                                                span {
-                                                    class: if token.price_change_1d >= 0.0 {
-                                                        "token-change positive"
-                                                    } else {
-                                                        "token-change negative"
-                                                    },
-                                                    title: "1 Day Change",
-                                                    {
-                                                        if token.price_change_1d >= 0.0 {
-                                                            format!("1D: +{}%", token.price_change_1d.round() as i32)
-                                                        } else {
-                                                            format!("1D: {}%", token.price_change_1d.round() as i32)
-                                                        }
+                                                class: "token-chart-expanded",
+                                                
+                                                // Show loading state
+                                                if chart_loading().contains(&token.symbol) {
+                                                    div {
+                                                        class: "chart-loading",
+                                                        "📊 Loading chart data..."
                                                     }
                                                 }
-                                                span {
-                                                    class: if token.price_change_3d >= 0.0 {
-                                                        "token-change positive"
-                                                    } else {
-                                                        "token-change negative"
-                                                    },
-                                                    title: "3 Day Change", 
-                                                    {
-                                                        if token.price_change_3d >= 0.0 {
-                                                            format!("3D: +{}%", token.price_change_3d.round() as i32)
-                                                        } else {
-                                                            format!("3D: {}%", token.price_change_3d.round() as i32)
-                                                        }
+                                                // Show chart if data is available
+                                                else if let Some(candlesticks) = chart_data().get(&token.symbol) {
+                                                    // Use the new CandlestickChart component
+                                                    CandlestickChart {
+                                                        data: candlesticks.clone(),
+                                                        symbol: token.symbol.clone(),
                                                     }
                                                 }
-                                                span {
-                                                    class: if token.price_change_7d >= 0.0 {
-                                                        "token-change positive"
-                                                    } else {
-                                                        "token-change negative"
-                                                    },
-                                                    title: "7 Day Change",
-                                                    {
-                                                        if token.price_change_7d >= 0.0 {
-                                                            format!("7D: +{}%", token.price_change_7d.round() as i32)
-                                                        } else {
-                                                            format!("7D: {}%", token.price_change_7d.round() as i32)
-                                                        }
+                                                // Show error state if no data
+                                                else {
+                                                    div {
+                                                        class: "chart-error",
+                                                        "📈 Chart data unavailable"
                                                     }
                                                 }
                                             }

@@ -1,0 +1,223 @@
+// Portfolio % change section with expandable multi-timeframe (just like tokens)
+            // Main content container for balance, address, and actions
+            div {
+                class: "main-content",
+                div {
+                    class: "balance-section-enhanced",
+                    div {
+                        class: "balance-amount-bold",
+                        // Show loading state for total portfolio value when prices are refreshing
+                        if prices_loading() {
+                            "Loading..."
+                        } else {
+                            // Calculate total portfolio value (sum of all token values) and round to nearest dollar
+                            {
+                                let total_value = tokens.read().iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                format_price_in_selected_currency(total_value)
+                            }
+                        }
+                    }
+                }
+                    if !prices_loading() {
+                        div {
+                            class: "portfolio-change-row",
+                            // Clickable container for expansion (same style as token prices)
+                            div {
+                                class: "portfolio-price-container",
+                                onclick: move |_| {
+                                    portfolio_expanded.set(!portfolio_expanded());
+                                },
+                                
+                                // Default 1D change display
+                                span {
+                                    class: {
+                                        // Calculate weighted average % change for portfolio (1D)
+                                        let tokens_list = tokens.read();
+                                        let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                        
+                                        if total_value > 0.0 {
+                                            let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                let weight = token.value_usd / total_value;
+                                                acc + (token.price_change_1d * weight)
+                                            });
+                                            
+                                            if weighted_change_1d >= 0.0 {
+                                                "portfolio-change positive"
+                                            } else {
+                                                "portfolio-change negative"
+                                            }
+                                        } else {
+                                            "portfolio-change neutral"
+                                        }
+                                    },
+                                    {
+                                        // Calculate and display the weighted average % change (1D)
+                                        let tokens_list = tokens.read();
+                                        let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                        
+                                        if total_value > 0.0 {
+                                            let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                let weight = token.value_usd / total_value;
+                                                acc + (token.price_change_1d * weight)
+                                            });
+                                            
+                                            if weighted_change_1d >= 0.0 {
+                                                format!("+{}%", weighted_change_1d.round() as i32)
+                                            } else {
+                                                format!("{}%", weighted_change_1d.round() as i32)
+                                            }
+                                        } else {
+                                            "0%".to_string()
+                                        }
+                                    }
+                                }
+                                
+                                // Expand indicator (same as tokens)
+                                span {
+                                    class: "price-expand-indicator",
+                                    if portfolio_expanded() {
+                                        "▼"
+                                    } else {
+                                        "▶"
+                                    }
+                                }
+                            }
+                            
+                            // Expandable multi-timeframe portfolio changes (same style as tokens)
+                            if portfolio_expanded() {
+                                div {
+                                    class: "token-changes-expanded",
+                                    span {
+                                        class: {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_1d * weight)
+                                                });
+                                                
+                                                if weighted_change_1d >= 0.0 {
+                                                    "token-change positive"
+                                                } else {
+                                                    "token-change negative"
+                                                }
+                                            } else {
+                                                "token-change neutral"
+                                            }
+                                        },
+                                        title: "1 Day Portfolio Change",
+                                        {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_1d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_1d * weight)
+                                                });
+                                                
+                                                if weighted_change_1d >= 0.0 {
+                                                    format!("1D: +{}%", weighted_change_1d.round() as i32)
+                                                } else {
+                                                    format!("1D: {}%", weighted_change_1d.round() as i32)
+                                                }
+                                            } else {
+                                                "1D: 0%".to_string()
+                                            }
+                                        }
+                                    }
+                                    span {
+                                        class: {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_3d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_3d * weight)
+                                                });
+                                                
+                                                if weighted_change_3d >= 0.0 {
+                                                    "token-change positive"
+                                                } else {
+                                                    "token-change negative"
+                                                }
+                                            } else {
+                                                "token-change neutral"
+                                            }
+                                        },
+                                        title: "3 Day Portfolio Change",
+                                        {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_3d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_3d * weight)
+                                                });
+                                                
+                                                if weighted_change_3d >= 0.0 {
+                                                    format!("3D: +{}%", weighted_change_3d.round() as i32)
+                                                } else {
+                                                    format!("3D: {}%", weighted_change_3d.round() as i32)
+                                                }
+                                            } else {
+                                                "3D: 0%".to_string()
+                                            }
+                                        }
+                                    }
+                                    span {
+                                        class: {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_7d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_7d * weight)
+                                                });
+                                                
+                                                if weighted_change_7d >= 0.0 {
+                                                    "token-change positive"
+                                                } else {
+                                                    "token-change negative"
+                                                }
+                                            } else {
+                                                "token-change neutral"
+                                            }
+                                        },
+                                        title: "7 Day Portfolio Change",
+                                        {
+                                            let tokens_list = tokens.read();
+                                            let total_value = tokens_list.iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                            
+                                            if total_value > 0.0 {
+                                                let weighted_change_7d = tokens_list.iter().fold(0.0, |acc, token| {
+                                                    let weight = token.value_usd / total_value;
+                                                    acc + (token.price_change_7d * weight)
+                                                });
+                                                
+                                                if weighted_change_7d >= 0.0 {
+                                                    format!("7D: +{}%", weighted_change_7d.round() as i32)
+                                                } else {
+                                                    format!("7D: {}%", weighted_change_7d.round() as i32)
+                                                }
+                                            } else {
+                                                "7D: 0%".to_string()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    if let Some(error) = price_error() {
+                        div {
+                            class: "price-error",
+                            "Price data error: {error}"
+                        }
+                    }
