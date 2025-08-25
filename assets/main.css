@@ -266,12 +266,12 @@ body {
     gap: 20px;
 }
 
-/* Keep original token-item structure but add position relative for send button */
 .token-item {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    position: relative; /* Add this for absolute positioning of send button */
+    flex-direction: column; /* Change to column so chart goes below */
+    gap: 0;
+    position: relative;
+    transition: all 0.3s ease;
 }
 
 .token-info {
@@ -4788,4 +4788,104 @@ body:has(.token-item-selected) .token-item:hover {
     .chart-summary {
         color: #9ca3af;
     }
+}
+
+.chart-timeframe-selector {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 8px;
+    gap: 4px;
+}
+
+.timeframe-btn {
+    padding: 4px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    background: rgba(0, 0, 0, 0.3);
+    color: #888;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.timeframe-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #a5f3fc;
+}
+
+.timeframe-btn.active {
+    background: rgba(34, 197, 94, 0.2);
+    color: #22c55e;
+    border-color: rgba(34, 197, 94, 0.4);
+}
+
+@media (prefers-color-scheme: dark) {
+    .timeframe-btn {
+        background: rgba(255, 255, 255, 0.05);
+        border-color: rgba(255, 255, 255, 0.1);
+    }
+    
+    .timeframe-btn:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+}
+
+.token-row-main {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    position: relative;
+}
+
+/* Full-width chart that spans below the entire token row */
+.token-chart-expanded-fullwidth {
+    margin-top: 12px;
+    padding: 16px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    animation: slideDown 0.3s ease-out;
+    backdrop-filter: blur(10px);
+    width: 100%;
+    align-self: stretch; /* Make it span the full width */
+}
+
+.token-chart-expanded-fullwidth .candlestick-chart-container {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.token-chart-expanded-fullwidth .candlestick-chart-container svg {
+    width: 100%;
+    max-width: 100%;
+    height: 160px; /* Increase height since we have more space */
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Override the existing token-item styling that might be interfering */
+.token-list .token-item {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    gap: 0 !important;
+}
+
+/* Ensure token-info and token-values stay in the same horizontal row */
+.token-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1; /* Take up available space */
+}
+
+.token-values {
+    text-align: right;
+    flex-shrink: 0; /* Don't shrink */
 }

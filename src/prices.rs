@@ -200,6 +200,75 @@ pub async fn get_candlestick_data(symbol: &str, days: i64) -> Result<Vec<Candles
     Ok(candlesticks)
 }
 
+pub async fn get_candlestick_data_with_resolution(
+    symbol: &str, 
+    days: i64, 
+    resolution: &str
+) -> Result<Vec<CandlestickData>, Box<dyn Error>> {
+    println!("Fetching {}-{} candlestick data for {}", days, resolution, symbol);
+    
+    let client = Client::new();
+    let end_time = Utc::now();
+    let start_time = match resolution {
+        "1H" => end_time - chrono::Duration::days(days),
+        "1D" => end_time - chrono::Duration::days(days),
+        _ => end_time - chrono::Duration::days(days),
+    };
+    
+    let params = [
+        ("symbol", format!("Crypto.{}/USD", symbol)),
+        ("resolution", resolution.to_string()),
+        ("from", start_time.timestamp().to_string()),
+        ("to", end_time.timestamp().to_string()),
+    ];
+    
+    // Rest of the function is the same as your existing get_candlestick_data
+    let response = client
+        .get(PYTH_HISTORY_URL)
+        .query(&params)
+        .header("accept", "application/json")
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        return Err(format!("API error for {}: {}", symbol, response.status()).into());
+    }
+    
+    let hist_data: TradingViewHistoryResponse = response.json().await?;
+    
+    if hist_data.s != "ok" {
+        return Err(format!("API returned error status: {}", hist_data.s).into());
+    }
+    
+    let timestamps = hist_data.t.ok_or("No timestamp data")?;
+    let opens = hist_data.o.ok_or("No open price data")?;
+    let highs = hist_data.h.ok_or("No high price data")?;
+    let lows = hist_data.l.ok_or("No low price data")?;
+    let closes = hist_data.c.ok_or("No close price data")?;
+    let volumes = hist_data.v;
+    
+    if timestamps.len() != opens.len() || timestamps.len() != highs.len() 
+        || timestamps.len() != lows.len() || timestamps.len() != closes.len() {
+        return Err("Mismatched data array lengths".into());
+    }
+    
+    let mut candlesticks = Vec::new();
+    
+    for i in 0..timestamps.len() {
+        candlesticks.push(CandlestickData {
+            timestamp: timestamps[i],
+            open: opens[i],
+            high: highs[i],
+            low: lows[i],
+            close: closes[i],
+            volume: volumes.as_ref().map(|v| v[i]),
+        });
+    }
+    
+    println!("✅ Fetched {} candlesticks for {} ({})", candlesticks.len(), symbol, resolution);
+    Ok(candlesticks)
+}
+
 // Get previous day's closing price (24h ago) - NO CACHING for debugging
 async fn get_previous_day_price(symbol: &str) -> Result<Option<f64>, Box<dyn Error>> {
     println!("Fetching historical price for {}", symbol);
