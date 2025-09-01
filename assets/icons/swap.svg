@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 72 72">
+  <!-- Generator: Adobe Illustrator 29.6.0, SVG Export Plug-In . SVG Version: 2.1.1 Build 207)  -->
+  <defs>
+    <style>
+      .st0 {
+        font-family: Archivo-Medium, Archivo;
+        font-size: 11.42px;
+        font-weight: 500;
+      }
+
+      .st0, .st1 {
+        fill: #fff;
+      }
+
+      .st2 {
+        fill: #221f1f;
+      }
+    </style>
+  </defs>
+  <rect class="st2" width="72" height="72" rx="21.82" ry="21.82"/>
+  <text class="st0" transform="translate(21.5 60.26)"><tspan x="0" y="0">Swap</tspan></text>
+  <g>
+    <path class="st1" d="M40.06,29.19c-.33,0-.66-.13-.9-.37-.5-.5-.5-1.31,0-1.81l3-2.99h-15.38c-.7,0-1.27-.57-1.27-1.27s.57-1.27,1.27-1.27h15.38l-3-2.99c-.24-.24-.37-.57-.37-.9s.13-.66.37-.9c.5-.5,1.31-.5,1.81,0l5.17,5.17c.5.5.5,1.31,0,1.81l-5.17,5.17c-.24.24-.57.37-.9.37Z"/>
+    <path class="st1" d="M31.94,29.19c.33,0,.66.13.9.37.5.5.5,1.31,0,1.81l-3,2.99h15.38c.7,0,1.27.57,1.27,1.27s-.57,1.27-1.27,1.27h-15.38s3,2.99,3,2.99c.24.24.37.57.37.9s-.13.66-.37.9c-.5.5-1.31.5-1.81,0l-5.17-5.17c-.5-.5-.5-1.31,0-1.81l5.17-5.17c.24-.24.57-.37.9-.37Z"/>
+  </g>
+</svg>
