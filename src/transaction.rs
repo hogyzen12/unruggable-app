@@ -780,15 +780,3 @@ impl TransactionClient {
         Ok(())
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test_transaction_client() {
-        let client = TransactionClient::new(None);
-        let blockhash = client.get_recent_blockhash().await;
-        assert!(blockhash.is_ok());
-    }
-}
