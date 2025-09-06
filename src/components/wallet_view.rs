@@ -29,7 +29,9 @@ use crate::currency_utils::{
 use crate::components::modals::currency_modal::CurrencyModal;
 use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
-use crate::components::common::Token;
+use crate::token_utils::process_tokens_for_display;
+use crate::components::common::TokenDisplayData;
+use crate::components::common::{Token, TokenSortConfig, TokenFilter, SortCriteria};
 use crate::rpc;
 use crate::prices;
 use crate::hardware::HardwareWallet;
@@ -52,7 +54,7 @@ use rand::{thread_rng, Rng};
 //const ICON_JTO: Asset = asset!("/assets/icons/jtoLogo.png");
 //const ICON_JUP: Asset = asset!("/assets/icons/jupLogo.png");
 //const ICON_JLP: Asset = asset!("/assets/icons/jlpLogo.png");
-//const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
+const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
 
 // Action button SVG icons
 const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
@@ -68,7 +70,7 @@ const ICON_USDT:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@m
 const ICON_JTO:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jtoLogo.png";
 const ICON_JUP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jupLogo.png";
 const ICON_JLP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jlpLogo.png";
-const ICON_BONK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
+//const ICON_BONK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
 //const ICON_RECEIVE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/receive.svg";
 //const ICON_SEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/send.svg";
 //const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/stake.svg";
@@ -145,6 +147,81 @@ async fn fetch_token_prices(
         Err(e) => {
             price_error.set(Some(format!("Failed to fetch prices: {}", e)));
             println!("❌ Error fetching prices: {}", e);
+        }
+    }
+    
+    prices_loading.set(false);
+}
+
+async fn fetch_token_prices_for_discovered_tokens(
+    discovered_tokens: HashMap<String, String>, // mint -> symbol mapping
+    mut token_prices: Signal<HashMap<String, f64>>,
+    mut prices_loading: Signal<bool>,
+    mut price_error: Signal<Option<String>>,
+    mut sol_price: Signal<f64>,
+    mut daily_change: Signal<f64>,
+    mut daily_change_percent: Signal<f64>,
+    mut token_changes: Signal<HashMap<String, (Option<f64>, Option<f64>)>>,
+    mut multi_timeframe_data: Signal<HashMap<String, prices::MultiTimeframePriceData>>,
+) {
+    prices_loading.set(true);
+    price_error.set(None);
+
+    println!("Fetching prices for discovered tokens: {:?}", discovered_tokens);
+
+    // Use the corrected function name from prices.rs
+    match prices::get_prices_for_tokens(discovered_tokens).await {
+        Ok(current_prices) => {
+            println!("Got dynamic prices: {:?}", current_prices);
+            
+            // Create dummy multi-timeframe data for backward compatibility
+            let mut multi_data = HashMap::new();
+            for (token, price) in &current_prices {
+                multi_data.insert(token.clone(), prices::MultiTimeframePriceData {
+                    current_price: *price,
+                    change_1d_amount: Some(0.0),
+                    change_1d_percentage: Some(0.0),
+                    change_3d_amount: Some(0.0),
+                    change_3d_percentage: Some(0.0),
+                    change_7d_amount: Some(0.0),
+                    change_7d_percentage: Some(0.0),
+                });
+            }
+            
+            // Set the multi-timeframe data signal
+            multi_timeframe_data.set(multi_data.clone());
+            
+            // Convert to old format for backward compatibility
+            let mut old_format_changes = HashMap::new();
+            for (token, data) in &multi_data {
+                old_format_changes.insert(token.clone(), (data.change_1d_amount, data.change_1d_percentage));
+            }
+            
+            // Set both signals
+            token_changes.set(old_format_changes);
+            token_prices.set(current_prices.clone());
+
+            // Update SOL price
+            if let Some(new_sol_price) = current_prices.get("SOL") {
+                let old_price = sol_price();
+                let price_diff = new_sol_price - old_price;
+                
+                if old_price > 0.0 {
+                    daily_change.set(price_diff);
+                    daily_change_percent.set((price_diff / old_price) * 100.0);
+                } else {
+                    daily_change.set(0.0);
+                    daily_change_percent.set(0.0);
+                }
+                
+                sol_price.set(*new_sol_price);
+            }
+            
+            println!("Successfully updated all price data for {} tokens", current_prices.len());
+        },
+        Err(e) => {
+            price_error.set(Some(format!("Failed to fetch prices: {}", e)));
+            println!("Error fetching prices: {}", e);
         }
     }
     
@@ -443,6 +520,10 @@ pub fn WalletView() -> Element {
 
     // Token management
     let mut tokens = use_signal(|| Vec::<Token>::new());
+    // Add these after existing signals
+    let mut token_sort_config = use_signal(|| TokenSortConfig::default());
+    let mut token_filter = use_signal(|| TokenFilter::default());
+    let mut show_sort_menu = use_signal(|| false);
     
     // Add a new signal for token prices
     let mut token_prices = use_signal(|| HashMap::<String, f64>::new());
@@ -530,28 +611,6 @@ pub fn WalletView() -> Element {
         });
     });
     
-    async fn fetch_historical_changes(
-        token_prices: Signal<HashMap<String, f64>>,
-        mut token_changes: Signal<HashMap<String, (Option<f64>, Option<f64>)>>,
-    ) {
-        // Get a copy of current prices
-        let current_prices = token_prices.read().clone();
-        
-        // Fetch historical changes separately
-        match prices::get_historical_changes(&current_prices).await {
-            Ok(changes) => {
-                println!("PRICE DEBUG: Successfully fetched historical changes: {:#?}", changes);
-                token_changes.set(changes); // Just use the original changes directly
-                
-                // Add this line to confirm the data was set
-                println!("PRICE DEBUG: After setting token_changes: {:#?}", token_changes.read());
-            },
-            Err(e) => {
-                println!("PRICE DEBUG: Error fetching historical changes: {}", e);
-            }
-        }
-    }
-
     async fn fetch_chart_data(
         symbol: String,
         mut chart_data: Signal<HashMap<String, Vec<CandlestickData>>>,
@@ -771,76 +830,119 @@ pub fn WalletView() -> Element {
                     let token_changes_snapshot = token_changes.read().clone();
                     println!("PRICE DEBUG: token_changes_snapshot in token creation: {:#?}", token_changes_snapshot);
                     
-                    // Filter token accounts
-                    let filtered_accounts: Vec<_> = token_accounts
+                    let all_non_zero_accounts: Vec<_> = token_accounts
                         .into_iter()
                         .filter(|account| {
                             let is_non_zero = account.amount > 0.0;
-                            let is_verified = verified_tokens_map.contains_key(&account.mint);
                             println!(
-                                "Token {}: amount={}, is_verified={}, will_include={}",
+                                "Token {}: amount={}, will_include={}",
                                 account.mint,
                                 account.amount,
-                                is_verified,
-                                is_non_zero && is_verified
+                                is_non_zero
                             );
-                            is_non_zero && is_verified
+                            is_non_zero  // <- INCLUDE ALL NON-ZERO TOKENS
                         })
                         .collect();
-                    
-                    println!("Filtered token accounts: {:?}", filtered_accounts);
-                    
-                    let new_tokens = filtered_accounts
+
+                    println!("All non-zero token accounts: {} tokens", all_non_zero_accounts.len());
+
+                    // STEP 2: Build mint->symbol mapping for price fetching
+                    let mut mint_to_symbol_map = HashMap::new();
+                    for account in &all_non_zero_accounts {
+                        if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
+                            // Use verified token name
+                            mint_to_symbol_map.insert(account.mint.clone(), verified_token.symbol.clone());
+                        } else {
+                            // Use truncated mint address as symbol for unknown tokens
+                            let short_mint = if account.mint.len() >= 8 {
+                                format!("{}...{}", &account.mint[..4], &account.mint[account.mint.len()-4..])
+                            } else {
+                                account.mint.clone()
+                            };
+                            mint_to_symbol_map.insert(account.mint.clone(), short_mint);
+                        }
+                    }
+
+                    // STEP 3: Fetch prices for ALL tokens
+                    println!("Fetching prices for {} discovered tokens", mint_to_symbol_map.len());
+                    let token_prices_result = if !mint_to_symbol_map.is_empty() {
+                        prices::get_prices_for_tokens(mint_to_symbol_map.clone()).await
+                    } else {
+                        Ok(HashMap::new())
+                    };
+
+                    let dynamic_token_prices = match token_prices_result {
+                        Ok(prices) => {
+                            println!("Successfully fetched prices for {} tokens", prices.len());
+                            prices
+                        },
+                        Err(e) => {
+                            println!("Error fetching dynamic prices: {}", e);
+                            HashMap::new()
+                        }
+                    };
+
+                    // STEP 4: Create tokens for display
+                    let new_tokens = all_non_zero_accounts
                         .into_iter()
                         .map(|account| {
-                            let metadata = verified_tokens_map.get(&account.mint).unwrap();
+                            let symbol = mint_to_symbol_map.get(&account.mint)
+                                .cloned()
+                                .unwrap_or_else(|| format!("UNKNOWN_{}", &account.mint[..6]));
                             
-                            // Get real price from token_prices if available
-                            let price = token_prices_snapshot.get(&metadata.symbol)
+                            // Get price from dynamic prices, fallback to hardcoded snapshot, then to 1.0
+                            let price = dynamic_token_prices.get(&symbol)
                                 .copied()
+                                .or_else(|| token_prices_snapshot.get(&symbol).copied())
                                 .unwrap_or_else(|| {
-                                    match metadata.symbol.as_str() {
-                                        "USDC" => 1.0,
-                                        "USDT" => 1.0,
-                                        _ => 1.0,
+                                    match symbol.as_str() {
+                                        "USDC" | "USDT" => 1.0,
+                                        _ => 0.0, // Show $0 for unknown token prices
                                     }
                                 });
                             
-                            let symbol = metadata.symbol.as_str();
-                            
                             // Get multi-timeframe changes
                             let multi_data_snapshot = multi_timeframe_data.read().clone();
-                            let (change_1d, change_3d, change_7d) = get_multi_timeframe_changes(symbol, &multi_data_snapshot);
+                            let (change_1d, change_3d, change_7d) = get_multi_timeframe_changes(&symbol, &multi_data_snapshot);
                             
-                            println!("Creating token {}: 1D={:.1}%, 3D={:.1}%, 7D={:.1}%", symbol, change_1d, change_3d, change_7d);
+                            println!("Creating token {}: price=${:.4}, 1D={:.1}%, 3D={:.1}%, 7D={:.1}%", 
+                                    symbol, price, change_1d, change_3d, change_7d);
                             
                             let value_usd = account.amount * price;
-                            let icon_type = match metadata.symbol.as_str() {
-                                "USDC" => ICON_USDC.to_string(),
-                                "USDT" => ICON_USDT.to_string(),
-                                "JTO" => ICON_JTO.to_string(),
-                                "JUP" => ICON_JUP.to_string(),
-                                "JLP" => ICON_JLP.to_string(),
-                                "BONK" => ICON_BONK.to_string(),
-                                _ => ICON_32.to_string(),
+                            
+                            // Use verified token icons when available, fallback to generic
+                            let icon_type = if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
+                                match verified_token.symbol.as_str() {
+                                    "USDC" => ICON_USDC.to_string(),
+                                    "USDT" => ICON_USDT.to_string(),
+                                    "JTO" => ICON_JTO.to_string(),
+                                    "JUP" => ICON_JUP.to_string(),
+                                    "JLP" => ICON_JLP.to_string(),
+                                    "BONK" => ICON_BONK.to_string(),
+                                    _ => ICON_32.to_string(),
+                                }
+                            } else {
+                                ICON_32.to_string()
                             };
                             
                             Token {
                                 mint: account.mint.clone(),
-                                symbol: metadata.symbol.clone(),
-                                name: metadata.name.clone(),
+                                symbol: symbol.clone(),
+                                name: verified_tokens_map.get(&account.mint)
+                                    .map(|t| t.name.clone())
+                                    .unwrap_or_else(|| format!("Token {}", &symbol)),
                                 icon_type,
                                 balance: account.amount,
                                 value_usd,
                                 price,
-                                price_change: change_1d,  // Keep for backward compatibility
+                                price_change: change_1d,
                                 price_change_1d: change_1d,
                                 price_change_3d: change_3d,
                                 price_change_7d: change_7d,
                             }
                         })
                         .collect::<Vec<Token>>();
-
+                    
                     // Get the most recent SOL price
                     let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
 
@@ -848,7 +950,8 @@ pub fn WalletView() -> Element {
                     let multi_data_snapshot = multi_timeframe_data.read().clone();
                     let (sol_change_1d, sol_change_3d, sol_change_7d) = get_multi_timeframe_changes("SOL", &multi_data_snapshot);
 
-                    let mut all_tokens = vec![Token {
+                    let mut all_tokens_raw = {
+                    let mut raw_tokens = vec![Token {
                         mint: "So11111111111111111111111111111111111111112".to_string(),
                         symbol: "SOL".to_string(),
                         name: "Solana".to_string(),
@@ -856,14 +959,30 @@ pub fn WalletView() -> Element {
                         balance: balance(),
                         value_usd: balance() * current_sol_price,
                         price: current_sol_price,
-                        price_change: sol_change_1d,  // Keep for backward compatibility
+                        price_change: sol_change_1d,
                         price_change_1d: sol_change_1d,
                         price_change_3d: sol_change_3d,
                         price_change_7d: sol_change_7d,
                     }];
-                    all_tokens.extend(new_tokens);
-                    
-                    tokens.set(all_tokens);
+                    raw_tokens.extend(new_tokens);
+                    raw_tokens
+                };
+
+                // Use the new processing system
+                let processed_tokens = process_tokens_for_display(
+                    all_tokens_raw,
+                    &token_prices_snapshot,
+                    &token_sort_config.read(),
+                    &token_filter.read(),
+                );
+
+                // Convert back to Token structs for compatibility
+                let final_tokens: Vec<Token> = processed_tokens
+                    .into_iter()
+                    .map(|td| td.token)
+                    .collect();
+
+                tokens.set(final_tokens);
                 }
                 Err(e) => {
                     println!("Failed to fetch token accounts for address {}: {}", address, e);
@@ -1939,11 +2058,11 @@ pub fn WalletView() -> Element {
                                             class: "token-values",
                                             div {
                                                 class: "token-value-usd",
-                                                "${token_value_usd:.2}"
+                                                "{format_token_value_smart(token_balance, token_price)}"
                                             }
                                             div {
                                                 class: "token-amount",
-                                                "{token_balance:.4} {token_symbol}"
+                                                "{format_token_amount(token_balance, &token_symbol)}"
                                             }
                                         }
                                     }
