@@ -36,6 +36,7 @@ use crate::hardware::HardwareWallet;
 use crate::components::background_themes::BackgroundTheme;
 use crate::components::modals::BackgroundModal;
 use crate::prices::CandlestickData;
+use crate::config::tokens::{get_verified_tokens as get_config_tokens, VerifiedToken};
 use std::sync::Arc;
 use std::collections::HashMap;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -54,10 +55,11 @@ use rand::{thread_rng, Rng};
 //const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
 
 // Action button SVG icons
-//const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
-//const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
-//const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
-//const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
+const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
+const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
+const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
+const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
+const ICON_SWAP: Asset = asset!("/assets/icons/swap.svg");
 
 const ICON_32:     &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
 const ICON_SOL:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
@@ -67,10 +69,11 @@ const ICON_JTO:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@m
 const ICON_JUP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jupLogo.png";
 const ICON_JLP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jlpLogo.png";
 const ICON_BONK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
-const ICON_RECEIVE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/receive.svg";
-const ICON_SEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/send.svg";
-const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/stake.svg";
-const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bulk.svg";
+//const ICON_RECEIVE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/receive.svg";
+//const ICON_SEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/send.svg";
+//const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/stake.svg";
+//const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bulk.svg";
+//const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
 
 
 // JupiterToken struct with PartialEq and Eq for use_memo
@@ -446,8 +449,22 @@ pub fn WalletView() -> Element {
     let mut prices_loading = use_signal(|| false);
     let mut price_error = use_signal(|| None as Option<String>);
 
-    // Verified tokens loaded with USDC and USDT
-    let verified_tokens = use_memo(move || get_verified_tokens());
+    let verified_tokens = use_memo(move || {
+        let config_tokens = get_config_tokens();
+        let mut jupiter_tokens = HashMap::new();
+        
+        for (address, token) in config_tokens {
+            jupiter_tokens.insert(address, JupiterToken {
+                address: token.address,
+                name: token.name,
+                symbol: token.symbol,
+                logo_uri: token.logo_uri,
+                tags: token.tags,
+            });
+        }
+        
+        jupiter_tokens
+    });
 
     // Background Selections
     let mut selected_background = use_signal(|| BackgroundTheme::get_presets()[0].clone());
@@ -1062,20 +1079,20 @@ pub fn WalletView() -> Element {
                         onclick: move |e| e.stop_propagation(),
                         
                         // Current wallet display
-                        if let Some(ref wallet) = current_wallet {
-                            div {
-                                class: "dropdown-item current-wallet",
-                                div {
-                                    class: "dropdown-icon wallet-icon",
-                                    "💼"
-                                }
-                                div {
-                                    class: "wallet-info",
-                                    div { class: "wallet-name", "{wallet.name}" }
-                                    div { class: "wallet-address", "{wallet_address}" }
-                                }
-                            }
-                        }
+                        //if let Some(ref wallet) = current_wallet {
+                        //    div {
+                        //        class: "dropdown-item current-wallet current-wallet-highlighted", // ← ADD custom class
+                        //        div {
+                        //            class: "dropdown-icon wallet-icon",
+                        //            "💼"
+                        //        }
+                        //        div {
+                        //            class: "wallet-info",
+                        //            div { class: "wallet-name", "{wallet.name}" }
+                        //            div { class: "wallet-address", "{wallet_address}" }
+                        //        }
+                        //    }
+                        //}
                         
                         // Hardware wallet display (unchanged)
                         if hardware_connected() && hardware_pubkey().is_some() {
@@ -1107,29 +1124,6 @@ pub fn WalletView() -> Element {
                                             }
                                         }
                                     }
-                                }
-                            }
-                        }
-                        
-                        div { class: "dropdown-divider" }
-                        
-                        // NEW: Currency Selector
-                        button {
-                            class: "dropdown-item currency-selector",
-                            onclick: move |_| {
-                                show_currency_modal.set(true);
-                                show_dropdown.set(false);
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                "💱"
-                            }
-                            div {
-                                class: "currency-display",
-                                "Currency: "
-                                span {
-                                    class: "current-symbol",
-                                    "{get_current_currency_code()}"
                                 }
                             }
                         }
@@ -1172,6 +1166,29 @@ pub fn WalletView() -> Element {
                         }
                         
                         div { class: "dropdown-divider" }
+
+                        // NEW: Currency Selector
+                        button {
+                            class: "dropdown-item currency-selector",
+                            onclick: move |_| {
+                                show_currency_modal.set(true);
+                                show_dropdown.set(false);
+                            },
+                            div {
+                                class: "dropdown-icon action-icon",
+                                "💱"
+                            }
+                            div {
+                                class: "currency-display",
+                                "Currency: "
+                                span {
+                                    class: "current-symbol",
+                                    "{get_current_currency_code()}"
+                                }
+                            }
+                        }
+                        
+                        div { class: "dropdown-divider" }
                         
                         // Existing action buttons (unchanged)
                         button {
@@ -1202,20 +1219,20 @@ pub fn WalletView() -> Element {
                             "Import Wallet"
                         }
                         
-                        if hardware_device_present() && !hardware_connected() {
-                            button {
-                                class: "dropdown-item",
-                                onclick: move |_| {
-                                    show_hardware_modal.set(true);
-                                    show_dropdown.set(false);
-                                },
-                                div {
-                                    class: "dropdown-icon action-icon",
-                                    "🔐"
-                                }
-                                "Connect Hardware Wallet"
-                            }
-                        }
+                        //if hardware_device_present() && !hardware_connected() {
+                        //    button {
+                        //        class: "dropdown-item",
+                        //        onclick: move |_| {
+                        //            show_hardware_modal.set(true);
+                        //            show_dropdown.set(false);
+                        //        },
+                        //        div {
+                        //            class: "dropdown-icon action-icon",
+                        //            "🔐"
+                        //        }
+                        //        "Connect Hardware Wallet"
+                        //    }
+                        //}
                         
                         div { class: "dropdown-divider" }
                         
@@ -1657,22 +1674,39 @@ pub fn WalletView() -> Element {
                             class: "action-label",
                             "Stake"
                         }
-                    }                    
+                    }
                     button {
                         class: "action-button",
                         onclick: move |_| {
                             println!("🔄 Swap button clicked!"); // Add logging for debugging
                             show_swap_modal.set(true);
                         },
-                        div {
-                            class: "action-icon",
-                            "🔄"
+                        img {
+                            class: "action-svg",
+                            src: "{ICON_SWAP}",  // Point this to your new SVG file path
+                            alt: "Swap",
                         }
-                        span {
-                            class: "action-label",
-                            "Swap"
-                        }
-                    }
+                    }                   
+                    //button {
+                    //    class: "action-button",
+                    //    onclick: move |_| {
+                    //        println!("🔄 Swap button clicked!"); // Add logging for debugging
+                    //        show_swap_modal.set(true);
+                    //    },
+                    //    div {
+                    //        class: "action-icon",
+                    //        img {
+                    //            src: "{ICON_SWAP}",
+                    //            alt: "Swap",
+                    //            width: "24",
+                    //            height: "24",
+                    //        }
+                    //    }
+                        //span {
+                        //    class: "action-label",
+                        //    "Swap"
+                        //}
+                    //}
                     //button {
                     //    class: "action-button",
                     //    onclick: move |_| show_send_modal.set(true),
@@ -1690,18 +1724,18 @@ pub fn WalletView() -> Element {
                     //        "Send"
                     //    }
                     //}
-                    button {
-                        class: "action-button",
-                        onclick: move |_| show_history_modal.set(true),
-                        div {
-                            class: "action-icon history-icon",
-                            "📜"
-                        }
-                        span {
-                            class: "action-label",
-                            "History"
-                        }
-                    }
+                    //button {
+                    //    class: "action-button",
+                    //    onclick: move |_| show_history_modal.set(true),
+                    //    div {
+                    //        class: "action-icon history-icon",
+                    //        "📜"
+                    //    }
+                    //    span {
+                    //        class: "action-label",
+                    //        "History"
+                    //    }
+                    //}
                 }
             }
             

@@ -14,6 +14,7 @@ mod staking;
 mod currency;
 mod currency_utils;
 mod sns;
+mod config;
 
 use components::*;
 

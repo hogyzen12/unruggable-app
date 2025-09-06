@@ -688,8 +688,13 @@ body {
     background-color: #2a2a2a;
 }
 
+/* Current wallet display (top section) with custom highlight */
 .dropdown-item.current-wallet {
-    background-color: #1f2937;
+    background: linear-gradient(90deg, 
+        rgba(99, 102, 241, 0.2) 0%, 
+        rgba(31, 41, 55, 1) 20%
+    );
+    border-left: 3px solid #6366f1;
     cursor: default;
     border-radius: 8px;
     padding: 16px;
@@ -697,8 +702,10 @@ body {
     align-items: center;
     gap: 16px;
     overflow: hidden;
+    margin-left: -1px;              /* Align border with menu edge */
 }
 
+/* Current wallet icon */
 .dropdown-item.current-wallet .dropdown-icon.wallet-icon {
     width: 32px;
     height: 32px;
@@ -711,6 +718,7 @@ body {
     color: #fff;
 }
 
+/* Current wallet text info */
 .dropdown-item.current-wallet .wallet-info {
     display: flex;
     flex-direction: column;
@@ -751,16 +759,6 @@ body {
     font-size: 20px;
 }
 
-/* Wallet icon styles */
-.dropdown-icon.wallet-icon {
-    background-color: #2a2a2a;
-}
-
-.dropdown-icon.action-icon {
-    background-color: transparent;
-}
-
-/* Special styling for wallet items */
 .wallet-list-item .dropdown-icon {
     width: 32px;
     height: 32px;
@@ -787,10 +785,16 @@ body {
     margin-top: 2px;
 }
 
+/* Dropdown divider */
 .dropdown-divider {
     height: 1px;
     background-color: #2a2a2a;
     margin: 8px 16px;
+}
+
+/* Action icon styling */
+.dropdown-icon.action-icon {
+    background-color: transparent;
 }
 
 /* Menu icon update */
@@ -4888,4 +4892,33 @@ body:has(.token-item-selected) .token-item:hover {
 .token-values {
     text-align: right;
     flex-shrink: 0; /* Don't shrink */
+}
+
+/* New styling for the SVG image - adapted from previous .action-icon */
+.action-svg {
+    width: 80px;  /* Increased from 50px to make it bigger */
+    height: auto; /* Preserves aspect ratio if text makes it taller */
+    background-color: rgba(31, 41, 55, 0.6); /* Semi-transparent dark background */
+    border-radius: 12px; /* Use 50% for circle if square; otherwise rectangle for icon+text */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    backdrop-filter: blur(10px); /* Glass effect */
+}
+
+/* SVG icon styling - much simpler */
+.action-svg {
+    filter: invert(0.0); /* Makes SVG gray (if monochromatic) */
+    transition: filter 0.2s ease;
+}
+
+/* Simple hover effect */
+.action-button:hover .action-svg {
+    background-color: rgba(31, 41, 55, 0.8);
+    transform: scale(1.05);
+}
+
+.action-button:hover .action-svg {
+    filter: invert(1); /* Makes SVG white on hover */
 }
