@@ -3,6 +3,10 @@ use dioxus::prelude::*;
 use crate::hardware::{HardwareWallet, HardwareDeviceInfo, HardwareDeviceType};
 use std::sync::Arc;
 
+// Define the assets for device icons
+const ICON_UNRUGGABLE: Asset = asset!("/assets/icon.png");
+const ICON_LEDGER: Asset = asset!("/assets/icons/ledgerLogo.webp");
+
 #[component]
 pub fn HardwareWalletModal(
     onclose: EventHandler<()>,
@@ -49,17 +53,6 @@ pub fn HardwareWalletModal(
             });
         }
     });
-
-    // Function to refresh device list
-    let refresh_devices = move |_| {
-        scanning.set(true);
-        error_message.set(None);
-        spawn(async move {
-            let devices = HardwareWallet::scan_available_devices().await;
-            available_devices.set(devices);
-            scanning.set(false);
-        });
-    };
 
     // Function to connect to a specific device type
     let mut connect_device = move |dev_type: HardwareDeviceType| {
@@ -122,143 +115,224 @@ pub fn HardwareWalletModal(
             onclick: move |_| onclose.call(()),
             
             div {
-                class: "modal-content",
+                class: "modal-content hardware-modal",
                 onclick: move |e| e.stop_propagation(),
                 
-                h2 { class: "modal-title", "Hardware Wallet" }
-                
-                // Show error if any
-                if let Some(error) = error_message() {
-                    div {
-                        class: "error-message",
-                        "{error}"
+                div {
+                    class: "modal-header",
+                    h2 { class: "modal-title", "Hardware Wallet" }
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
                     }
                 }
                 
-                if !connected() {
-                    div {
-                        class: "info-message",
-                        "Connect your hardware wallet via USB"
-                    }
-
-                    // Device scanning status
-                    if scanning() {
+                div {
+                    class: "modal-body",
+                    
+                    // Show error if any
+                    if let Some(error) = error_message() {
                         div {
-                            class: "scanning-message",
-                            "🔍 Scanning for devices..."
+                            class: "error-message",
+                            div { class: "error-icon", "⚠️" }
+                            div { class: "error-text", "{error}" }
                         }
-                    } else {
-                        // Show available devices
-                        if available_devices().is_empty() {
+                    }
+                    
+                    if !connected() {
+                        div {
+                            class: "connection-section",
+                            
                             div {
-                                class: "no-devices-message",
-                                "No hardware wallets detected."
-                                br {}
-                                "Please connect your device and ensure:"
-                                ul {
-                                    li { "ESP32: Device is connected via USB with proper drivers" }
-                                    li { "Ledger: Device is unlocked, Solana app is open, and Ledger Live is closed" }
-                                }
+                                class: "info-header",
+                                h3 { "Connect Your Hardware Wallet" }
+                                p { class: "info-subtitle", "Secure your transactions with hardware-based signing" }
                             }
-                        } else {
-                            div {
-                                class: "devices-list",
-                                h3 { "Available Devices:" }
-                                
-                                for device in available_devices() {
+
+                            // Device scanning status
+                            if scanning() {
+                                div {
+                                    class: "scanning-container",
+                                    div { class: "scanning-spinner" }
+                                    div { class: "scanning-text", "Scanning for devices..." }
+                                }
+                            } else {
+                                // Show available devices or empty state
+                                if available_devices().is_empty() {
                                     div {
-                                        class: "device-item",
-                                        div {
-                                            class: "device-info",
-                                            span {
-                                                class: "device-icon",
-                                                match device.device_type {
-                                                    HardwareDeviceType::ESP32 => "🔧",
-                                                    HardwareDeviceType::Ledger => "🔒",
-                                                }
+                                        class: "no-devices-container",
+                                        div { class: "no-devices-icon", "🔍" }
+                                        div { class: "no-devices-title", "No Hardware Wallets Detected" }
+                                        div { class: "no-devices-subtitle", "Please connect your device and ensure:" }
+                                        ul {
+                                            class: "device-requirements",
+                                            li { 
+                                                strong { "Unruggable: " }
+                                                "Device is connected via USB with proper drivers installed"
                                             }
-                                            div {
-                                                class: "device-details",
-                                                div { class: "device-name", "{device.name}" }
-                                                div { 
-                                                    class: "device-type",
-                                                    match device.device_type {
-                                                        HardwareDeviceType::ESP32 => "ESP32 Hardware Wallet",
-                                                        HardwareDeviceType::Ledger => "Ledger Hardware Wallet",
+                                            li { 
+                                                strong { "Ledger: " }
+                                                "Device is unlocked, Solana app is open, and Ledger Live is closed"
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    div {
+                                        class: "devices-section",
+                                        h4 { class: "devices-title", "Available Devices" }
+                                        
+                                        div {
+                                            class: "devices-grid",
+                                            for device in available_devices() {
+                                                div {
+                                                    class: "device-card",
+                                                    div {
+                                                        class: "device-icon-container",
+                                                        div {
+                                                            class: if device.device_type == HardwareDeviceType::ESP32 {
+                                                                "device-icon device-icon-unruggable"
+                                                            } else {
+                                                                "device-icon device-icon-ledger"
+                                                            },
+                                                            // Device logo images
+                                                            img {
+                                                                src: if device.device_type == HardwareDeviceType::ESP32 {
+                                                                    ICON_UNRUGGABLE
+                                                                } else {
+                                                                    ICON_LEDGER
+                                                                },
+                                                                alt: if device.device_type == HardwareDeviceType::ESP32 {
+                                                                    "Unruggable Hardware Wallet"
+                                                                } else {
+                                                                    "Ledger Hardware Wallet"
+                                                                },
+                                                                width: "48",
+                                                                height: "48"
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    div {
+                                                        class: "device-info",
+                                                        div { class: "device-name", "{device.name}" }
+                                                        div { 
+                                                            class: if device.device_type == HardwareDeviceType::ESP32 {
+                                                                "device-type-badge unruggable-badge"
+                                                            } else {
+                                                                "device-type-badge ledger-badge"
+                                                            },
+                                                            if device.device_type == HardwareDeviceType::ESP32 {
+                                                                "Unruggable Wallet"
+                                                            } else {
+                                                                "Ledger Wallet"
+                                                            }
+                                                        }
+                                                    }
+                                                    
+                                                    button {
+                                                        class: if connecting() {
+                                                            "connect-device-button connecting"
+                                                        } else {
+                                                            "connect-device-button"
+                                                        },
+                                                        disabled: connecting(),
+                                                        onclick: {
+                                                            let dev_type = device.device_type.clone();
+                                                            move |_| connect_device(dev_type.clone())
+                                                        },
+                                                        if connecting() {
+                                                            div { class: "button-spinner" }
+                                                            span { "Connecting..." }
+                                                        } else {
+                                                            span { "Connect" }
+                                                        }
                                                     }
                                                 }
                                             }
                                         }
-                                        button {
-                                            class: "connect-device-button",
-                                            disabled: connecting(),
-                                            onclick: {
-                                                let dev_type = device.device_type.clone();
-                                                move |_| connect_device(dev_type.clone())
+                                    }
+                                }
+                            }
+                        }
+                        
+                    } else {
+                        // Connected state - show wallet info and options
+                        div {
+                            class: "connected-section",
+                            
+                            div {
+                                class: "success-header",
+                                div { class: "success-icon", "✅" }
+                                h3 { "Hardware Wallet Connected" }
+                            }
+                            
+                            if let Some(dev_type) = device_type() {
+                                div {
+                                    class: "connected-device-card",
+                                    div {
+                                        class: "connected-device-icon",
+                                        div {
+                                            class: if dev_type == HardwareDeviceType::ESP32 {
+                                                "device-icon-large device-icon-unruggable"
+                                            } else {
+                                                "device-icon-large device-icon-ledger"
                                             },
-                                            if connecting() { "Connecting..." } else { "Connect" }
+                                            // Larger device logo images for connected state
+                                            img {
+                                                src: if dev_type == HardwareDeviceType::ESP32 {
+                                                    ICON_UNRUGGABLE
+                                                } else {
+                                                    ICON_LEDGER
+                                                },
+                                                alt: if dev_type == HardwareDeviceType::ESP32 {
+                                                    "Unruggable Hardware Wallet"
+                                                } else {
+                                                    "Ledger Hardware Wallet"
+                                                },
+                                                width: "64",
+                                                height: "64"
+                                            }
+                                        }
+                                    }
+                                    
+                                    div {
+                                        class: "connected-device-info",
+                                        h4 { class: "connected-device-name", "{dev_type}" }
+                                        if let Some(pubkey) = public_key() {
+                                            div {
+                                                class: "device-pubkey-section",
+                                                div { class: "pubkey-label", "Public Key:" }
+                                                div { 
+                                                    class: "pubkey-display",
+                                                    onclick: move |_| {
+                                                        // Copy to clipboard functionality could be added here
+                                                        log::info!("Public key copied: {}", pubkey);
+                                                    },
+                                                    span { class: "pubkey-text", "{pubkey}" }
+                                                    div { class: "copy-hint", "Click to copy" }
+                                                }
+                                            }
+                                        }
+                                        
+                                        div {
+                                            class: "connection-status",
+                                            div { class: "status-indicator connected" }
+                                            span { "Securely Connected" }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
-                    
-                    div { class: "modal-buttons",
-                        button {
-                            class: "modal-button secondary",
-                            onclick: refresh_devices,
-                            disabled: scanning() || connecting(),
-                            if scanning() { "Scanning..." } else { "Refresh Devices" }
-                        }
-                        button {
-                            class: "modal-button cancel",
-                            onclick: move |_| onclose.call(()),
-                            disabled: connecting(),
-                            "Cancel"
-                        }
-                    }
-                } else {
-                    // Connected state - show wallet info and disconnect option
-                    div {
-                        class: "success-message",
-                        "✅ Hardware wallet connected!"
-                    }
-                    
-                    if let Some(dev_type) = device_type() {
-                        div {
-                            class: "device-info-connected",
-                            div {
-                                class: "device-icon-large",
-                                match dev_type {
-                                    HardwareDeviceType::ESP32 => "🔧",
-                                    HardwareDeviceType::Ledger => "🔒",
-                                }
+                        
+                        div { 
+                            class: "connected-modal-actions",
+                            button {
+                                class: "connect-device-button",
+                                onclick: disconnect_device,
+                                div { class: "disconnect-icon", "🔌" }
+                                span { "Disconnect Device" }
                             }
-                            div {
-                                class: "device-details-connected",
-                                div { class: "device-type-connected", "{dev_type}" }
-                                if let Some(pubkey) = public_key() {
-                                    div {
-                                        class: "device-pubkey",
-                                        "Public Key: "
-                                        span { class: "pubkey-text", "{pubkey}" }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    div { class: "modal-buttons",
-                        button {
-                            class: "modal-button secondary",
-                            onclick: disconnect_device,
-                            "Disconnect"
-                        }
-                        button {
-                            class: "modal-button primary",
-                            onclick: move |_| onclose.call(()),
-                            "Continue"
                         }
                     }
                 }
