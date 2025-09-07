@@ -24,7 +24,8 @@ use crate::currency_utils::{
     format_token_value_smart,
     format_token_amount, 
     format_price_change,
-    get_current_currency_code
+    get_current_currency_code,
+    format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
 use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal};
@@ -305,6 +306,20 @@ fn get_verified_tokens() -> HashMap<String, JupiterToken> {
     );
     
     map
+}
+
+// Helper function to get fallback icons
+fn get_fallback_icon(symbol: &str) -> String {
+    match symbol {
+        "USDC" => ICON_USDC.to_string(),
+        "USDT" => ICON_USDT.to_string(),
+        "JTO" => ICON_JTO.to_string(),
+        "JUP" => ICON_JUP.to_string(),
+        "JLP" => ICON_JLP.to_string(),
+        "BONK" => ICON_BONK.to_string(),
+        "SOL" => ICON_SOL.to_string(),
+        _ => ICON_32.to_string(),
+    }
 }
 
 #[component]
@@ -846,24 +861,47 @@ pub fn WalletView() -> Element {
 
                     println!("All non-zero token accounts: {} tokens", all_non_zero_accounts.len());
 
-                    // STEP 2: Build mint->symbol mapping for price fetching
+                    // STEP 2: Fetch token metadata from Jupiter Token API
+                    let mint_addresses: Vec<String> = all_non_zero_accounts.iter()
+                        .map(|account| account.mint.clone())
+                        .collect();
+
+                    let token_metadata = if !mint_addresses.is_empty() {
+                        match prices::get_token_metadata(mint_addresses).await {
+                            Ok(metadata) => {
+                                println!("Successfully fetched metadata for {} tokens", metadata.len());
+                                metadata
+                            },
+                            Err(e) => {
+                                println!("Error fetching token metadata: {}", e);
+                                HashMap::new()
+                            }
+                        }
+                    } else {
+                        HashMap::new()
+                    };
+
+                    // STEP 3: Build mint->symbol mapping for price fetching (updated)
                     let mut mint_to_symbol_map = HashMap::new();
                     for account in &all_non_zero_accounts {
-                        if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
+                        let symbol = if let Some(metadata) = token_metadata.get(&account.mint) {
+                            // Use metadata from Jupiter Token API
+                            metadata.symbol.clone()
+                        } else if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
                             // Use verified token name
-                            mint_to_symbol_map.insert(account.mint.clone(), verified_token.symbol.clone());
+                            verified_token.symbol.clone()
                         } else {
                             // Use truncated mint address as symbol for unknown tokens
-                            let short_mint = if account.mint.len() >= 8 {
+                            if account.mint.len() >= 8 {
                                 format!("{}...{}", &account.mint[..4], &account.mint[account.mint.len()-4..])
                             } else {
                                 account.mint.clone()
-                            };
-                            mint_to_symbol_map.insert(account.mint.clone(), short_mint);
-                        }
+                            }
+                        };
+                        mint_to_symbol_map.insert(account.mint.clone(), symbol);
                     }
 
-                    // STEP 3: Fetch prices for ALL tokens
+                    // STEP 4: Fetch prices for ALL tokens
                     println!("Fetching prices for {} discovered tokens", mint_to_symbol_map.len());
                     let token_prices_result = if !mint_to_symbol_map.is_empty() {
                         prices::get_prices_for_tokens(mint_to_symbol_map.clone()).await
@@ -882,13 +920,22 @@ pub fn WalletView() -> Element {
                         }
                     };
 
-                    // STEP 4: Create tokens for display
+                    // STEP 5: Create tokens for display with metadata
                     let new_tokens = all_non_zero_accounts
                         .into_iter()
                         .map(|account| {
                             let symbol = mint_to_symbol_map.get(&account.mint)
                                 .cloned()
                                 .unwrap_or_else(|| format!("UNKNOWN_{}", &account.mint[..6]));
+                            
+                            // Get token metadata from Jupiter API or verified tokens
+                            let (token_name, icon_url) = if let Some(metadata) = token_metadata.get(&account.mint) {
+                                (metadata.name.clone(), metadata.icon.clone())
+                            } else if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
+                                (verified_token.name.clone(), Some(verified_token.logo_uri.clone()))
+                            } else {
+                                (format!("Token {}", &symbol), None)
+                            };
                             
                             // Get price from dynamic prices, fallback to hardcoded snapshot, then to 1.0
                             let price = dynamic_token_prices.get(&symbol)
@@ -910,27 +957,21 @@ pub fn WalletView() -> Element {
                             
                             let value_usd = account.amount * price;
                             
-                            // Use verified token icons when available, fallback to generic
-                            let icon_type = if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
-                                match verified_token.symbol.as_str() {
-                                    "USDC" => ICON_USDC.to_string(),
-                                    "USDT" => ICON_USDT.to_string(),
-                                    "JTO" => ICON_JTO.to_string(),
-                                    "JUP" => ICON_JUP.to_string(),
-                                    "JLP" => ICON_JLP.to_string(),
-                                    "BONK" => ICON_BONK.to_string(),
-                                    _ => ICON_32.to_string(),
+                            // Determine icon to use - prioritize real icons from metadata
+                            let icon_type = if let Some(icon_url) = icon_url {
+                                if !icon_url.is_empty() {
+                                    icon_url  // Use real icon from Jupiter Token API
+                                } else {
+                                    get_fallback_icon(&symbol)  // Use fallback for empty URLs
                                 }
                             } else {
-                                ICON_32.to_string()
+                                get_fallback_icon(&symbol)  // Use fallback for no metadata
                             };
                             
                             Token {
                                 mint: account.mint.clone(),
                                 symbol: symbol.clone(),
-                                name: verified_tokens_map.get(&account.mint)
-                                    .map(|t| t.name.clone())
-                                    .unwrap_or_else(|| format!("Token {}", &symbol)),
+                                name: token_name,
                                 icon_type,
                                 balance: account.amount,
                                 value_usd,
@@ -942,7 +983,7 @@ pub fn WalletView() -> Element {
                             }
                         })
                         .collect::<Vec<Token>>();
-                    
+                        
                     // Get the most recent SOL price
                     let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
 
@@ -1714,7 +1755,7 @@ pub fn WalletView() -> Element {
                             // Calculate total portfolio value (sum of all token values) and round to nearest dollar
                             {
                                 let total_value = tokens.read().iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                format_price_in_selected_currency(total_value)
+                                format_portfolio_balance(total_value)
                             }
                         }
                     }

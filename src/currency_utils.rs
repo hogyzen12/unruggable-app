@@ -70,7 +70,18 @@ pub fn format_percentage_change(percentage: f64) -> String {
     format!("{}{:.2}%", sign, percentage)
 }
 
-/// Format large numbers with appropriate abbreviations (K, M, B)
+/// Format portfolio balance without decimals for clean display
+pub fn format_portfolio_balance(usd_amount: f64) -> String {
+    let selected_currency = SELECTED_CURRENCY.read().clone();
+    let converted_amount = convert_from_usd(usd_amount, &selected_currency);
+    let rounded_amount = converted_amount.round();
+    let symbol = get_current_currency_symbol();
+    
+    // Always format without decimals for portfolio balance
+    format!("{}{:.0}", symbol, rounded_amount)
+}
+
+/// Format large numbers with appropriate abbreviations (K, M, B) - Updated to handle whole numbers
 pub fn format_large_currency_amount(usd_amount: f64) -> String {
     let selected_currency = SELECTED_CURRENCY.read().clone();
     let converted_amount = convert_from_usd(usd_amount, &selected_currency);
@@ -87,7 +98,12 @@ pub fn format_large_currency_amount(usd_amount: f64) -> String {
     };
     
     if suffix.is_empty() {
-        format!("{}{:.2}", symbol, value)
+        // For amounts under 1000, check if it's a whole number
+        if value.fract() == 0.0 {
+            format!("{}{:.0}", symbol, value)  // No decimals for whole numbers
+        } else {
+            format!("{}{:.2}", symbol, value)  // Keep decimals for fractional amounts
+        }
     } else {
         format!("{}{:.1}{}", symbol, value, suffix)
     }

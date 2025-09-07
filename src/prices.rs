@@ -10,6 +10,7 @@ use std::sync::OnceLock;
 // API Constants
 const PYTH_HISTORY_URL: &str = "https://benchmarks.pyth.network/v1/shims/tradingview/history";
 const JUPITER_PRICE_API_URL: &str = "https://lite-api.jup.ag/price/v3";
+const JUPITER_TOKEN_API_URL: &str = "https://lite-api.jup.ag/tokens/v2/search";
 const PRICE_CACHE_TIMEOUT: u64 = 120; // 2 minutes
 
 // Token mint addresses for Jupiter API
@@ -55,6 +56,52 @@ struct JupiterTokenPrice {
     decimals: Option<u8>,
     #[serde(rename = "priceChange24h")]
     price_change_24h: Option<f64>,
+}
+
+// Jupiter Token API V2 response structure
+#[derive(Debug, Deserialize, Clone)]
+pub struct JupiterTokenInfo {
+    pub id: String,  // mint address
+    pub name: String,
+    pub symbol: String,
+    pub icon: Option<String>,
+    pub decimals: u8,
+    pub twitter: Option<String>,
+    pub telegram: Option<String>,
+    pub website: Option<String>,
+    pub dev: Option<String>,
+    #[serde(rename = "circSupply")]
+    pub circ_supply: Option<f64>,
+    #[serde(rename = "totalSupply")]
+    pub total_supply: Option<f64>,
+    #[serde(rename = "tokenProgram")]
+    pub token_program: String,
+    pub launchpad: Option<String>,
+    #[serde(rename = "partnerConfig")]
+    pub partner_config: Option<String>,
+    #[serde(rename = "graduatedPool")]
+    pub graduated_pool: Option<String>,
+    #[serde(rename = "graduatedAt")]
+    pub graduated_at: Option<String>,
+    #[serde(rename = "holderCount")]
+    pub holder_count: Option<u64>,
+    pub fdv: Option<f64>,
+    pub mcap: Option<f64>,
+    #[serde(rename = "usdPrice")]
+    pub usd_price: Option<f64>,
+    #[serde(rename = "priceBlockId")]
+    pub price_block_id: Option<u64>,
+    pub liquidity: Option<f64>,
+    #[serde(rename = "organicScore")]
+    pub organic_score: f64,
+    #[serde(rename = "organicScoreLabel")]
+    pub organic_score_label: String,
+    #[serde(rename = "isVerified")]
+    pub is_verified: Option<bool>,
+    pub cexes: Option<Vec<String>>,
+    pub tags: Option<Vec<String>>,
+    #[serde(rename = "updatedAt")]
+    pub updated_at: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -223,6 +270,62 @@ pub async fn get_prices_for_tokens(token_mint_to_symbol: HashMap<String, String>
     
     println!("Final symbol prices: {} tokens", symbol_prices.len());
     Ok(symbol_prices)
+}
+
+/// Fetch token metadata from Jupiter Token API
+pub async fn get_token_metadata(mint_addresses: Vec<String>) -> Result<HashMap<String, JupiterTokenInfo>, Box<dyn Error>> {
+    if mint_addresses.is_empty() {
+        return Ok(HashMap::new());
+    }
+    
+    println!("Fetching token metadata from Jupiter Token API for {} tokens...", mint_addresses.len());
+    
+    let client = Client::new();
+    
+    // Build comma-separated mint addresses (max 100 as per API docs)
+    let chunks: Vec<_> = mint_addresses.chunks(100).collect();
+    let mut all_tokens = HashMap::new();
+    
+    for chunk in chunks {
+        let ids_param = chunk.join(",");
+        
+        println!("Jupiter Token API request: {} with query: {}", JUPITER_TOKEN_API_URL, ids_param);
+        
+        let response = client
+            .get(JUPITER_TOKEN_API_URL)
+            .query(&[("query", &ids_param)])
+            .header("Accept", "application/json")
+            .send()
+            .await
+            .map_err(|e| format!("Jupiter Token API request failed: {}", e))?;
+
+        let status = response.status();
+        println!("Jupiter Token API response status: {}", status);
+
+        if !status.is_success() {
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            println!("Jupiter Token API error {}: {}", status, error_text);
+            continue; // Continue with next chunk instead of failing completely
+        }
+
+        let response_text = response.text().await?;
+        println!("Jupiter Token API raw response (first 500 chars): {}", 
+                 if response_text.len() > 500 { &response_text[..500] } else { &response_text });
+
+        let token_infos: Vec<JupiterTokenInfo> = serde_json::from_str(&response_text)
+            .map_err(|e| format!("Failed to parse Jupiter Token API response: {} - Response: {}", e, response_text))?;
+
+        // Index by mint address
+        for token_info in token_infos {
+            all_tokens.insert(token_info.id.clone(), token_info);
+        }
+        
+        // Small delay between requests to be nice to the API
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    
+    println!("Jupiter Token API returned metadata for {} tokens", all_tokens.len());
+    Ok(all_tokens)
 }
 
 fn create_dummy_multi_data(prices: &HashMap<String, f64>) -> HashMap<String, MultiTimeframePriceData> {
