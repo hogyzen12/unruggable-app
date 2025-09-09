@@ -39,7 +39,7 @@ use crate::hardware::HardwareWallet;
 use crate::components::background_themes::BackgroundTheme;
 use crate::components::modals::BackgroundModal;
 use crate::prices::CandlestickData;
-use crate::config::tokens::{get_verified_tokens as get_config_tokens, VerifiedToken};
+use crate::config::tokens::{get_verified_tokens, VerifiedToken};
 use std::sync::Arc;
 use std::collections::HashMap;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -228,85 +228,6 @@ async fn fetch_token_prices_for_discovered_tokens(
     }
     
     prices_loading.set(false);
-}
-
-// Hardcoded verified tokens including USDC, USDT, JTO, JUP, JLP, and BONK
-fn get_verified_tokens() -> HashMap<String, JupiterToken> {
-    let mut map = HashMap::new();
-    
-    // USDC
-    map.insert(
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
-        JupiterToken {
-            address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
-            name: "USD Coin".to_string(),
-            symbol: "USDC".to_string(),
-            logo_uri: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png".to_string(),
-            tags: vec!["stablecoin".to_string()],
-        },
-    );
-    
-    // USDT
-    map.insert(
-        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".to_string(),
-        JupiterToken {
-            address: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB".to_string(),
-            name: "Tether USD".to_string(),
-            symbol: "USDT".to_string(),
-            logo_uri: "https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB/logo.png".to_string(),
-            tags: vec!["stablecoin".to_string()],
-        },
-    );
-    
-    // JTO
-    map.insert(
-        "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL".to_string(),
-        JupiterToken {
-            address: "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL".to_string(),
-            name: "Jito".to_string(),
-            symbol: "JTO".to_string(),
-            logo_uri: "".to_string(),
-            tags: vec!["token".to_string()],
-        },
-    );
-    
-    // JUP
-    map.insert(
-        "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN".to_string(),
-        JupiterToken {
-            address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN".to_string(),
-            name: "Jupiter".to_string(),
-            symbol: "JUP".to_string(),
-            logo_uri: "".to_string(),
-            tags: vec!["token".to_string()],
-        },
-    );
-    
-    // JLP
-    map.insert(
-        "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4".to_string(),
-        JupiterToken {
-            address: "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4".to_string(),
-            name: "Jupiter LP".to_string(),
-            symbol: "JLP".to_string(),
-            logo_uri: "".to_string(),
-            tags: vec!["token".to_string()],
-        },
-    );
-    
-    // BONK
-    map.insert(
-        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string(),
-        JupiterToken {
-            address: "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263".to_string(),
-            name: "Bonk".to_string(),
-            symbol: "BONK".to_string(),
-            logo_uri: "".to_string(),
-            tags: vec!["meme".to_string()],
-        },
-    );
-    
-    map
 }
 
 // Helper function to get fallback icons
@@ -547,20 +468,7 @@ pub fn WalletView() -> Element {
     let mut price_error = use_signal(|| None as Option<String>);
 
     let verified_tokens = use_memo(move || {
-        let config_tokens = get_config_tokens();
-        let mut jupiter_tokens = HashMap::new();
-        
-        for (address, token) in config_tokens {
-            jupiter_tokens.insert(address, JupiterToken {
-                address: token.address,
-                name: token.name,
-                symbol: token.symbol,
-                logo_uri: token.logo_uri,
-                tags: token.tags,
-            });
-        }
-        
-        jupiter_tokens
+        get_verified_tokens().clone()
     });
 
     // Background Selections
@@ -841,7 +749,7 @@ pub fn WalletView() -> Element {
                     println!("Raw token accounts for address {}: {:?}", address, token_accounts);
                     
                     // Access the HashMap inside the Memo using read()
-                    let verified_tokens_map = verified_tokens_clone.read();
+                    let verified_tokens_map = &verified_tokens_clone();
                     
                     // Get snapshots of current prices and historical changes
                     let token_prices_snapshot = token_prices_snapshot.clone();

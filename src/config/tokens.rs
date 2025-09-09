@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 // Simple token struct - no dependencies
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -10,8 +11,8 @@ pub struct VerifiedToken {
     pub tags: Vec<String>,
 }
 
-/// Get hardcoded verified tokens
-pub fn get_verified_tokens() -> HashMap<String, VerifiedToken> {
+// Lazy static initialization - creates the HashMap only once
+static VERIFIED_TOKENS: LazyLock<HashMap<String, VerifiedToken>> = LazyLock::new(|| {
     let mut map = HashMap::new();
     
     // SOL
@@ -46011,4 +46012,14 @@ pub fn get_verified_tokens() -> HashMap<String, VerifiedToken> {
     );
     
     map
+});
+
+/// Get reference to the verified tokens HashMap (no recreation each time)
+pub fn get_verified_tokens() -> &'static HashMap<String, VerifiedToken> {
+    &VERIFIED_TOKENS
+}
+
+/// Get a cloned copy of the verified tokens HashMap (if mutation needed)
+pub fn get_verified_tokens_cloned() -> HashMap<String, VerifiedToken> {
+    VERIFIED_TOKENS.clone()
 }
