@@ -28,7 +28,7 @@ use crate::currency_utils::{
     format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -63,6 +63,7 @@ const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
 const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
 const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
 const ICON_SWAP: Asset = asset!("/assets/icons/swap.svg");
+const ICON_LEND: Asset = asset!("/assets/icons/lend.webp");
 
 const ICON_32:     &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
 const ICON_SOL:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
@@ -594,6 +595,8 @@ pub fn WalletView() -> Element {
     let mut chart_loading = use_signal(|| HashSet::<String>::new());
     let mut selected_timeframe = use_signal(|| HashMap::<String, String>::new()); // Per-token timeframe
     let mut chart_timeframe_data = use_signal(|| HashMap::<String, HashMap<String, Vec<CandlestickData>>>::new());
+
+    let mut show_lend_modal = use_signal(|| false);
 
     // Load wallets from storage on component mount
     use_effect(move || {
@@ -1724,6 +1727,36 @@ pub fn WalletView() -> Element {
                 }
             }
 
+            if show_lend_modal() {
+                LendModal {
+                    tokens: tokens(),
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| show_lend_modal.set(false),
+                    onsuccess: move |signature| {
+                        println!("✅ Lend completed with signature: {}", signature);
+                        show_lend_modal.set(false);
+                        // Refresh balances after successful lend
+                        if let Some(wallet) = current_wallet.clone() {
+                            let address = wallet.address.clone();
+                            let rpc_url = custom_rpc();
+                            
+                            spawn(async move {
+                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
+                                    Ok(sol_balance) => {
+                                        balance.set(sol_balance);
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to refresh balance after lend: {}", e);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+
             if show_background_modal() {
                 BackgroundModal {
                     current_background: selected_background(),
@@ -1846,7 +1879,27 @@ pub fn WalletView() -> Element {
                             src: "{ICON_SWAP}",  // Point this to your new SVG file path
                             alt: "Swap",
                         }
-                    }                   
+                    }
+                    button {
+                        class: "action-button",
+                        onclick: move |_| {
+                            println!("💰 Lend button clicked!");
+                            show_lend_modal.set(true);
+                        },
+                        div {
+                            class: "action-icon",
+                            img {
+                                src: "{ICON_LEND}",
+                                alt: "Lend",
+                                width: "24",
+                                height: "24",
+                            }
+                        }
+                        span {
+                            class: "action-label",
+                            "Lend"
+                        }
+                    }               
                     //button {
                     //    class: "action-button",
                     //    onclick: move |_| {
