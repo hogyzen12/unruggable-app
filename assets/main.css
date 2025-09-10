@@ -218,7 +218,7 @@ body {
 .action-icon img {
     width: 24px;
     height: 24px;
-    filter: invert(0.6); /* Makes SVG gray */
+    filter: invert(1); /* Makes SVG gray */
     transition: filter 0.2s ease;
 }
 
@@ -229,7 +229,7 @@ body {
 }
 
 .action-button:hover .action-icon img {
-    filter: invert(1); /* Makes SVG white on hover */
+    filter: invert(0.4); /* Makes SVG white on hover */
 }
 
 .action-label {

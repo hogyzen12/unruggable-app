@@ -55,15 +55,16 @@ use rand::{thread_rng, Rng};
 //const ICON_JTO: Asset = asset!("/assets/icons/jtoLogo.png");
 //const ICON_JUP: Asset = asset!("/assets/icons/jupLogo.png");
 //const ICON_JLP: Asset = asset!("/assets/icons/jlpLogo.png");
-const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
+//const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
 
 // Action button SVG icons
 const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
 const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
 const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
 const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
+
 const ICON_SWAP: Asset = asset!("/assets/icons/swap.svg");
-const ICON_LEND: Asset = asset!("/assets/icons/lend.webp");
+const ICON_LEND: Asset = asset!("/assets/icons/jupLend.svg");
 
 const ICON_32:     &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
 const ICON_SOL:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
@@ -72,7 +73,7 @@ const ICON_USDT:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@m
 const ICON_JTO:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jtoLogo.png";
 const ICON_JUP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jupLogo.png";
 const ICON_JLP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jlpLogo.png";
-//const ICON_BONK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
+const ICON_BONK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
 //const ICON_RECEIVE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/receive.svg";
 //const ICON_SEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/send.svg";
 //const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/stake.svg";
@@ -1778,14 +1779,19 @@ pub fn WalletView() -> Element {
                     }
                     button {
                         class: "action-button",
-                        onclick: move |_| {
-                            println!("🔄 Swap button clicked!"); // Add logging for debugging
-                            show_swap_modal.set(true);
-                        },
-                        img {
-                            class: "action-svg",
-                            src: "{ICON_SWAP}",  // Point this to your new SVG file path
-                            alt: "Swap",
+                        onclick: move |_| show_swap_modal.set(true),
+                        div {
+                            class: "action-icon",
+                            img {
+                                src: "{ICON_SWAP}",
+                                alt: "Swap",
+                                width: "24",
+                                height: "24",
+                            }
+                        }
+                        span {
+                            class: "action-label",
+                            "Swap"
                         }
                     }
                     button {
@@ -1808,25 +1814,6 @@ pub fn WalletView() -> Element {
                             "Lend"
                         }
                     }               
-                    //button {
-                    //    class: "action-button",
-                    //    onclick: move |_| {
-                    //        println!("🔄 Swap button clicked!"); // Add logging for debugging
-                    //        show_swap_modal.set(true);
-                    //    },
-                    //    div {
-                    //        class: "action-icon",
-                    //        img {
-                    //            src: "{ICON_SWAP}",
-                    //            alt: "Swap",
-                    //            width: "24",
-                    //            height: "24",
-                    //        }
-                    //    }
-                        //span {
-                        //    class: "action-label",
-                        //    "Swap"
-                        //}
                     //}
                     //button {
                     //    class: "action-button",
