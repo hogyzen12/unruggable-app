@@ -5813,3 +5813,295 @@ body:has(.token-item-selected) .token-item:hover {
     color: #28a745; /* Green for earnings */
     font-weight: bold;
 }
+
+/* Tab system styles - add these to your main.css */
+
+/* Tab header container */
+.tokens-tabs-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.tabs-container {
+    display: flex;
+    gap: 4px;
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 4px;
+    backdrop-filter: blur(10px);
+}
+
+/* Individual tab buttons */
+.tab-button {
+    background: transparent;
+    border: none;
+    color: #9ca3af;
+    font-size: 16px;
+    font-weight: 500;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.tab-button:hover {
+    color: #d1d5db;
+    background-color: rgba(255, 255, 255, 0.08);
+}
+
+.tab-button.active {
+    color: #ffffff;
+    background-color: rgba(255, 255, 255, 0.12);
+    font-weight: 600;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Collectibles specific styles */
+.collectibles-list {
+    min-height: 300px;
+}
+
+.collectibles-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 16px;
+    padding: 8px 0;
+}
+
+.collectible-item {
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 12px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.collectible-item:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.collectible-image {
+    aspect-ratio: 1;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 8px;
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.collectible-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.collectible-info {
+    text-align: center;
+}
+
+.collectible-name {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.collectible-collection {
+    color: #9ca3af;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Empty state styles */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.6;
+}
+
+.empty-message {
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.empty-description {
+    color: #9ca3af;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+    .tabs-container {
+        flex: 1;
+        max-width: none;
+    }
+    
+    .tab-button {
+        flex: 1;
+        text-align: center;
+        padding: 8px 12px;
+        font-size: 15px;
+    }
+    
+    .collectibles-grid {
+        grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+        gap: 12px;
+    }
+    
+    .tokens-tabs-header {
+        flex-direction: column;
+        gap: 12px;
+        align-items: stretch;
+    }
+    
+    .bulk-send-confirm-button {
+        align-self: center;
+    }
+}
+
+/* ADD THESE ADDITIONAL STYLES to your main.css for the verified badge and improved collectibles styling */
+
+.collectible-verified {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background-color: rgba(34, 197, 94, 0.9);
+    border-radius: 50%;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    backdrop-filter: blur(4px);
+}
+
+.collectible-item {
+    position: relative; /* Needed for absolute positioning of verified badge */
+    background-color: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 12px;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.collectible-item:hover {
+    background-color: rgba(255, 255, 255, 0.08);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.collectible-image {
+    aspect-ratio: 1;
+    border-radius: 8px;
+    overflow: hidden;
+    margin-bottom: 8px;
+    background-color: rgba(255, 255, 255, 0.1);
+    position: relative;
+}
+
+.collectible-image img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    transition: transform 0.2s ease;
+}
+
+.collectible-item:hover .collectible-image img {
+    transform: scale(1.05);
+}
+
+/* Loading state improvements */
+.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.empty-icon {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.6;
+    animation: pulse 2s ease-in-out infinite alternate;
+}
+
+@keyframes pulse {
+    from {
+        opacity: 0.4;
+    }
+    to {
+        opacity: 0.8;
+    }
+}
+
+/* Better text truncation for long names/collections */
+.collectible-name {
+    color: #ffffff;
+    font-size: 14px;
+    font-weight: 500;
+    margin-bottom: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.collectible-collection {
+    color: #9ca3af;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+/* Improved grid for different screen sizes */
+@media (max-width: 480px) {
+    .collectibles-grid {
+        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        gap: 12px;
+    }
+    
+    .collectible-verified {
+        width: 20px;
+        height: 20px;
+        font-size: 10px;
+        top: 6px;
+        right: 6px;
+    }
+}
+
+@media (min-width: 768px) {
+    .collectibles-grid {
+        grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+        gap: 20px;
+    }
+}

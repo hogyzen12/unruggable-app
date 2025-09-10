@@ -33,7 +33,7 @@ use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
 use crate::components::common::{Token, TokenSortConfig, TokenFilter, SortCriteria};
-use crate::rpc;
+use crate::rpc::{self, CollectibleInfo, fetch_collectibles, TokenAccountFilter};
 use crate::prices;
 use crate::hardware::HardwareWallet;
 use crate::components::background_themes::BackgroundTheme;
@@ -58,13 +58,12 @@ use rand::{thread_rng, Rng};
 //const ICON_BONK: Asset = asset!("/assets/icons/bonkLogo.png");
 
 // Action button SVG icons
-const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
-const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
-const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
-const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
-
-const ICON_SWAP: Asset = asset!("/assets/icons/swap.svg");
-const ICON_LEND: Asset = asset!("/assets/icons/jupLend.svg");
+//const ICON_RECEIVE: Asset = asset!("/assets/icons/receive.svg");
+//const ICON_SEND: Asset = asset!("/assets/icons/send.svg");
+//const ICON_STAKE: Asset = asset!("/assets/icons/stake.svg");
+//const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
+//const ICON_SWAP: Asset = asset!("/assets/icons/swap.svg");
+//const ICON_LEND: Asset = asset!("/assets/icons/jupLend.svg");
 
 const ICON_32:     &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
 const ICON_SOL:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
@@ -74,11 +73,13 @@ const ICON_JTO:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@m
 const ICON_JUP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jupLogo.png";
 const ICON_JLP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jlpLogo.png";
 const ICON_BONK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
-//const ICON_RECEIVE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/receive.svg";
-//const ICON_SEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/send.svg";
-//const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/stake.svg";
-//const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bulk.svg";
-//const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
+
+const ICON_RECEIVE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/receive.svg";
+const ICON_SEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/send.svg";
+const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/stake.svg";
+const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bulk.svg";
+const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
+const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/jupLend.svg";
 
 
 // JupiterToken struct with PartialEq and Eq for use_memo
@@ -506,6 +507,9 @@ pub fn WalletView() -> Element {
     let mut chart_timeframe_data = use_signal(|| HashMap::<String, HashMap<String, Vec<CandlestickData>>>::new());
 
     let mut show_lend_modal = use_signal(|| false);
+    let mut active_tab = use_signal(|| "tokens".to_string());
+    let mut collectibles = use_signal(|| Vec::<CollectibleInfo>::new());
+    let mut collectibles_loading = use_signal(|| false);
 
     // Load wallets from storage on component mount
     use_effect(move || {
@@ -973,6 +977,38 @@ pub fn WalletView() -> Element {
             // Start exchange rate update loop
             update_exchange_rates_loop().await;
         });
+    });
+
+    use_effect(move || {
+        if active_tab() == "collectibles" && collectibles().is_empty() && !collectibles_loading() {
+            collectibles_loading.set(true);
+            
+            // Get the wallet address - CORRECTED to use .address instead of .public_key
+            let wallet_address = if let Some(hw_pubkey) = hardware_pubkey() {
+                hw_pubkey
+            } else if !wallets().is_empty() {
+                wallets()[current_wallet_index()].address.clone()  // ← FIXED: use .address
+            } else {
+                collectibles_loading.set(false);
+                return; // No wallet available
+            };
+            
+            let rpc_url = custom_rpc();
+            
+            spawn(async move {
+                match fetch_collectibles(&wallet_address, rpc_url.as_deref()).await {
+                    Ok(nfts) => {
+                        println!("✅ Fetched {} collectibles", nfts.len());
+                        collectibles.set(nfts);
+                    },
+                    Err(e) => {
+                        println!("❌ Failed to fetch collectibles: {}", e);
+                        collectibles.set(vec![]);
+                    }
+                }
+                collectibles_loading.set(false);
+            });
+        }
     });
 
     let current_wallet = wallets.read().get(current_wallet_index()).cloned();
@@ -1849,20 +1885,30 @@ pub fn WalletView() -> Element {
             
             div {
                 class: "tokens-section",
-                h3 {
-                    class: "tokens-header",
-                    style: "display: flex; justify-content: space-between; align-items: center;",
-                    
-                    span {
-                        if bulk_send_mode() {
-                            "Select Tokens to Send"
-                        } else {
-                            "Your Tokens"
+                
+                // Tab headers with existing bulk send functionality
+                div {
+                    class: "tokens-tabs-header",
+                    div {
+                        class: "tabs-container",
+                        button {
+                            class: if active_tab() == "tokens" { "tab-button active" } else { "tab-button" },
+                            onclick: move |_| active_tab.set("tokens".to_string()),
+                            if bulk_send_mode() && active_tab() == "tokens" {
+                                "Select Tokens to Send"
+                            } else {
+                                "Your Tokens"
+                            }
+                        }
+                        button {
+                            class: if active_tab() == "collectibles" { "tab-button active" } else { "tab-button" },
+                            onclick: move |_| active_tab.set("collectibles".to_string()),
+                            "Collectibles"
                         }
                     }
                     
-                    // ONLY show send button when in bulk mode AND tokens are selected
-                    if bulk_send_mode() && !selected_tokens().is_empty() {
+                    // Show bulk send button only when on tokens tab and in bulk mode with selections
+                    if active_tab() == "tokens" && bulk_send_mode() && !selected_tokens().is_empty() {
                         button {
                             class: "bulk-send-confirm-button",
                             onclick: move |_| {
@@ -1872,269 +1918,275 @@ pub fn WalletView() -> Element {
                         }
                     }
                 }
-                div {
-                    class: "token-list",
-                    for token in tokens() {
-                        {
-                            // Clone all the values we'll need to avoid borrow checker issues
-                            let token_mint = token.mint.clone();
-                            let token_symbol = token.symbol.clone();
-                            let token_name = token.name.clone();
-                            let token_icon = token.icon_type.clone();
-                            let token_price = token.price;
-                            let token_balance = token.balance;
-                            let token_value_usd = token.value_usd;
-                            
-                            rsx! {
-                                div {
-                                    key: "{token_mint}",
-                                    class: if bulk_send_mode() && selected_tokens().contains(&token_mint) {
-                                        "token-item token-item-selected"
-                                    } else {
-                                        "token-item"
-                                    },
-                                    // Add click handler for bulk selection
-                                    onclick: {
-                                        let mint_clone = token_mint.clone();
-                                        let is_bulk_mode = bulk_send_mode();
-                                        move |_| {
-                                            if is_bulk_mode {
-                                                let mut current_selected = selected_tokens();
-                                                if current_selected.contains(&mint_clone) {
-                                                    current_selected.remove(&mint_clone);
-                                                } else {
-                                                    current_selected.insert(mint_clone.clone());
-                                                }
-                                                selected_tokens.set(current_selected);
-                                            }
-                                        }
-                                    },
+                
+                // Tab content
+                match active_tab().as_str() {
+                    "tokens" => rsx! {
+                        div {
+                            class: "token-list",
+                            for token in tokens() {
+                                {
+                                    // Clone all the values we'll need to avoid borrow checker issues
+                                    let token_mint = token.mint.clone();
+                                    let token_symbol = token.symbol.clone();
+                                    let token_name = token.name.clone();
+                                    let token_icon = token.icon_type.clone();
+                                    let token_price = token.price;
+                                    let token_balance = token.balance;
+                                    let token_value_usd = token.value_usd;
                                     
-                                    // Main token row
-                                    div {
-                                        class: "token-row-main",
-                                        
-                                        // Add selection checkbox when in bulk mode
-                                        if bulk_send_mode() {
-                                            div {
-                                                class: "token-selection-checkbox",
-                                                input {
-                                                    r#type: "checkbox",
-                                                    checked: selected_tokens().contains(&token_mint),
-                                                    onclick: move |e| e.stop_propagation(),
-                                                }
-                                            }
-                                        }
-                                        
+                                    rsx! {
                                         div {
-                                            class: "token-info",
-                                            div {
-                                                class: "token-icon",
-                                                img {
-                                                    src: "{token_icon}",
-                                                    alt: "{token_symbol}",
-                                                    width: "32",
-                                                    height: "32",
-                                                    style: "border-radius: 50%;",
-                                                    onerror: {
-                                                        let symbol = token_symbol.clone();
-                                                        let icon_type = token_icon.clone();
-                                                        move |_| {
-                                                            println!("Failed to load image for {}: {}", symbol, icon_type);
+                                            key: "{token_mint}",
+                                            class: if bulk_send_mode() && selected_tokens().contains(&token_mint) {
+                                                "token-item token-item-selected"
+                                            } else {
+                                                "token-item"
+                                            },
+                                            // Add click handler for bulk selection
+                                            onclick: {
+                                                let mint_clone = token_mint.clone();
+                                                let is_bulk_mode = bulk_send_mode();
+                                                move |_| {
+                                                    if is_bulk_mode {
+                                                        let mut current_selected = selected_tokens();
+                                                        if current_selected.contains(&mint_clone) {
+                                                            current_selected.remove(&mint_clone);
+                                                        } else {
+                                                            current_selected.insert(mint_clone.clone());
                                                         }
-                                                    },
+                                                        selected_tokens.set(current_selected);
+                                                    }
                                                 }
-                                            }
+                                            },
+                                            
+                                            // Main token row
                                             div {
-                                                class: "token-details",
-                                                div {
-                                                    class: "token-name",
-                                                    "{token_name} ({token_symbol})"
-                                                }
-                                                div {
-                                                    class: "token-price-info",
-                                                    // Clickable price section for charts
+                                                class: "token-row-main",
+                                                
+                                                // Add selection checkbox when in bulk mode
+                                                if bulk_send_mode() {
                                                     div {
-                                                        class: "token-price-container",
-                                                        onclick: {
-                                                            let mint_clone = token_mint.clone();
-                                                            let symbol_clone = token_symbol.clone();
-                                                            let is_stablecoin = matches!(token_symbol.as_str(), "USDC" | "USDT");
-                                                            move |e| {
-                                                                e.stop_propagation();
-                                                                // Only allow expansion for non-stablecoins
-                                                                if !is_stablecoin {
-                                                                    let mut current_expanded = expanded_tokens();
-                                                                    let is_expanding = !current_expanded.contains(&mint_clone);
-                                                                    
-                                                                    if current_expanded.contains(&mint_clone) {
-                                                                        current_expanded.remove(&mint_clone);
-                                                                    } else {
-                                                                        current_expanded.insert(mint_clone.clone());
-                                                                        
-                                                                        // Fetch chart data when expanding
-                                                                        if is_expanding {
-                                                                            let cache_key = format!("{}_1D", symbol_clone);
-                                                                            if !chart_data().contains_key(&cache_key) {
-                                                                                spawn(fetch_chart_data_with_timeframe(symbol_clone.clone(), "1D".to_string(), chart_data, chart_loading));
+                                                        class: "token-selection-checkbox",
+                                                        input {
+                                                            r#type: "checkbox",
+                                                            checked: selected_tokens().contains(&token_mint),
+                                                            onclick: move |e| e.stop_propagation(),
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                div {
+                                                    class: "token-info",
+                                                    div {
+                                                        class: "token-icon",
+                                                        img {
+                                                            src: "{token_icon}",
+                                                            alt: "{token_symbol}",
+                                                            width: "32",
+                                                            height: "32",
+                                                            style: "border-radius: 50%;",
+                                                            onerror: {
+                                                                let symbol = token_symbol.clone();
+                                                                let icon_type = token_icon.clone();
+                                                                move |_| {
+                                                                    println!("Failed to load image for {}: {}", symbol, icon_type);
+                                                                }
+                                                            },
+                                                        }
+                                                    }
+                                                    div {
+                                                        class: "token-details",
+                                                        div {
+                                                            class: "token-name",
+                                                            "{token_name} ({token_symbol})"
+                                                        }
+                                                        div {
+                                                            class: "token-price-info",
+                                                            // Clickable price section for charts
+                                                            div {
+                                                                class: "token-price-container",
+                                                                onclick: {
+                                                                    let mint_clone = token_mint.clone();
+                                                                    let symbol_clone = token_symbol.clone();
+                                                                    let is_stablecoin = matches!(token_symbol.as_str(), "USDC" | "USDT");
+                                                                    move |e| {
+                                                                        e.stop_propagation();
+                                                                        // Only allow expansion for non-stablecoins
+                                                                        if !is_stablecoin {
+                                                                            let mut current_expanded = expanded_tokens();
+                                                                            let is_expanding = !current_expanded.contains(&mint_clone);
+                                                                            
+                                                                            if current_expanded.contains(&mint_clone) {
+                                                                                current_expanded.remove(&mint_clone);
+                                                                            } else {
+                                                                                current_expanded.insert(mint_clone.clone());
+                                                                                
+                                                                                // Fetch chart data when expanding
+                                                                                if is_expanding {
+                                                                                    let cache_key = format!("{}_1D", symbol_clone);
+                                                                                    if !chart_data().contains_key(&cache_key) {
+                                                                                        spawn(fetch_chart_data_with_timeframe(symbol_clone.clone(), "1D".to_string(), chart_data, chart_loading));
+                                                                                    }
+                                                                                }
                                                                             }
+                                                                            expanded_tokens.set(current_expanded);
                                                                         }
                                                                     }
-                                                                    expanded_tokens.set(current_expanded);
+                                                                },
+                                                                span {
+                                                                    class: "token-price",
+                                                                    "${token_price:.2}"
+                                                                }
+                                                                // Show expand indicator for non-stablecoins
+                                                                if !matches!(token_symbol.as_str(), "USDC" | "USDT") {
+                                                                    span {
+                                                                        class: "price-expand-indicator",
+                                                                        if expanded_tokens().contains(&token_mint) {
+                                                                            "▼"
+                                                                        } else {
+                                                                            "▶"
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                
+                                                // Individual send button - ONLY show when NOT in bulk mode
+                                                if !bulk_send_mode() {
+                                                    button {
+                                                        class: "token-send-button",
+                                                        onclick: {
+                                                            let symbol_clone = token_symbol.clone();
+                                                            let mint_clone = token_mint.clone();
+                                                            let token_decimals = match token_symbol.as_str() {
+                                                                "SOL" => Some(9),
+                                                                "USDC" | "USDT" => Some(6),
+                                                                _ => Some(9),
+                                                            };
+                                                            
+                                                            move |e| {
+                                                                e.stop_propagation();
+                                                                if symbol_clone == "SOL" {
+                                                                    show_send_modal.set(true);
+                                                                } else {
+                                                                    selected_token_symbol.set(symbol_clone.clone());
+                                                                    selected_token_mint.set(mint_clone.clone());
+                                                                    selected_token_balance.set(token_balance);
+                                                                    selected_token_decimals.set(token_decimals);
+                                                                    show_send_token_modal.set(true);
                                                                 }
                                                             }
                                                         },
-                                                        span {
-                                                            class: "token-price",
-                                                            "${token_price:.2}"
-                                                        }
-                                                        // Show expand indicator for non-stablecoins
-                                                        if !matches!(token_symbol.as_str(), "USDC" | "USDT") {
-                                                            span {
-                                                                class: "price-expand-indicator",
-                                                                if expanded_tokens().contains(&token_mint) {
-                                                                    "▼"
-                                                                } else {
-                                                                    "▶"
-                                                                }
+                                                        title: "Send {token_symbol}",
+                                                        div {
+                                                            class: "token-send-icon",
+                                                            img {
+                                                                src: "{ICON_SEND}",
+                                                                alt: "Send",
+                                                                width: "14",
+                                                                height: "14",
                                                             }
                                                         }
                                                     }
                                                 }
-                                            }
-                                        }
-                                        
-                                        // Individual send button - ONLY show when NOT in bulk mode
-                                        if !bulk_send_mode() {
-                                            button {
-                                                class: "token-send-button",
-                                                onclick: {
-                                                    let symbol_clone = token_symbol.clone();
-                                                    let mint_clone = token_mint.clone();
-                                                    let token_decimals = match token_symbol.as_str() {
-                                                        "SOL" => Some(9),
-                                                        "USDC" | "USDT" => Some(6),
-                                                        _ => Some(9),
-                                                    };
-                                                    
-                                                    move |e| {
-                                                        e.stop_propagation();
-                                                        if symbol_clone == "SOL" {
-                                                            show_send_modal.set(true);
-                                                        } else {
-                                                            selected_token_symbol.set(symbol_clone.clone());
-                                                            selected_token_mint.set(mint_clone.clone());
-                                                            selected_token_balance.set(token_balance);
-                                                            selected_token_decimals.set(token_decimals);
-                                                            show_send_token_modal.set(true);
-                                                        }
-                                                    }
-                                                },
-                                                title: "Send {token_symbol}",
+                                                
                                                 div {
-                                                    class: "token-send-icon",
-                                                    img {
-                                                        src: "{ICON_SEND}",
-                                                        alt: "Send",
-                                                        width: "14",
-                                                        height: "14",
+                                                    class: "token-values",
+                                                    div {
+                                                        class: "token-value-usd",
+                                                        "{format_token_value_smart(token_balance, token_price)}"
+                                                    }
+                                                    div {
+                                                        class: "token-amount",
+                                                        "{format_token_amount(token_balance, &token_symbol)}"
                                                     }
                                                 }
                                             }
-                                        }
-                                        
-                                        div {
-                                            class: "token-values",
-                                            div {
-                                                class: "token-value-usd",
-                                                "{format_token_value_smart(token_balance, token_price)}"
-                                            }
-                                            div {
-                                                class: "token-amount",
-                                                "{format_token_amount(token_balance, &token_symbol)}"
-                                            }
-                                        }
-                                    }
-                                    
-                                    // Chart section (spans full width BELOW the token row)
-                                    if !matches!(token_symbol.as_str(), "USDC" | "USDT") && expanded_tokens().contains(&token_mint) {
-                                        div {
-                                            class: "token-chart-expanded-fullwidth",
                                             
-                                            {
-                                                let current_timeframe = selected_timeframe.read().get(&token_symbol).cloned().unwrap_or("1D".to_string());
-                                                let cache_key = format!("{}_{}", token_symbol, current_timeframe);
-                                                let has_chart_data = chart_data().contains_key(&cache_key);
-                                                let chart_data_clone = chart_data().get(&cache_key).cloned();
-                                                
-                                                // Clone the timeframe for multiple uses
-                                                let timeframe_for_buttons = current_timeframe.clone();
-                                                let timeframe_for_chart = current_timeframe.clone();
-                                                
-                                                rsx! {
-                                                    // Timeframe selector buttons
-                                                    div {
-                                                        class: "chart-timeframe-selector",
-                                                        
-                                                        button {
-                                                            class: if timeframe_for_buttons == "1H" { "timeframe-btn active" } else { "timeframe-btn" },
-                                                            onclick: {
-                                                                let symbol_clone = token_symbol.clone();
-                                                                move |_| {
-                                                                    let mut timeframes = selected_timeframe();
-                                                                    timeframes.insert(symbol_clone.clone(), "1H".to_string());
-                                                                    selected_timeframe.set(timeframes);
-                                                                    
-                                                                    let symbol_for_fetch = symbol_clone.clone();
-                                                                    spawn(async move {
-                                                                        fetch_chart_data_with_timeframe(symbol_for_fetch, "1H".to_string(), chart_data, chart_loading).await;
-                                                                    });
-                                                                }
-                                                            },
-                                                            "1H"
-                                                        }
-                                                        
-                                                        button {
-                                                            class: if timeframe_for_buttons == "1D" { "timeframe-btn active" } else { "timeframe-btn" },
-                                                            onclick: {
-                                                                let symbol_clone = token_symbol.clone();
-                                                                move |_| {
-                                                                    let mut timeframes = selected_timeframe();
-                                                                    timeframes.insert(symbol_clone.clone(), "1D".to_string());
-                                                                    selected_timeframe.set(timeframes);
-                                                                    
-                                                                    let symbol_for_fetch = symbol_clone.clone();
-                                                                    spawn(async move {
-                                                                        fetch_chart_data_with_timeframe(symbol_for_fetch, "1D".to_string(), chart_data, chart_loading).await;
-                                                                    });
-                                                                }
-                                                            },
-                                                            "1D"
-                                                        }
-                                                    }
+                                            // Chart section (spans full width BELOW the token row)
+                                            if !matches!(token_symbol.as_str(), "USDC" | "USDT") && expanded_tokens().contains(&token_mint) {
+                                                div {
+                                                    class: "token-chart-expanded-fullwidth",
                                                     
-                                                    // Show loading state
-                                                    if chart_loading().contains(&cache_key) {
-                                                        div {
-                                                            class: "chart-loading",
-                                                            "📊 Loading chart data..."
-                                                        }
-                                                    }
-                                                    // Show the actual chart
-                                                    else if has_chart_data {
-                                                        if let Some(candlesticks) = chart_data_clone {
-                                                            CandlestickChart {
-                                                                data: candlesticks,
-                                                                symbol: token_symbol.clone(),
-                                                                timeframe: timeframe_for_chart,
+                                                    {
+                                                        let current_timeframe = selected_timeframe.read().get(&token_symbol).cloned().unwrap_or("1D".to_string());
+                                                        let cache_key = format!("{}_{}", token_symbol, current_timeframe);
+                                                        let has_chart_data = chart_data().contains_key(&cache_key);
+                                                        let chart_data_clone = chart_data().get(&cache_key).cloned();
+                                                        
+                                                        // Clone the timeframe for multiple uses
+                                                        let timeframe_for_buttons = current_timeframe.clone();
+                                                        let timeframe_for_chart = current_timeframe.clone();
+                                                        
+                                                        rsx! {
+                                                            // Timeframe selector buttons
+                                                            div {
+                                                                class: "chart-timeframe-selector",
+                                                                
+                                                                button {
+                                                                    class: if timeframe_for_buttons == "1H" { "timeframe-btn active" } else { "timeframe-btn" },
+                                                                    onclick: {
+                                                                        let symbol_clone = token_symbol.clone();
+                                                                        move |_| {
+                                                                            let mut timeframes = selected_timeframe();
+                                                                            timeframes.insert(symbol_clone.clone(), "1H".to_string());
+                                                                            selected_timeframe.set(timeframes);
+                                                                            
+                                                                            let symbol_for_fetch = symbol_clone.clone();
+                                                                            spawn(async move {
+                                                                                fetch_chart_data_with_timeframe(symbol_for_fetch, "1H".to_string(), chart_data, chart_loading).await;
+                                                                            });
+                                                                        }
+                                                                    },
+                                                                    "1H"
+                                                                }
+                                                                
+                                                                button {
+                                                                    class: if timeframe_for_buttons == "1D" { "timeframe-btn active" } else { "timeframe-btn" },
+                                                                    onclick: {
+                                                                        let symbol_clone = token_symbol.clone();
+                                                                        move |_| {
+                                                                            let mut timeframes = selected_timeframe();
+                                                                            timeframes.insert(symbol_clone.clone(), "1D".to_string());
+                                                                            selected_timeframe.set(timeframes);
+                                                                            
+                                                                            let symbol_for_fetch = symbol_clone.clone();
+                                                                            spawn(async move {
+                                                                                fetch_chart_data_with_timeframe(symbol_for_fetch, "1D".to_string(), chart_data, chart_loading).await;
+                                                                            });
+                                                                        }
+                                                                    },
+                                                                    "1D"
+                                                                }
                                                             }
-                                                        }
-                                                    }
-                                                    // Show error state
-                                                    else {
-                                                        div {
-                                                            class: "chart-error",
-                                                            "📈 No chart data available"
+                                                            
+                                                            // Show loading state
+                                                            if chart_loading().contains(&cache_key) {
+                                                                div {
+                                                                    class: "chart-loading",
+                                                                    "📊 Loading chart data..."
+                                                                }
+                                                            }
+                                                            // Show the actual chart
+                                                            else if has_chart_data {
+                                                                if let Some(candlesticks) = chart_data_clone {
+                                                                    CandlestickChart {
+                                                                        data: candlesticks,
+                                                                        symbol: token_symbol.clone(),
+                                                                        timeframe: timeframe_for_chart,
+                                                                    }
+                                                                }
+                                                            }
+                                                            // Show error state
+                                                            else {
+                                                                div {
+                                                                    class: "chart-error",
+                                                                    "📈 No chart data available"
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -2144,7 +2196,103 @@ pub fn WalletView() -> Element {
                                 }
                             }
                         }
-                    }
+                    },
+                    "collectibles" => rsx! {
+                        div {
+                            class: "collectibles-list",
+                            if collectibles_loading() {
+                                div {
+                                    class: "empty-state",
+                                    div {
+                                        class: "empty-icon",
+                                        "⏳"
+                                    }
+                                    div {
+                                        class: "empty-message",
+                                        "Loading collectibles..."
+                                    }
+                                    div {
+                                        class: "empty-description",
+                                        "Fetching your NFTs and digital assets"
+                                    }
+                                }
+                            } else if collectibles().is_empty() {
+                                div {
+                                    class: "empty-state",
+                                    div {
+                                        class: "empty-icon",
+                                        "🎨"
+                                    }
+                                    div {
+                                        class: "empty-message",
+                                        "No collectibles found"
+                                    }
+                                    div {
+                                        class: "empty-description",
+                                        "Your NFTs and collectibles will appear here"
+                                    }
+                                }
+                            } else {
+                                div {
+                                    class: "collectibles-grid",
+                                    for collectible in collectibles() {
+                                        {
+                                            // Clone the values we need to avoid borrow checker issues
+                                            let collectible_mint = collectible.mint.clone();
+                                            let collectible_name = collectible.name.clone();
+                                            let collectible_collection = collectible.collection.clone();
+                                            let collectible_image = collectible.image.clone();
+                                            let collectible_verified = collectible.verified;
+                                            
+                                            rsx! {
+                                                div {
+                                                    key: "{collectible_mint}",
+                                                    class: "collectible-item",
+                                                    onclick: {
+                                                        let name_clone = collectible_name.clone();
+                                                        move |_| {
+                                                            println!("Clicked collectible: {}", name_clone);
+                                                        }
+                                                    },
+                                                    div {
+                                                        class: "collectible-image",
+                                                        img {
+                                                            src: "{collectible_image}",
+                                                            alt: "{collectible_name}",
+                                                            onerror: {
+                                                                let name_clone = collectible_name.clone();
+                                                                move |_| {
+                                                                    println!("Failed to load collectible image: {}", name_clone);
+                                                                }
+                                                            },
+                                                        }
+                                                    }
+                                                    div {
+                                                        class: "collectible-info",
+                                                        div {
+                                                            class: "collectible-name",
+                                                            "{collectible_name}"
+                                                        }
+                                                        div {
+                                                            class: "collectible-collection",
+                                                            "{collectible_collection}"
+                                                        }
+                                                        if collectible_verified {
+                                                            div {
+                                                                class: "collectible-verified",
+                                                                "✅"
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    _ => rsx! { div {} }
                 }
             }
         }
