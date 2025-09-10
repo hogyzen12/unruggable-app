@@ -128,6 +128,14 @@ body {
     position: relative;
 }
 
+/* Dynamic wallet container - replaces static background */
+.wallet-container-dynamic {
+    max-width: 390px;
+    margin: 0 auto;
+    min-height: 100vh;
+    position: relative;
+    /* Background set dynamically via style attribute */
+}
 
 .wallet-header {
     display: flex;
@@ -182,66 +190,169 @@ body {
     color: #10b981;
 }
 
-/* Action buttons */
+/* Responsive wallet container - replaces hardcoded 390px */
+.wallet-container {
+    width: 100%;
+    max-width: 100vw;
+    margin: 0 auto;
+    background-image: 
+        linear-gradient(rgba(0, 0, 0, 0.3), rgba(0, 0, 0, 0.5)),
+        url('https://pbs.twimg.com/media/Gv1Mca8WMAIGdHX?format=jpg&name=large');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    min-height: 100vh;
+    position: relative;
+    padding: 0 10px; /* Add small padding to prevent edge touching */
+    box-sizing: border-box;
+}
+
+/* For larger screens, limit the wallet to mobile-like width */
+@media (min-width: 480px) {
+    .wallet-container {
+        max-width: 390px;
+        padding: 0; /* Remove padding on larger screens */
+    }
+}
+
+/* Responsive Action buttons */
 .action-buttons {
     display: flex;
-    justify-content: space-around;
-    padding: 10px 40px;
+    justify-content: center;
+    gap: clamp(6px, 2vw, 12px); /* Responsive gap: 6px on small, up to 12px on larger */
+    padding: 6px clamp(8px, 3vw, 15px); /* Responsive horizontal padding */
     background-color: transparent;
+    width: 100%;
+    max-width: 100%;
+    margin: 0 auto;
+    box-sizing: border-box;
 }
 
 .action-button {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
     cursor: pointer;
     background: none;
     border: none;
-    color: #9ca3af;
+    color: #f1f5f9;
     transition: all 0.2s ease;
+    flex: 0 0 auto;
+    min-width: 0; /* Allow shrinking if needed */
 }
 
 .action-icon {
-    width: 50px;
-    height: 50px;
-    background-color: rgba(31, 41, 55, 0.6); /* Semi-transparent dark background */
-    border-radius: 50%;
+    width: clamp(40px, 12vw, 48px); /* Responsive icon size: 40px minimum, 48px maximum */
+    height: clamp(40px, 12vw, 48px);
+    background-color: rgba(100, 116, 139, 0.6);
+    border-radius: 10px;
     display: flex;
     align-items: center;
     justify-content: center;
     transition: all 0.2s ease;
-    backdrop-filter: blur(10px); /* Glass effect */
+    backdrop-filter: blur(10px);
 }
 
-/* SVG icon styling - much simpler */
+/* SVG icon styling - responsive size */
 .action-icon img {
-    width: 24px;
-    height: 24px;
-    filter: invert(1); /* Makes SVG gray */
+    width: clamp(24px, 8vw, 32px); /* Responsive icon size: 24px minimum, 32px maximum */
+    height: clamp(24px, 8vw, 32px);
+    filter: invert(1);
     transition: filter 0.2s ease;
 }
 
-/* Simple hover effect */
+/* Hover effects */
 .action-button:hover .action-icon {
-    background-color: rgba(31, 41, 55, 0.8);
+    background-color: rgba(100, 116, 139, 0.8);
     transform: scale(1.05);
 }
 
 .action-button:hover .action-icon img {
-    filter: invert(0.4); /* Makes SVG white on hover */
+    filter: invert(1) brightness(1.2);
 }
 
 .action-label {
-    font-size: 14px;
-    color: #9ca3af;
+    font-size: clamp(12px, 3.5vw, 14px); /* Responsive text: 12px minimum, 14px maximum */
+    color: #f1f5f9;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 60px; /* Prevent label overflow */
 }
 
-.action-label {
-    font-size: 14px;
-    color: #9ca3af;
+/* Media queries for fine-tuning specific breakpoints */
+@media (max-width: 320px) {
+    /* Very small screens - ensure buttons still fit */
+    .action-buttons {
+        gap: 3px;
+        padding: 6px 3px;
+    }
+    
+    .action-icon {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .action-icon img {
+        width: 24px;
+        height: 24px;
+    }
+    
+    .action-label {
+        font-size: 11px;
+    }
 }
 
+@media (min-width: 375px) and (max-width: 479px) {
+    /* iPhone standard size - bigger buttons, smaller gaps */
+    .action-buttons {
+        gap: 3px; /* Reduced gap */
+        padding: 6px 4px; /* Reduced padding */
+        max-width: 370px; /* Increased width */
+    }
+    
+    .action-icon {
+        width: 52px; /* Bigger icons */
+        height: 52px;
+    }
+    
+    .action-icon img {
+        width: 34px; /* Bigger SVGs */
+        height: 34px;
+    }
+    
+    .action-label {
+        font-size: 15px; /* Bigger text */
+        font-weight: 600; /* Bold */
+    }
+}
+
+@media (min-width: 480px) {
+    /* Larger screens - bigger buttons, smaller gaps */
+    .action-buttons {
+        gap: 4px; /* Reduced from your 8px */
+        padding: 6px 6px; /* Reduced from your 10px */
+        max-width: 380px; /* Increased from your 360px */
+        width: auto; /* Remove responsive width calculation */
+    }
+    
+    .action-icon {
+        width: 56px; /* Bigger than your 48px */
+        height: 56px;
+    }
+    
+    .action-icon img {
+        width: 38px; /* Bigger than your 32px */
+        height: 38px;
+    }
+    
+    .action-label {
+        font-size: 16px; /* Bigger than your 14px */
+        font-weight: 600; /* Bold */
+    }
+}
 
 .tokens-section {
     background-color: rgba(17, 17, 17, 0.25);
@@ -2813,38 +2924,6 @@ input:checked + .toggle-slider:before {
     flex-wrap: wrap;
 }
 
-.action-button {
-    padding: 6px 12px;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    flex: 1;
-    min-width: 100px;
-}
-
-.action-button.secondary {
-    background-color: #374151;
-    color: #d1d5db;
-    border: 1px solid #4b5563;
-}
-
-.action-button.secondary:hover {
-    background-color: #4b5563;
-    border-color: #6b7280;
-}
-
-.action-button.danger {
-    background-color: #dc2626;
-    color: white;
-}
-
-.action-button.danger:hover {
-    background-color: #b91c1c;
-}
-
 /* Enhanced modal responsiveness for stakes view */
 @media (max-width: 640px) {
     .stakes-summary {
@@ -2874,15 +2953,6 @@ input:checked + .toggle-slider:before {
     .stake-success-details {
         padding: 16px;
     }
-}
-
-/* Dynamic wallet container - replaces static background */
-.wallet-container-dynamic {
-    max-width: 390px;
-    margin: 0 auto;
-    min-height: 100vh;
-    position: relative;
-    /* Background set dynamically via style attribute */
 }
 
 /* Background selector modal */
@@ -4892,35 +4962,6 @@ body:has(.token-item-selected) .token-item:hover {
 .token-values {
     text-align: right;
     flex-shrink: 0; /* Don't shrink */
-}
-
-/* New styling for the SVG image - adapted from previous .action-icon */
-.action-svg {
-    width: 80px;  /* Increased from 50px to make it bigger */
-    height: auto; /* Preserves aspect ratio if text makes it taller */
-    background-color: rgba(31, 41, 55, 0.6); /* Semi-transparent dark background */
-    border-radius: 12px; /* Use 50% for circle if square; otherwise rectangle for icon+text */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    backdrop-filter: blur(10px); /* Glass effect */
-}
-
-/* SVG icon styling - much simpler */
-.action-svg {
-    filter: invert(0.0); /* Makes SVG gray (if monochromatic) */
-    transition: filter 0.2s ease;
-}
-
-/* Simple hover effect */
-.action-button:hover .action-svg {
-    background-color: rgba(31, 41, 55, 0.8);
-    transform: scale(1.05);
-}
-
-.action-button:hover .action-svg {
-    filter: invert(1); /* Makes SVG white on hover */
 }
 
 /* Enhanced Hardware Modal Styles */
