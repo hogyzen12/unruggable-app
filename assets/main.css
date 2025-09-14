@@ -6105,3 +6105,469 @@ body:has(.token-item-selected) .token-item:hover {
         gap: 20px;
     }
 }
+
+/* Add these new styles for the modal structure */
+
+.modal-content.stake-modal {
+    width: 90vw;
+    max-width: 400px;
+    height: 80vh;
+    max-height: 800px; /* Prevent overly tall modals on large screens */
+    display: flex;
+    flex-direction: column;
+    background: #111827; /* Assuming dark theme from screenshot */
+    border-radius: 16px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+    overflow: hidden; /* Prevent content from spilling out */
+    box-sizing: border-box;
+}
+
+.modal-header-with-toggle {
+    flex: 0 0 auto;
+    padding: 12px 16px 0;
+    border-bottom: 1px solid #374151;
+    padding-bottom: 8px;
+}
+
+.modal-body {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 12px 16px;
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+}
+
+.modal-body::-webkit-scrollbar {
+    width: 4px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+    background: #1f2937;
+    border-radius: 2px;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 2px;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+.modal-buttons {
+    flex: 0 0 auto;
+    display: flex;
+    gap: 8px;
+    padding: 8px 16px;
+    border-top: 1px solid #374151;
+    background: #1f2937;
+    justify-content: space-between; /* Space buttons evenly */
+    flex-wrap: wrap; /* Allow wrapping if needed */
+}
+
+/* Style for merge button */
+.modal-button.merge-simple {
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    color: white;
+    border: none;
+    flex: 1;
+    min-width: 120px;
+}
+
+.modal-button.merge-simple:hover {
+    background: linear-gradient(135deg, #34d399 0%, #10b981 100%);
+}
+
+.modal-button.merge-simple:disabled {
+    background: #374151;
+    cursor: not-allowed;
+}
+
+/* Update existing styles for My Staked Sol mode to use flex for remaining space */
+
+.stakes-overview-modern {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    height: 100%;
+    padding: 0;
+}
+
+.stakes-summary-compact {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+    border: 1px solid #374151;
+    border-radius: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+}
+
+.summary-label {
+    font-size: 10px;
+    color: #9ca3af;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.summary-value {
+    font-size: 12px;
+    font-weight: 700;
+    color: #fbbf24;
+    font-family: monospace;
+}
+
+.summary-count {
+    font-size: 12px;
+    font-weight: 700;
+    color: #60a5fa;
+    font-family: monospace;
+}
+
+.merge-simple-section {
+    flex: 0 0 auto;
+    padding: 4px 0;
+}
+
+.loading-stakes-modern,
+.no-stakes-modern {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.stakes-list-modern {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    padding-right: 4px;
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+}
+
+.stakes-list-modern::-webkit-scrollbar {
+    width: 4px;
+}
+
+.stakes-list-modern::-webkit-scrollbar-track {
+    background: #1f2937;
+    border-radius: 2px;
+}
+
+.stakes-list-modern::-webkit-scrollbar-thumb {
+    background: #4b5563;
+    border-radius: 2px;
+}
+
+.stakes-list-modern::-webkit-scrollbar-thumb:hover {
+    background: #6b7280;
+}
+
+/* Modern Stake Account Cards */
+.stake-account-modern {
+    background: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 8px;
+    transition: all 0.2s ease;
+    position: relative;
+    /* Removed overflow: hidden to prevent clipping of content */
+    min-height: fit-content; /* Ensure card expands to fit content */
+    height: auto; /* Allow natural height */
+    flex-shrink: 0; /* Prevent compression in flex list */
+}
+
+.stake-account-modern::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #06b6d4);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.stake-account-modern:hover {
+    border-color: #4b5563;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.stake-account-modern:hover::before {
+    opacity: 1;
+}
+
+/* Modern Account Header */
+.stake-account-header-modern {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.validator-info-modern {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.validator-logo-modern {
+    flex-shrink: 0;
+}
+
+.validator-logo-modern img {
+    width: 24px;
+    height: 24px;
+    border-radius: 4px;
+    background: #374151;
+    border: 1px solid #4b5563;
+}
+
+.validator-details-modern {
+    display: flex;
+    flex-direction: column;
+    gap: 0px;
+}
+
+.validator-name-modern {
+    font-size: 12px;
+    font-weight: 600;
+    color: #f3f4f6;
+    line-height: 1;
+}
+
+.validator-address-modern {
+    font-size: 10px;
+    color: #9ca3af;
+    font-family: monospace;
+    font-weight: 500;
+}
+
+/* Status Badges */
+.status-badge {
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border: 1px solid;
+}
+
+.status-badge.active {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: rgba(16, 185, 129, 0.3);
+    color: #10b981;
+}
+
+.status-badge.activating {
+    background: rgba(245, 158, 11, 0.1);
+    border-color: rgba(245, 158, 11, 0.3);
+    color: #f59e0b;
+}
+
+.status-badge.inactive {
+    background: rgba(107, 114, 128, 0.1);
+    border-color: rgba(107, 114, 128, 0.3);
+    color: #6b7280;
+}
+
+.status-badge.rewards {
+    background: rgba(124, 58, 237, 0.1);
+    border-color: rgba(124, 58, 237, 0.3);
+    color: #7c3aed;
+}
+
+/* Modern Account Details */
+.stake-account-details-modern {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 4px;
+    flex-wrap: wrap;
+}
+
+.detail-separator {
+    color: #9ca3af;
+    font-size: 11px;
+}
+
+.detail-label {
+    font-size: 11px;
+    color: #9ca3af;
+    font-weight: 500;
+}
+
+.detail-value {
+    font-size: 11px;
+    color: #d1d5db;
+    font-weight: 600;
+}
+
+.detail-value.stake-amount {
+    color: #fbbf24;
+    font-family: monospace;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* Modern Action Buttons */
+.stake-actions-modern {
+    display: flex;
+    gap: 4px;
+}
+
+.action-btn {
+    flex: 1;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    border: 1px solid;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: center;
+    min-width: 30px;
+}
+
+.action-btn.secondary {
+    background: rgba(75, 85, 99, 0.1);
+    border-color: #4b5563;
+    color: #d1d5db;
+}
+
+.action-btn.secondary:hover {
+    background: rgba(75, 85, 99, 0.2);
+    border-color: #6b7280;
+    color: #f3f4f6;
+}
+
+.action-btn.primary {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
+}
+
+.action-btn.primary:hover {
+    background: rgba(239, 68, 68, 0.2);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #f87171;
+}
+
+/* Loading and Empty States */
+.loading-stakes-modern {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 20px;
+    color: #9ca3af;
+    gap: 8px;
+}
+
+.loading-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid #374151;
+    border-top: 3px solid #6366f1;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.no-stakes-modern {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 30px 20px;
+    text-align: center;
+    color: #9ca3af;
+    gap: 8px;
+}
+
+.no-stakes-icon {
+    font-size: 36px;
+    margin-bottom: 4px;
+}
+
+.no-stakes-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #d1d5db;
+}
+
+.no-stakes-description {
+    font-size: 12px;
+    line-height: 1.4;
+    max-width: 280px;
+}
+
+/* Refresh Button */
+.stakes-footer-modern {
+    display: flex;
+    justify-content: center;
+    margin-top: 4px;
+}
+
+.refresh-btn-modern {
+    padding: 6px 16px;
+    background: linear-gradient(135deg, #374151 0%, #1f2937 100%);
+    border: 1px solid #4b5563;
+    border-radius: 6px;
+    color: #d1d5db;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.refresh-btn-modern:hover:not(:disabled) {
+    background: linear-gradient(135deg, #4b5563 0%, #374151 100%);
+    border-color: #6b7280;
+    color: #f3f4f6;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.refresh-btn-modern:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Responsive Design */
+@media (max-width: 640px) {
+    .stakes-summary-compact {
+        flex-direction: row;
+        gap: 4px;
+        padding: 4px 8px;
+        flex-wrap: wrap;
+    }
+    
+    .stake-account-modern {
+        padding: 8px;
+    }
+    
+    .stake-actions-modern {
+        flex-direction: row;
+        gap: 4px;
+    }
+    
+    .action-btn {
+        min-width: 0;
+        flex: 1;
+    }
+}

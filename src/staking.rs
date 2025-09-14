@@ -546,146 +546,56 @@ pub async fn get_stake_account_info(
     Ok(None)
 }
 
-/// Find all possible merge groups from a list of stake accounts (SAFE VERSION)
-/// Only suggests merges that will actually work - avoiding transient states
+/// Find all possible merge groups from a list of stake accounts
+/// Groups active stake accounts by validator if there are 2 or more
+/// Find all possible merge groups from a list of stake accounts
+/// Groups active stake accounts by validator if there are 2 or more
 pub fn find_mergeable_stake_accounts(
     accounts: &[DetailedStakeAccount],
-    current_epoch: u64,
+    _current_epoch: u64,
 ) -> Vec<MergeGroup> {
     let mut merge_groups = Vec::new();
     
-    println!("🔍 Analyzing {} accounts for SAFE merge opportunities...", accounts.len());
+    println!("🔍 Analyzing {} accounts for merge opportunities...", accounts.len());
     
-    // Group accounts by validator (they must be delegated to the same validator to merge)
-    let mut by_validator: HashMap<String, Vec<&DetailedStakeAccount>> = HashMap::new();
+    // Group ACTIVE accounts by validator
+    let mut by_validator: HashMap<String, Vec<DetailedStakeAccount>> = HashMap::new();
     
     for account in accounts {
-        let validator_key = account.validator_name.clone();
-        by_validator.entry(validator_key).or_insert_with(Vec::new).push(account);
+        if account.state == StakeAccountState::Delegated {
+            let validator_key = account.validator_name.clone();
+            by_validator.entry(validator_key).or_insert_with(Vec::new).push(account.clone());
+        }
     }
     
-    for (validator_name, validator_accounts) in by_validator {
-        if validator_accounts.len() < 2 {
-            continue; // Need at least 2 accounts to merge
-        }
-        
-        println!("🏛️  Checking {} accounts for validator: {}", validator_accounts.len(), validator_name);
-        
-        // 1. Find two deactivated stakes (SAFE - always works)
-        let deactivated: Vec<&DetailedStakeAccount> = validator_accounts
-            .iter()
-            .filter(|acc| acc.state == StakeAccountState::Uninitialized)
-            .copied()
-            .collect();
-        
-        if deactivated.len() >= 2 {
-            let total_amount: u64 = deactivated.iter()
+    for (validator_name, active_accounts) in by_validator {
+        if active_accounts.len() >= 2 {
+            // Print before moving values
+            println!("✅ Found merge group for validator {} with {} active accounts", 
+                     validator_name, active_accounts.len());
+            
+            let total_amount: u64 = active_accounts.iter()
                 .map(|acc| acc.balance.saturating_sub(acc.rent_exempt_reserve))
                 .sum();
             
-            let deactivated_accounts: Vec<DetailedStakeAccount> = deactivated.iter().map(|&acc| acc.clone()).collect();
-            let account_count = deactivated_accounts.len();
+            // Extract voter_pubkey from validator_name (trim "Validator " prefix)
+            let voter_pubkey = validator_name.trim_start_matches("Validator ").trim().to_string();
             
             merge_groups.push(MergeGroup {
-                accounts: deactivated_accounts,
-                merge_type: MergeType::TwoDeactivated,
-                total_amount,
-                validator_name: validator_name.clone(),
-            });
-            
-            println!("✅ Found SAFE deactivated merge group: {} accounts", account_count);
-        }
-        
-        // 2. Find inactive stake into activating stake during activation epoch (CONSERVATIVE)
-        // Only allow if we're exactly in the activation epoch and account is truly inactive
-        let activating_this_epoch: Vec<&DetailedStakeAccount> = validator_accounts
-            .iter()
-            .filter(|acc| {
-                acc.state == StakeAccountState::Initialized &&
-                acc.activation_epoch == Some(current_epoch)
-            })
-            .copied()
-            .collect();
-        
-        let truly_inactive: Vec<&DetailedStakeAccount> = validator_accounts
-            .iter()
-            .filter(|acc| {
-                acc.state == StakeAccountState::Initialized && 
-                acc.activation_epoch.is_none() &&
-                acc.deactivation_epoch.is_none() // Make sure it's not deactivating
-            })
-            .copied()
-            .collect();
-        
-        // ONLY during the exact activation epoch - be very strict
-        for activating_acc in &activating_this_epoch {
-            for inactive_acc in &truly_inactive {
-                let total_amount = activating_acc.balance.saturating_sub(activating_acc.rent_exempt_reserve) +
-                                   inactive_acc.balance.saturating_sub(inactive_acc.rent_exempt_reserve);
-                
-                merge_groups.push(MergeGroup {
-                    accounts: vec![(*activating_acc).clone(), (*inactive_acc).clone()],
-                    merge_type: MergeType::InactiveIntoActivating,
-                    total_amount,
-                    validator_name: validator_name.clone(),
-                });
-                
-                println!("✅ Found SAFE inactive->activating merge pair (epoch {})", current_epoch);
-            }
-        }
-        
-        // 3. Find two FULLY ACTIVE stakes (VERY CONSERVATIVE)
-        // Only allow stakes that have been active for at least 2+ epochs to avoid transient states
-        let fully_active: Vec<&DetailedStakeAccount> = validator_accounts
-            .iter()
-            .filter(|acc| {
-                acc.state == StakeAccountState::Delegated &&
-                acc.deactivation_epoch.is_none() && // Not deactivating
-                if let Some(activation_epoch) = acc.activation_epoch {
-                    // Must have been active for at least 2 full epochs to be fully settled
-                    current_epoch >= activation_epoch + 2
-                } else {
-                    false // No activation info = not safe
-                }
-            })
-            .copied()
-            .collect();
-        
-        if fully_active.len() >= 2 {
-            let total_amount: u64 = fully_active.iter()
-                .map(|acc| acc.balance.saturating_sub(acc.rent_exempt_reserve))
-                .sum();
-            
-            let voter_pubkey = validator_name.chars().take(16).collect::<String>();
-            
-            let active_accounts: Vec<DetailedStakeAccount> = fully_active.iter().map(|&acc| acc.clone()).collect();
-            let account_count = active_accounts.len();
-            
-            merge_groups.push(MergeGroup {
-                accounts: active_accounts,
+                accounts: active_accounts,  // Move here after printing
                 merge_type: MergeType::TwoActivated { voter_pubkey },
                 total_amount,
-                validator_name: validator_name.clone(),
+                validator_name,  // Move string here
             });
-            
-            println!("✅ Found SAFE fully-active merge group: {} accounts (active 2+ epochs)", account_count);
         }
-        
-        // 4. REMOVED: Two activating accounts with same activation epoch
-        // This is likely to be transient and cause 0x6 errors, so we skip it entirely
-        // The original logic was too aggressive and would include accounts still warming up
-        
-        println!("⚠️  Skipped activating-same-epoch merges (transient state risk)");
     }
     
     let total_groups = merge_groups.len();
-    println!("🎯 Found {} SAFE merge opportunities total", total_groups);
+    println!("🎯 Found {} merge opportunities total", total_groups);
     
     if total_groups == 0 {
-        println!("💡 No safe merge opportunities found. This is normal if:");
-        println!("   - Stakes are still activating/deactivating (wait 1-2 epochs)");
-        println!("   - Active stakes haven't been active long enough (need 2+ epochs)");
-        println!("   - No accounts are in compatible states for merging");
+        println!("💡 No merge opportunities found. This is normal if:");
+        println!("   - No validators have 2+ active stake accounts");
     }
     
     merge_groups
