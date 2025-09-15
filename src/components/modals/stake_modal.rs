@@ -4,6 +4,7 @@ use crate::hardware::HardwareWallet;
 use crate::validators::{ValidatorInfo, get_recommended_validators};
 use crate::staking::{self, DetailedStakeAccount, StakeAccountState};
 use crate::staking::{MergeGroup, MergeType};
+use crate::unstaking::{instant_unstake_stake_account, can_instant_unstake};
 use std::sync::Arc;
 use std::collections::HashMap;
 use crate::signing::hardware::HardwareSigner;
@@ -314,6 +315,9 @@ pub fn StakeModal(
     let mut was_hardware_transaction = use_signal(|| false);
     let mut merge_groups = use_signal(|| Vec::<MergeGroup>::new());
     let mut merging = use_signal(|| false);
+
+    let instant_unstaking = use_signal(|| false);
+    //let normal_unstaking = use_signal(|| false);
 
     // Load validators on component mount
     use_effect(move || {
@@ -859,18 +863,93 @@ pub fn StakeModal(
                                                 if account.state == StakeAccountState::Delegated {
                                                     button {
                                                         class: "action-btn secondary",
-                                                        onclick: move |_| {
-                                                            // Instant unstake placeholder
-                                                            println!("Instant unstake: {}", account.pubkey);
+                                                        disabled: instant_unstaking() || !can_instant_unstake(&account),
+                                                        onclick: {
+                                                            // Clone all necessary values for the async block
+                                                            let account_clone = account.clone();
+                                                            let wallet_for_instant = wallet.clone();
+                                                            let hardware_wallet_for_instant = hardware_wallet.clone();
+                                                            let custom_rpc_for_instant = custom_rpc.clone();
+                                                            
+                                                            // Clone mutable signals
+                                                            let mut instant_unstaking_clone = instant_unstaking.clone();
+                                                            let mut error_message_clone = error_message.clone();
+                                                            let mut show_hardware_approval_clone = show_hardware_approval.clone();
+                                                            let mut stake_accounts_clone = stake_accounts.clone();
+                                                            
+                                                            move |_| {
+                                                                let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
+                                                                println!("INSTANT UNSTAKE: Starting for account {} ({:.6} SOL)", 
+                                                                    account_clone.pubkey, stake_balance_sol);
+                                                                
+                                                                instant_unstaking_clone.set(true);
+                                                                error_message_clone.set(None);
+                                                                
+                                                                // Show hardware approval overlay if using hardware wallet
+                                                                if hardware_wallet_for_instant.is_some() {
+                                                                    show_hardware_approval_clone.set(true);
+                                                                }
+                                                                
+                                                                // Clone for async block
+                                                                let wallet_clone = wallet_for_instant.clone();
+                                                                let hardware_wallet_clone = hardware_wallet_for_instant.clone();
+                                                                let custom_rpc_clone = custom_rpc_for_instant.clone();
+                                                                let account_async = account_clone.clone();
+                                                                
+                                                                spawn(async move {
+                                                                    println!("INSTANT UNSTAKE: Executing transaction...");
+                                                                    
+                                                                    match instant_unstake_stake_account(
+                                                                        &account_async,
+                                                                        wallet_clone.as_ref(),
+                                                                        hardware_wallet_clone,
+                                                                        custom_rpc_clone.as_deref(),
+                                                                    ).await {
+                                                                        Ok(signature) => {
+                                                                            println!("✅ Instant unstake completed: {}", signature);
+                                                                            
+                                                                            // Hide hardware approval overlay
+                                                                            show_hardware_approval_clone.set(false);
+                                                                            
+                                                                            // Clear stake accounts to trigger refresh
+                                                                            stake_accounts_clone.set(Vec::new());
+                                                                            
+                                                                            // Show success message
+                                                                            error_message_clone.set(Some(format!(
+                                                                                "✅ Instant unstake successful! Stake account transferred to pool and deactivated. Transaction: {}", 
+                                                                                signature
+                                                                            )));
+                                                                            
+                                                                            // Clear success message after 8 seconds
+                                                                            let mut error_message_clear = error_message_clone.clone();
+                                                                            spawn(async move {
+                                                                                tokio::time::sleep(std::time::Duration::from_millis(8_000)).await;
+                                                                                error_message_clear.set(None);
+                                                                            });
+                                                                        }
+                                                                        Err(e) => {
+                                                                            println!("❌ Instant unstake error: {}", e);
+                                                                            error_message_clone.set(Some(format!("Instant unstake failed: {}", e)));
+                                                                            show_hardware_approval_clone.set(false);
+                                                                        }
+                                                                    }
+                                                                    
+                                                                    instant_unstaking_clone.set(false);
+                                                                });
+                                                            }
                                                         },
-                                                        "🔓"
+                                                        if instant_unstaking() {
+                                                            "⏳"
+                                                        } else {
+                                                            "⚡"
+                                                        }
                                                     }
                                                     
                                                     button {
                                                         class: "action-btn primary",
                                                         onclick: move |_| {
-                                                            // Normal unstake placeholder
-                                                            println!("Unstake: {}", account.pubkey);
+                                                            // Normal unstake placeholder - implement as needed
+                                                            println!("Regular unstake: {}", account.pubkey);
                                                         },
                                                         "🔓 Unstake"
                                                     }
