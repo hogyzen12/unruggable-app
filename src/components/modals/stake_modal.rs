@@ -4,7 +4,7 @@ use crate::hardware::HardwareWallet;
 use crate::validators::{ValidatorInfo, get_recommended_validators};
 use crate::staking::{self, DetailedStakeAccount, StakeAccountState};
 use crate::staking::{MergeGroup, MergeType};
-use crate::unstaking::{instant_unstake_stake_account, can_instant_unstake};
+use crate::unstaking::{instant_unstake_stake_account, can_instant_unstake, normal_unstake_stake_account, can_normal_unstake};
 use std::sync::Arc;
 use std::collections::HashMap;
 use crate::signing::hardware::HardwareSigner;
@@ -317,7 +317,7 @@ pub fn StakeModal(
     let mut merging = use_signal(|| false);
 
     let instant_unstaking = use_signal(|| false);
-    //let normal_unstaking = use_signal(|| false);
+    let normal_unstaking = use_signal(|| false);
 
     // Load validators on component mount
     use_effect(move || {
@@ -947,11 +947,86 @@ pub fn StakeModal(
                                                     
                                                     button {
                                                         class: "action-btn primary",
-                                                        onclick: move |_| {
-                                                            // Normal unstake placeholder - implement as needed
-                                                            println!("Regular unstake: {}", account.pubkey);
+                                                        disabled: normal_unstaking() || instant_unstaking() || !can_normal_unstake(&account),
+                                                        onclick: {
+                                                            // Clone all necessary values for the async block (matching instant unstake pattern)
+                                                            let account_clone = account.clone();
+                                                            let wallet_for_normal = wallet.clone();
+                                                            let hardware_wallet_for_normal = hardware_wallet.clone();
+                                                            let custom_rpc_for_normal = custom_rpc.clone();
+                                                            
+                                                            // Clone mutable signals
+                                                            let mut normal_unstaking_clone = normal_unstaking.clone();
+                                                            let mut error_message_clone = error_message.clone();
+                                                            let mut show_hardware_approval_clone = show_hardware_approval.clone();
+                                                            let mut stake_accounts_clone = stake_accounts.clone();
+                                                            
+                                                            move |_| {
+                                                                let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
+                                                                println!("NORMAL UNSTAKE: Starting for account {} ({:.6} SOL)", 
+                                                                    account_clone.pubkey, stake_balance_sol);
+                                                                
+                                                                normal_unstaking_clone.set(true);
+                                                                error_message_clone.set(None);
+                                                                
+                                                                // Show hardware approval overlay if using hardware wallet
+                                                                if hardware_wallet_for_normal.is_some() {
+                                                                    show_hardware_approval_clone.set(true);
+                                                                }
+                                                                
+                                                                // Clone for async block
+                                                                let wallet_clone = wallet_for_normal.clone();
+                                                                let hardware_wallet_clone = hardware_wallet_for_normal.clone();
+                                                                let custom_rpc_clone = custom_rpc_for_normal.clone();
+                                                                let account_async = account_clone.clone();
+                                                                
+                                                                spawn(async move {
+                                                                    println!("NORMAL UNSTAKE: Executing deactivate transaction...");
+                                                                    
+                                                                    match normal_unstake_stake_account(
+                                                                        &account_async,
+                                                                        wallet_clone.as_ref(),
+                                                                        hardware_wallet_clone,
+                                                                        custom_rpc_clone.as_deref(),
+                                                                    ).await {
+                                                                        Ok(signature) => {
+                                                                            println!("✅ Normal unstake completed: {}", signature);
+                                                                            
+                                                                            // Hide hardware approval overlay
+                                                                            show_hardware_approval_clone.set(false);
+                                                                            
+                                                                            // Clear stake accounts to trigger refresh
+                                                                            stake_accounts_clone.set(Vec::new());
+                                                                            
+                                                                            // Show success message
+                                                                            error_message_clone.set(Some(format!(
+                                                                                "✅ Normal unstake successful! Stake account has been deactivated and will be available for withdrawal after the cooldown period. Transaction: {}", 
+                                                                                signature
+                                                                            )));
+                                                                            
+                                                                            // Clear success message after 8 seconds
+                                                                            let mut error_message_clear = error_message_clone.clone();
+                                                                            spawn(async move {
+                                                                                tokio::time::sleep(std::time::Duration::from_millis(8_000)).await;
+                                                                                error_message_clear.set(None);
+                                                                            });
+                                                                        }
+                                                                        Err(e) => {
+                                                                            println!("❌ Normal unstake error: {}", e);
+                                                                            error_message_clone.set(Some(format!("Normal unstake failed: {}", e)));
+                                                                            show_hardware_approval_clone.set(false);
+                                                                        }
+                                                                    }
+                                                                    
+                                                                    normal_unstaking_clone.set(false);
+                                                                });
+                                                            }
                                                         },
-                                                        "🔓 Unstake"
+                                                        if normal_unstaking() {
+                                                            "⏳ Deactivating..."
+                                                        } else {
+                                                            "🔓 Unstake"
+                                                        }
                                                     }
                                                 }
                                             }

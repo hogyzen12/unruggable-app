@@ -10,6 +10,7 @@ use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
     system_instruction,
 };
+use solana_sdk::sysvar;
 use crate::wallet::{Wallet, WalletInfo};
 use crate::hardware::HardwareWallet;
 use crate::signing::{TransactionSigner, software::SoftwareSigner, hardware::HardwareSigner};
@@ -283,5 +284,154 @@ pub async fn instant_unstake_stake_account(
 
 /// Check if a stake account can be instantly unstaked
 pub fn can_instant_unstake(stake_account: &DetailedStakeAccount) -> bool {
+    stake_account.state == StakeAccountState::Delegated
+}
+
+// Build a normal deactivate stake instruction for regular unstaking
+fn build_deactivate_stake_instruction(
+    stake_account: &Pubkey,
+    stake_authority: &Pubkey,
+) -> Result<Instruction, StakingError> {
+    println!("Building deactivate instruction for stake account: {}", stake_account);
+    println!("Stake authority: {}", stake_authority);
+    
+    // Build the deactivate instruction manually
+    // The stake program ID
+    let stake_program_id = Pubkey::from_str("Stake11111111111111111111111111111111111111")
+        .map_err(|_| StakingError::RpcError("Invalid stake program ID".to_string()))?;
+    
+    // Clock sysvar
+    let clock_sysvar = Pubkey::from_str("SysvarC1ock11111111111111111111111111111111")
+        .map_err(|_| StakingError::RpcError("Invalid clock sysvar".to_string()))?;
+    
+    // Build account metas
+    let accounts = vec![
+        AccountMeta::new(*stake_account, false),      // Stake account (writable)
+        AccountMeta::new_readonly(clock_sysvar, false), // Clock sysvar (readonly)
+        AccountMeta::new(*stake_authority, true), // Stake authority (writable, signer)
+    ];
+    
+    // Deactivate instruction discriminator (instruction index 5 for Deactivate as LE u32)
+    let instruction_data = 5u32.to_le_bytes().to_vec(); // [5, 0, 0, 0]
+    
+    let instruction = Instruction {
+        program_id: stake_program_id,
+        accounts,
+        data: instruction_data,
+    };
+    
+    Ok(instruction)
+}
+
+/// Main normal unstake function - deactivates a stake account for regular unstaking
+pub async fn normal_unstake_stake_account(
+    stake_account: &DetailedStakeAccount,
+    wallet_info: Option<&WalletInfo>,
+    hardware_wallet: Option<Arc<HardwareWallet>>,
+    rpc_url: Option<&str>,
+) -> Result<String, StakingError> {
+    println!("NORMAL UNSTAKE: Starting for stake account: {}", stake_account.pubkey);
+    
+    // Validate that this is an active stake account that can be deactivated
+    if stake_account.state != StakeAccountState::Delegated {
+        return Err(StakingError::InvalidAmount("Can only deactivate delegated stake accounts".to_string()));
+    }
+
+    let stake_balance_sol = (stake_account.balance.saturating_sub(stake_account.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
+    println!("Stake account balance: {:.6} SOL", stake_balance_sol);
+    
+    // Create transaction client
+    let transaction_client = TransactionClient::new(rpc_url);
+    
+    // Create signer
+    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
+        Box::new(HardwareSigner::from_wallet(hw))
+    } else if let Some(w) = wallet_info {
+        let wallet = Wallet::from_wallet_info(w)
+            .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
+        Box::new(SoftwareSigner::new(wallet))
+    } else {
+        return Err(StakingError::WalletError("No wallet provided".to_string()));
+    };
+
+    // Get user pubkey (this will be the stake authority)
+    let user_pubkey_str = signer.get_public_key().await
+        .map_err(|e| StakingError::WalletError(format!("Failed to get public key: {}", e)))?;
+    let user_pubkey = Pubkey::from_str(&user_pubkey_str)
+        .map_err(|_| StakingError::WalletError("Invalid wallet address".to_string()))?;
+
+    // Build deactivate instruction 
+    let deactivate_ix = build_deactivate_stake_instruction(&stake_account.pubkey, &user_pubkey)?;
+
+    // Build transaction with compute budget and deactivate instruction
+    let mut instructions = Vec::new();
+    
+    // Add compute budget instructions (matching the transaction you provided)
+    instructions.push(ComputeBudgetInstruction::set_compute_unit_price(375_000)); // 0.375 lamports per compute unit
+    instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(200_000));
+    
+    // Add the main deactivate instruction
+    instructions.push(deactivate_ix);
+
+    // Add Jito tips if enabled
+    let jito_settings = get_current_jito_settings();
+    if jito_settings.jito_tx {
+        println!("Adding Jito tips");
+        if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
+            println!("Jito tips failed: {}, continuing", e);
+        }
+    }
+
+    // Get recent blockhash
+    let recent_blockhash = transaction_client.get_recent_blockhash().await
+        .map_err(|e| StakingError::RpcError(format!("Failed to get blockhash: {}", e)))?;
+
+    // Create transaction message
+    let mut message = Message::new(&instructions, Some(&user_pubkey));
+    message.recent_blockhash = recent_blockhash;
+    
+    let transaction = VersionedTransaction {
+        signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+        message: VersionedMessage::Legacy(message),
+    };
+    
+    // Sign transaction
+    let message_bytes = transaction.message.serialize();
+    let signature_bytes = signer.sign_message(&message_bytes).await
+        .map_err(|e| StakingError::WalletError(format!("Failed to sign: {}", e)))?;
+
+    let signature = SolanaSignature::from(
+        <[u8; 64]>::try_from(signature_bytes.as_slice())
+            .map_err(|_| StakingError::WalletError("Invalid signature length".to_string()))?
+    );
+
+    let mut signed_transaction = transaction;
+    signed_transaction.signatures[0] = signature;
+
+    // Serialize transaction to string (as TransactionClient expects)
+    let serialized = bincode::serialize(&signed_transaction)
+        .map_err(|e| StakingError::TransactionFailed(format!("Serialization failed: {}", e)))?;
+    let encoded = bs58::encode(serialized).into_string();
+
+    println!("Sending normal unstake (deactivate) transaction ({} bytes)", encoded.len());
+
+    // Send transaction
+    match transaction_client.send_transaction(&encoded).await {
+        Ok(sig) => {
+            println!("Normal unstake successful!");
+            println!("Transaction: {}", sig);
+            println!("Explorer: https://explorer.solana.com/tx/{}?cluster=mainnet", sig);
+            Ok(sig)
+        }
+        Err(e) => {
+            println!("Transaction failed: {}", e);
+            Err(StakingError::TransactionFailed(format!("Transaction failed: {}", e)))
+        }
+    }
+}
+
+/// Check if a stake account can be normally unstaked (deactivated)
+pub fn can_normal_unstake(stake_account: &DetailedStakeAccount) -> bool {
+    // Can only deactivate delegated (active) stake accounts
     stake_account.state == StakeAccountState::Delegated
 }
