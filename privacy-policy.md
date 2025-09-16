@@ -2,7 +2,10 @@ Effective Date: September 16, 2025
 
 Unruggable ("we," "our," or "us") is an open-source, self-custodial wallet and hardware wallet connection app committed to user privacy and decentralization. This Privacy Policy explains our approach to data handling when you use our mobile application ("App") available on the Google Play Store. As a self-custodial tool, the App operates entirely on your device and interacts directly with public blockchain networks without collecting or storing any personal information.By using the App, you agree to the terms of this Privacy Policy. If you do not agree, please do not access or use the App.
 
-1. Information We CollectWe do not collect, store, or process any personal information about you. The App is designed to be fully self-custodial, meaning all wallet management, transactions, and data handling occur on your device or directly on public blockchains.No Personal Data: We do not collect personally identifiable information (PII) such as your name, email address, device ID, IP address, or any other identifiers.
+1. Information We Collect
+We do not collect, store, or process any personal information about you. The App is designed to be fully self-custodial, meaning all wallet management, transactions, and data handling occur on your device or directly on public blockchains.
+
+No Personal Data: We do not collect personally identifiable information (PII) such as your name, email address, device ID, IP address, or any other identifiers.
 
 Public On-Chain Data: The App may display or interact with publicly available blockchain data (e.g., transaction histories, wallet balances) that is inherently visible on decentralized networks. This data is not collected or stored by us; it is retrieved in real-time from public sources as needed for App functionality.
 No Usage or Analytics Data: We do not track your interactions with the App, usage patterns, or any analytics. No third-party analytics tools are integrated.
