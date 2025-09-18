@@ -6,10 +6,10 @@ edition = "2021"
 
 [dependencies]
 # Core dependencies for all platforms
+#EDGE
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "a8230d8",  features = ["fullstack", "mobile", "router"] }
 #ALPHA - passing all builds & bundles + device deployment
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011",  features = ["mobile", "router"] }
-#FFI local/custom
-#dioxus = { git = "https://github.com/hogyzen12/dioxus", rev = "120eca1", features = ["router"] }
+#dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011",  features = ["fullstack", "mobile", "router"] }
 #STABLE - fails android
 #dioxus = { version = "0.6.3", features = ["fullstack","router"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -36,6 +36,7 @@ hex = "0.4"
 spl-token = "8.0.0"
 spl-associated-token-account = "7.0.0"
 solana-client = "2.3.2"
+server_fn_macro_default = "0.8.3"
 
 # Desktop/non-mobile specific dependencies
 [target.'cfg(not(any(target_os = "android")))'.dependencies]
@@ -50,6 +51,8 @@ solana-offchain-message = "2.2.1"
 solana-derivation-path = "2.2.1"
 hidapi = "2.6.3"
 parking_lot = "0.12"
+#dioxus-desktop = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011", default-features = false}
+dioxus-desktop = { git = "https://github.com/DioxusLabs/dioxus", rev = "a8230d8", default-features = false}
 
 
 # Android-specific dependencies
@@ -73,7 +76,8 @@ short_description = "unruggable"
 long_description = """
 unruggable for iphone.
 """
-osx_frameworks = ["WebKit"]
+#Comment this out for desktop builds
+#osx_frameworks = ["WebKit"]
 
 [features]
 default = ["mobile"]

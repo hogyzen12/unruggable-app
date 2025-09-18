@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::error::Error;
 
-const DEFAULT_RPC_URL: &str = "https://serene-stylish-mound.solana-mainnet.quiknode.pro/5489821bcd1547d9cd7b2d81f90c086e36e0e9f7/";
+const DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
 
 #[derive(Debug, Serialize)]
 struct RpcRequest {
@@ -714,4 +714,226 @@ pub async fn get_transaction_details(
     } else {
         Err("Failed to get transaction details from response".to_string())
     }
+}
+
+// NFT with DAS from helius Struts
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CollectibleInfo {
+    pub mint: String,
+    pub name: String,
+    pub collection: String,
+    pub image: String,
+    pub description: Option<String>,
+    pub verified: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct DasResponse {
+    jsonrpc: String,
+    result: DasResult,
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DasResult {
+    total: u32,
+    limit: u32,
+    page: u32,
+    items: Vec<DasAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DasAsset {
+    id: String,
+    content: Option<DasContent>,
+    grouping: Option<Vec<DasGrouping>>,
+    ownership: Option<DasOwnership>,
+    burnt: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DasContent {
+    #[serde(rename = "json_uri")]
+    json_uri: Option<String>,
+    files: Option<Vec<DasFile>>,
+    metadata: Option<DasMetadata>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DasFile {
+    uri: Option<String>,
+    #[serde(rename = "cdn_uri")]
+    cdn_uri: Option<String>,
+    mime: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DasMetadata {
+    name: Option<String>,
+    description: Option<String>,
+    image: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DasGrouping {
+    group_key: String,
+    group_value: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DasOwnership {
+    frozen: Option<bool>,
+    delegated: Option<bool>,
+    owner: String,
+}
+
+/// Fetches collectibles (NFTs) for a wallet using Helius DAS API
+pub async fn fetch_collectibles(wallet_address: &str, rpc_url: Option<&str>) -> Result<Vec<CollectibleInfo>, String> {
+    let client = Client::new();
+    let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
+    
+    println!("🎨 Fetching collectibles for wallet: {}", wallet_address);
+    
+    let request_body = json!({
+        "jsonrpc": "2.0",
+        "id": "1",
+        "method": "getAssetsByOwner",
+        "params": {
+            "ownerAddress": wallet_address,
+            "page": 1,
+            "limit": 50,
+            "sortBy": {
+                "sortBy": "created",
+                "sortDirection": "desc"
+            },
+            "options": {
+                "showUnverifiedCollections": true,
+                "showCollectionMetadata": true,
+                "showGrandTotal": false,
+                "showFungible": false,
+                "showNativeBalance": false,
+                "showInscription": false,
+                "showZeroBalance": false
+            }
+        }
+    });
+    
+    let response = client
+        .post(url)
+        .header("Content-Type", "application/json")
+        .json(&request_body)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to send DAS request: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("DAS API error: {}", response.status()));
+    }
+    
+    let json: serde_json::Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse DAS response: {}", e))?;
+    
+    // Check for errors in the response
+    if let Some(error) = json.get("error") {
+        return Err(format!("DAS API error: {:?}", error));
+    }
+    
+    // Parse the DAS response
+    let das_response: DasResponse = serde_json::from_value(json)
+        .map_err(|e| format!("Failed to deserialize DAS response: {}", e))?;
+    
+    println!("🎨 Found {} assets from DAS API", das_response.result.items.len());
+    
+    // Convert DAS assets to CollectibleInfo with explicit type annotation
+    let collectibles: Vec<CollectibleInfo> = das_response.result.items
+        .into_iter()
+        .filter_map(|asset| {
+            // Skip burnt assets
+            if asset.burnt.unwrap_or(false) {
+                return None;
+            }
+            
+            // Skip if not owned by the wallet
+            if let Some(ownership) = &asset.ownership {
+                if ownership.owner != wallet_address {
+                    return None;
+                }
+            }
+            
+            let content = asset.content.as_ref()?;
+            
+            // Try to get name from metadata first, then fallback to parsing from URI
+            let name = if let Some(metadata) = &content.metadata {
+                metadata.name.clone().unwrap_or_else(|| "Unknown NFT".to_string())
+            } else {
+                "Unknown NFT".to_string()
+            };
+            
+            // Get description
+            let description = content.metadata.as_ref()
+                .and_then(|m| m.description.clone());
+            
+            // Get image - prefer CDN URI, then regular URI, then metadata image
+            let image = if let Some(files) = &content.files {
+                files.first().and_then(|f| 
+                    f.cdn_uri.clone()
+                        .or_else(|| f.uri.clone())
+                ).unwrap_or_else(|| "https://via.placeholder.com/200x200/6b7280/ffffff?text=NFT".to_string())
+            } else if let Some(metadata) = &content.metadata {
+                metadata.image.clone().unwrap_or_else(|| "https://via.placeholder.com/200x200/6b7280/ffffff?text=NFT".to_string())
+            } else {
+                "https://via.placeholder.com/200x200/6b7280/ffffff?text=NFT".to_string()
+            };
+            
+            // Get collection name from grouping
+            let collection = if let Some(grouping) = &asset.grouping {
+                grouping.iter()
+                    .find(|g| g.group_key == "collection")
+                    .map(|g| g.group_value.clone())
+                    .unwrap_or_else(|| "Unknown Collection".to_string())
+            } else {
+                "Unknown Collection".to_string()
+            };
+            
+            // For now, assume all are verified - you could add more logic here
+            let verified = true;
+            
+            Some(CollectibleInfo {
+                mint: asset.id,
+                name,
+                collection,
+                image,
+                description,
+                verified,
+            })
+        })
+        .collect();
+    
+    println!("✅ Converted to {} collectible items", collectibles.len());
+    Ok(collectibles)
+}
+
+// ALSO ADD this helper function to fetch metadata from JSON URI if needed:
+pub async fn fetch_nft_metadata(json_uri: &str) -> Result<HashMap<String, serde_json::Value>, String> {
+    let client = Client::new();
+    
+    let response = client
+        .get(json_uri)
+        .send()
+        .await
+        .map_err(|e| format!("Failed to fetch metadata: {}", e))?;
+    
+    if !response.status().is_success() {
+        return Err(format!("Metadata fetch error: {}", response.status()));
+    }
+    
+    let metadata: HashMap<String, serde_json::Value> = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse metadata JSON: {}", e))?;
+    
+    Ok(metadata)
 }

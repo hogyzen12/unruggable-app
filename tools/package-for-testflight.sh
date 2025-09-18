@@ -170,9 +170,9 @@ flatten_to_opaque_png() {
 
 # --- Make every generated icon opaque (no alpha allowed by App Store) ---
 # (Moved here, after generation, targeting the icon dir)
-while IFS= read -r -d '' P; do
+for P in "$ICON_DIR"/*.png; do
   flatten_to_opaque_png "$P" "$P"
-done < <(find "$ICON_DIR" -type f -name '*.png' -print0)
+done
 
 ACTOOL_LOG="$TMP_DIR/actool.log"
 PARTIAL_PLIST="$TMP_DIR/asset-partial.plist"
