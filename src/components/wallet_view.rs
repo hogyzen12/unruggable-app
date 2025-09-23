@@ -36,6 +36,7 @@ use crate::components::common::{Token, TokenSortConfig, TokenFilter, SortCriteri
 use crate::rpc::{self, CollectibleInfo, fetch_collectibles, TokenAccountFilter};
 use crate::prices;
 use crate::hardware::HardwareWallet;
+use crate::hardware::HardwareDeviceType;
 use crate::components::background_themes::BackgroundTheme;
 use crate::components::modals::BackgroundModal;
 use crate::prices::CandlestickData;
@@ -64,6 +65,10 @@ use rand::{thread_rng, Rng};
 //const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
 //const ICON_SWAP: Asset = asset!("/assets/icons/swap.svg");
 //const ICON_LEND: Asset = asset!("/assets/icons/jupLendLogo.svg");
+
+const DEVICE_LEDGER: Asset = asset!("assets/icons/ledger_device.webp");
+const DEVICE_UNRGBL: Asset = asset!("assets/icons/unruggable_device.png");
+const DEVICE_SOFTWARE: Asset = asset!("assets/icons/hot_wallet.png");
 
 const ICON_32:     &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
 const ICON_SOL:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
@@ -511,6 +516,9 @@ pub fn WalletView() -> Element {
     let mut collectibles = use_signal(|| Vec::<CollectibleInfo>::new());
     let mut collectibles_loading = use_signal(|| false);
 
+    // Add this signal near your other hardware wallet signals in wallet_view.rs
+    let mut hardware_device_type = use_signal(|| None as Option<HardwareDeviceType>);
+    
     // Load wallets from storage on component mount
     use_effect(move || {
         let stored_wallets = load_wallets_from_storage();
@@ -1453,6 +1461,7 @@ pub fn WalletView() -> Element {
                         hardware_wallet.set(None);
                         hardware_connected.set(false);
                         hardware_pubkey.set(None);
+                        hardware_device_type.set(None);
                         show_hardware_modal.set(false);
                     },
                     onsuccess: move |hw_wallet: Arc<HardwareWallet>| {
@@ -1460,9 +1469,16 @@ pub fn WalletView() -> Element {
                         hardware_connected.set(true);
                         show_hardware_modal.set(false);
                         
+                        let hw_clone = hw_wallet.clone();
                         spawn(async move {
                             if let Ok(pubkey) = hw_wallet.get_public_key().await {
                                 hardware_pubkey.set(Some(pubkey));
+                            }
+                            
+                            // Get and set the device type - clone it for the println
+                            if let Some(dev_type) = hw_clone.get_device_type().await {
+                                println!("🔧 Set device type to: {:?}", dev_type); // Use it first
+                                hardware_device_type.set(Some(dev_type)); // Then move it
                             }
                         });
                     }
@@ -1723,17 +1739,64 @@ pub fn WalletView() -> Element {
             div {
                 class: "main-content",
                 div {
-                    class: "balance-section-enhanced",
+                    class: "balance-section-segmented",
+                    
+                    // Left side - Balance content
                     div {
-                        class: "balance-amount-bold",
-                        // Show loading state for total portfolio value when prices are refreshing
-                        if prices_loading() {
-                            "Loading..."
+                        class: "balance-content",
+                        
+                        div {
+                            class: "balance-label",
+                            "Your Balance"
+                        }
+                        
+                        div {
+                            class: "balance-amount-large",
+                            if prices_loading() {
+                                "Loading..."
+                            } else {
+                                // Calculate total portfolio value (sum of all token values) and round to nearest dollar
+                                {
+                                    let total_value = tokens.read().iter().fold(0.0, |acc, token| acc + token.value_usd);
+                                    format_portfolio_balance(total_value)
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Right side - Device/Wallet indicator
+                    div {
+                        class: "device-indicator",
+                        
+                        // Only show device when hardware is actually CONNECTED (green indicator) 
+                        if hardware_connected() {
+                            // Show the appropriate device icon based on stored device type
+                            match hardware_device_type() {
+                                Some(HardwareDeviceType::ESP32) => rsx! {
+                                    img { 
+                                        src: DEVICE_UNRGBL,
+                                        alt: "Unruggable Hardware Wallet"
+                                    }
+                                },
+                                Some(HardwareDeviceType::Ledger) => rsx! {
+                                    img { 
+                                        src: DEVICE_LEDGER,
+                                        alt: "Ledger Hardware Wallet"
+                                    }
+                                },
+                                None => rsx! {
+                                    // Default to Unruggable since that's your main device
+                                    img { 
+                                        src: DEVICE_UNRGBL,
+                                        alt: "Hardware Wallet"
+                                    }
+                                }
+                            }
                         } else {
-                            // Calculate total portfolio value (sum of all token values) and round to nearest dollar
-                            {
-                                let total_value = tokens.read().iter().fold(0.0, |acc, token| acc + token.value_usd);
-                                format_portfolio_balance(total_value)
+                            // Not connected - show software wallet
+                            img { 
+                                src: DEVICE_SOFTWARE,
+                                alt: "Software Wallet"
                             }
                         }
                     }

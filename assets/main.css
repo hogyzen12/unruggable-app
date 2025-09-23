@@ -3303,7 +3303,7 @@ input:checked + .toggle-slider:before {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 10px;
+    padding: 8px 10px; /* Reduced from 12px to 8px */
     background-color: rgba(0, 0, 0, 0.2);
     backdrop-filter: blur(2px);
     position: relative;
@@ -6571,3 +6571,91 @@ body:has(.token-item-selected) .token-item:hover {
         flex: 1;
     }
 }
+/* Updated Balance Section - Full Width with Larger Device Icon */
+.balance-section-segmented {
+    margin: 12px 10px 16px; /* Reduced top margin from 20px to 12px */
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 100%);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 24px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    width: calc(100% - 20px);
+    box-sizing: border-box;
+}
+
+.balance-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0; /* Prevents overflow issues */
+}
+
+.balance-section-segmented .balance-label {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 500;
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.balance-section-segmented .balance-amount-large {
+    font-size: 36px;
+    font-weight: 200;
+    color: white;
+    line-height: 1.1;
+    margin-bottom: 2px;
+}
+
+.balance-section-segmented .balance-decimals {
+    font-size: 24px;
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 200;
+}
+
+/* Larger Hardware wallet device indicator */
+/* Updated Device Indicator - Full Height */
+.device-indicator {
+    width: 80px; /* Increased from 64px */
+    height: 100%; /* Take full height of the balance section */
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    margin-left: 16px;
+    padding: 8px; /* Add some padding for the image */
+}
+
+.device-indicator img {
+    width: 100%; /* Take full width of container */
+    height: 100%; /* Take full height of container */
+    object-fit: contain; /* Maintain aspect ratio while filling space */
+    opacity: 0.9;
+    border-radius: 12px; /* Slightly round the image corners */
+}
+
+/* Responsive adjustments for smaller screens */
+@media (max-width: 350px) {
+    .device-indicator {
+        width: 70px; /* Slightly smaller on very small screens */
+        margin-left: 12px;
+        padding: 6px;
+    }
+}
+
+/* For very wide screens, limit the maximum width but still stretch nicely */
+@media (min-width: 390px) {
+    .balance-section-segmented {
+        max-width: 370px; /* Prevent it from getting too wide on larger screens */
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
+
