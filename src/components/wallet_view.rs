@@ -1802,147 +1802,127 @@ pub fn WalletView() -> Element {
                     }
                 }
                 
+                // Replace the current action-buttons div with this segmented version
                 div {
-                    class: "action-buttons",
-                    button {
-                        class: "action-button",
-                        onclick: move |_| show_receive_modal.set(true),
-                        div {
-                            class: "action-icon",
-                            img {
-                                src: "{ICON_RECEIVE}",
-                                alt: "Receive",
-                                width: "24",
-                                height: "24",
-                            }
-                        }
-                        span {
-                            class: "action-label",
-                            "Receive"
-                        }
-                    }
-                    button {
-                        class: "action-button",
-                        onclick: move |_| {
-                            if bulk_send_mode() {
-                                // Exit bulk mode
-                                bulk_send_mode.set(false);
-                                selected_tokens.set(HashSet::new());
-                            } else {
-                                // Enter bulk send mode
-                                bulk_send_mode.set(true);
-                                selected_tokens.set(HashSet::new()); // Clear previous selections
-                            }
-                        },
-                        div {
-                            class: "action-icon",
-                            if bulk_send_mode() {
-                                div {
-                                    style: "font-size: 24px;",
-                                    "❌" // Keep cancel emoji
-                                }
-                            } else {
-                                img {
-                                    src: "{ICON_BULK}",
-                                    alt: "Send",
-                                    width: "24",
-                                    height: "24",
+                    class: "action-buttons-segmented",
+                    
+                    div {
+                        class: "action-buttons-grid",
+                        
+                        button {
+                            class: "action-button-segmented",
+                            onclick: move |_| show_receive_modal.set(true),
+                            
+                            div {
+                                class: "action-icon-segmented",
+                                img { 
+                                    src: "{ICON_RECEIVE}",
+                                    alt: "Receive"
                                 }
                             }
+                            
+                            div {
+                                class: "action-label-segmented",
+                                "Receive"
+                            }
                         }
-                        span {
-                            class: "action-label",
-                            if bulk_send_mode() {
-                                "Cancel"
-                            } else {
-                                "Send"
+                        
+                        button {
+                            class: "action-button-segmented",
+                            onclick: move |_| {
+                                if bulk_send_mode() {
+                                    // Exit bulk mode
+                                    bulk_send_mode.set(false);
+                                    selected_tokens.set(HashSet::new());
+                                } else {
+                                    // Enter bulk send mode
+                                    bulk_send_mode.set(true);
+                                    selected_tokens.set(HashSet::new()); // Clear previous selections
+                                }
+                            },
+                            
+                            div {
+                                class: "action-icon-segmented",
+                                if bulk_send_mode() {
+                                    div {
+                                        style: "font-size: 24px; color: white;",
+                                        "❌" // Keep cancel emoji
+                                    }
+                                } else {
+                                    img {
+                                        src: "{ICON_BULK}",
+                                        alt: "Send"
+                                    }
+                                }
+                            }
+                            
+                            div {
+                                class: "action-label-segmented",
+                                if bulk_send_mode() {
+                                    "Cancel"
+                                } else {
+                                    "Send"
+                                }
+                            }
+                        }
+                        
+                        button {
+                            class: "action-button-segmented",
+                            onclick: move |_| show_stake_modal.set(true),
+                            
+                            div {
+                                class: "action-icon-segmented",
+                                img { 
+                                    src: "{ICON_STAKE}",
+                                    alt: "Stake"
+                                }
+                            }
+                            
+                            div {
+                                class: "action-label-segmented",
+                                "Stake"
+                            }
+                        }
+                        
+                        button {
+                            class: "action-button-segmented",
+                            onclick: move |_| show_swap_modal.set(true),
+                            
+                            div {
+                                class: "action-icon-segmented",
+                                img { 
+                                    src: "{ICON_SWAP}",
+                                    alt: "Swap"
+                                }
+                            }
+                            
+                            div {
+                                class: "action-label-segmented",
+                                "Swap"
+                            }
+                        }
+                        
+                        button {
+                            class: "action-button-segmented",
+                            onclick: move |_| {
+                                println!("💰 Lend button clicked!");
+                                show_lend_modal.set(true);
+                            },
+                            
+                            div {
+                                class: "action-icon-segmented",
+                                img { 
+                                    src: "{ICON_LEND}",
+                                    alt: "Lend"
+                                }
+                            }
+                            
+                            div {
+                                class: "action-label-segmented",
+                                "Lend"
                             }
                         }
                     }
-                    button {
-                        class: "action-button",
-                        onclick: move |_| show_stake_modal.set(true),
-                        div {
-                            class: "action-icon",
-                            img {
-                                src: "{ICON_STAKE}",
-                                alt: "Stake",
-                                width: "24",
-                                height: "24",
-                            }
-                        }
-                        span {
-                            class: "action-label",
-                            "Stake"
-                        }
-                    }
-                    button {
-                        class: "action-button",
-                        onclick: move |_| show_swap_modal.set(true),
-                        div {
-                            class: "action-icon",
-                            img {
-                                src: "{ICON_SWAP}",
-                                alt: "Swap",
-                                width: "24",
-                                height: "24",
-                            }
-                        }
-                        span {
-                            class: "action-label",
-                            "Swap"
-                        }
-                    }
-                    button {
-                        class: "action-button",
-                        onclick: move |_| {
-                            println!("💰 Lend button clicked!");
-                            show_lend_modal.set(true);
-                        },
-                        div {
-                            class: "action-icon",
-                            img {
-                                src: "{ICON_LEND}",
-                                alt: "Lend",
-                                width: "24",
-                                height: "24",
-                            }
-                        }
-                        span {
-                            class: "action-label",
-                            "Lend"
-                        }
-                    }               
-                    //}
-                    //button {
-                    //    class: "action-button",
-                    //    onclick: move |_| show_send_modal.set(true),
-                    //    div {
-                    //        class: "action-icon",
-                    //        img {
-                    //            src: "{ICON_SEND}",
-                    //            alt: "Send",
-                    //            width: "24",
-                    //            height: "24",
-                    //        }
-                    //    }
-                    //    span {
-                    //        class: "action-label",
-                    //        "Send"
-                    //    }
-                    //}
-                    //button {
-                    //    class: "action-button",
-                    //    onclick: move |_| show_history_modal.set(true),
-                    //    div {
-                    //        class: "action-icon history-icon",
-                    //        "📜"
-                    //    }
-                    //    span {
-                    //        class: "action-label",
-                    //        "History"
-                    //    }
-                    //}
                 }
             }
             

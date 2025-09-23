@@ -354,13 +354,14 @@ body {
     }
 }
 
+/* Tokens Section - FIXED: Remove huge top padding */
 .tokens-section {
     background-color: rgba(17, 17, 17, 0.25);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-radius: 20px 20px 0 0;
-    padding: 10px 20px 20px 20px; /* Change from 20px to 24px 20px 20px 20px */
-    min-height: 70vh;
+    padding: 10px 20px 20px 20px; /* FIXED: Reduced from 20px to 8px top padding */
+    min-height: 60vh;
 }
 
 .tokens-header {
@@ -1236,7 +1237,7 @@ body {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 20px;
+    padding: 8px;
 }
 
 /* Current address display styles */
@@ -3600,12 +3601,11 @@ input:checked + .toggle-slider:before {
 
 /* Update tokens header when in bulk mode */
 .tokens-header {
-    color: #6b7280;
-    font-size: 16px;
-    margin-bottom: 12px; /* Change from 20px to 12px */
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    color: #ffffff;
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 8px; /* Reduced from 12px for tighter spacing */
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 /* Bulk mode active state styling */
@@ -6571,14 +6571,15 @@ body:has(.token-item-selected) .token-item:hover {
         flex: 1;
     }
 }
-/* Updated Balance Section - Full Width with Larger Device Icon */
+
+/* Balance Section - Consistent 8px gaps */
 .balance-section-segmented {
-    margin: 12px 10px 16px; /* Reduced top margin from 20px to 12px */
+    margin: 8px 10px 8px; /* Consistent 8px spacing */
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 100%);
     backdrop-filter: blur(20px);
     border-radius: 20px;
     border: 1px solid rgba(255, 255, 255, 0.15);
-    padding: 24px 20px;
+    padding: 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -6659,3 +6660,208 @@ body:has(.token-item-selected) .token-item:hover {
     }
 }
 
+/* Balance Section - Sleeker and Properly Spaced */
+.balance-section-segmented {
+    margin: 12px 10px 8px; /* Tighter bottom margin */
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 100%);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 20px; /* Reduced for sleeker profile */
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    width: calc(100% - 20px);
+    box-sizing: border-box;
+}
+
+.balance-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.balance-section-segmented .balance-label {
+    font-size: 14px;
+    color: rgba(255, 255, 255, 0.7);
+    font-weight: 500;
+    margin-bottom: 2px; /* Tighter spacing */
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.balance-section-segmented .balance-amount-large {
+    font-size: 34px; /* Slightly smaller for sleeker look */
+    font-weight: 200;
+    color: white;
+    line-height: 1.0; /* Tighter line height */
+    margin-bottom: 0;
+}
+
+.balance-section-segmented .balance-decimals {
+    font-size: 22px; /* Proportionally smaller */
+    color: rgba(255, 255, 255, 0.8);
+    font-weight: 200;
+}
+
+/* Device Indicator - Proportional to sleeker balance */
+.device-indicator {
+    width: 76px; /* Slightly smaller for proportion */
+    height: 76px; /* Fixed height instead of 100% */
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    margin-left: 16px;
+    padding: 8px;
+}
+
+.device-indicator img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    opacity: 0.9;
+    border-radius: 12px;
+}
+
+/* Action Buttons - Consistent 8px gaps */
+.action-buttons-segmented {
+    margin: 8px 10px 8px; /* Consistent 8px spacing */
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 100%);
+    backdrop-filter: blur(20px);
+    border-radius: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 18px 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    width: calc(100% - 20px);
+    box-sizing: border-box;
+}
+
+.action-buttons-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+}
+
+.action-button-segmented {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 4px;
+    border-radius: 12px;
+    cursor: pointer;
+    background: none;
+    border: none;
+    color: white;
+    transition: all 0.2s ease;
+    position: relative;
+    min-width: 0;
+}
+
+.action-button-segmented:hover {
+    background: rgba(255, 255, 255, 0.1);
+    transform: translateY(-2px);
+}
+
+.action-icon-segmented {
+    width: 44px;
+    height: 44px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+.action-icon-segmented img {
+    width: 24px;
+    height: 24px;
+    filter: invert(1) brightness(0.9);
+    transition: filter 0.2s ease;
+}
+
+.action-button-segmented:hover .action-icon-segmented {
+    background: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.2);
+    transform: scale(1.05);
+}
+
+.action-button-segmented:hover .action-icon-segmented img {
+    filter: invert(1) brightness(1.1);
+}
+
+.action-label-segmented {
+    font-size: 11px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.9);
+    text-align: center;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+/* Responsive Design */
+@media (max-width: 350px) {
+    .balance-section-segmented {
+        padding: 18px 16px;
+        margin: 12px 8px 6px;
+    }
+    
+    .device-indicator {
+        width: 68px;
+        height: 68px;
+        margin-left: 12px;
+        padding: 6px;
+    }
+    
+    .balance-section-segmented .balance-amount-large {
+        font-size: 30px;
+    }
+    
+    .action-buttons-segmented {
+        margin: 4px 8px 14px;
+        padding: 16px 8px;
+    }
+    
+    .action-buttons-grid {
+        gap: 6px;
+    }
+    
+    .action-button-segmented {
+        padding: 10px 2px;
+    }
+    
+    .action-icon-segmented {
+        width: 40px;
+        height: 40px;
+    }
+    
+    .action-icon-segmented img {
+        width: 22px;
+        height: 22px;
+    }
+    
+    .action-label-segmented {
+        font-size: 10px;
+    }
+}
+
+/* Large Screen Constraints */
+@media (min-width: 390px) {
+    .balance-section-segmented,
+    .action-buttons-segmented {
+        max-width: 370px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+}
