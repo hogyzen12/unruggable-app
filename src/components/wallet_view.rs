@@ -66,9 +66,9 @@ use rand::{thread_rng, Rng};
 //const ICON_SWAP: Asset = asset!("/assets/icons/swap.svg");
 //const ICON_LEND: Asset = asset!("/assets/icons/jupLendLogo.svg");
 
-const DEVICE_LEDGER: Asset = asset!("assets/icons/ledger_device.webp");
-const DEVICE_UNRGBL: Asset = asset!("assets/icons/unruggable_device.png");
-const DEVICE_SOFTWARE: Asset = asset!("assets/icons/hot_wallet.png");
+//const DEVICE_LEDGER: Asset = asset!("assets/icons/ledger_device.webp");
+//const DEVICE_UNRGBL: Asset = asset!("assets/icons/unruggable_device.png");
+//const DEVICE_SOFTWARE: Asset = asset!("assets/icons/hot_wallet.png");
 
 const ICON_32:     &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
 const ICON_SOL:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
@@ -85,6 +85,10 @@ const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bulk.svg";
 const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
 const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/jupLendLogo.svg";
+
+const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
+const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
+const DEVICE_SOFTWARE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/hot_wallet.png";
 
 
 // JupiterToken struct with PartialEq and Eq for use_memo

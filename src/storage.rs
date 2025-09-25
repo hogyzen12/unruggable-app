@@ -125,7 +125,6 @@ fn get_storage_dir() -> String {
     }
 }
 
-// Simplified storage directory function
 fn get_storage_dir_simple() -> String {
     #[cfg(target_os = "android")]
     {
@@ -136,12 +135,81 @@ fn get_storage_dir_simple() -> String {
             "/data/data/com.unruggable/files".to_string() // Hardcoded fallback
         }
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
+    {
+        // Use iOS Application Support directory (better than Documents for app data)
+        if let Some(home) = std::env::var_os("HOME") {
+            let app_support = std::path::PathBuf::from(home)
+                .join("Library")
+                .join("Application Support")
+                .join("WalletData");
+            
+            let app_support_str = app_support.to_string_lossy().to_string();
+            log::info!("🍎 Using iOS Application Support: {}", app_support_str);
+            app_support_str
+        } else {
+            log::warn!("⚠️ iOS HOME not found, using fallback");
+            "./WalletData".to_string()
+        }
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
         let home_dir = std::env::var("HOME")
             .or_else(|_| std::env::var("USERPROFILE"))
             .unwrap_or_else(|_| ".".to_string());
         format!("{home_dir}/.solana_wallet_app")
+    }
+}
+
+// Add iOS-specific initialization function (add this new function)
+#[cfg(target_os = "ios")]
+pub fn init_ios_storage() -> Result<(), String> {
+    log::info!("🍎 Initializing iOS storage...");
+    
+    // Log environment info for debugging
+    if let Some(home) = std::env::var_os("HOME") {
+        log::info!("📱 iOS HOME: {}", home.to_string_lossy());
+    } else {
+        log::warn!("⚠️ iOS HOME environment variable not found");
+    }
+    
+    // Get and create storage directory
+    let storage_dir = get_storage_dir_simple();
+    log::info!("📁 iOS storage directory: {}", storage_dir);
+    
+    // Ensure directory exists
+    match ensure_storage_dir() {
+        Ok(_) => {
+            log::info!("✅ iOS storage directory ready");
+            
+            // Test read/write capabilities
+            let test_file = format!("{}/ios_test.txt", storage_dir);
+            match std::fs::write(&test_file, "iOS storage test") {
+                Ok(_) => {
+                    log::info!("✅ iOS write test successful");
+                    
+                    // Verify we can read it back
+                    match std::fs::read_to_string(&test_file) {
+                        Ok(content) => {
+                            if content == "iOS storage test" {
+                                log::info!("✅ iOS read-write verification successful");
+                                let _ = std::fs::remove_file(&test_file); // cleanup
+                                Ok(())
+                            } else {
+                                Err("iOS read-write verification failed".to_string())
+                            }
+                        }
+                        Err(e) => Err(format!("iOS read test failed: {}", e))
+                    }
+                }
+                Err(e) => {
+                    Err(format!("iOS write test failed: {}", e))
+                }
+            }
+        }
+        Err(e) => {
+            Err(format!("iOS storage directory creation failed: {}", e))
+        }
     }
 }
 
@@ -285,6 +353,14 @@ pub fn save_wallet_to_storage(wallet_info: &WalletInfo) {
 pub fn load_wallets_from_storage() -> Vec<WalletInfo> {
     log::info!("🔄 Attempting to load wallets from storage");
     
+    // iOS-specific initialization
+    #[cfg(target_os = "ios")]
+    {
+        if let Err(e) = init_ios_storage() {
+            log::error!("❌ iOS storage init failed: {}", e);
+        }
+    }
+    
     #[cfg(feature = "web")]
     {
         use wasm_bindgen::JsCast;
@@ -301,11 +377,29 @@ pub fn load_wallets_from_storage() -> Vec<WalletInfo> {
     #[cfg(not(feature = "web"))]
     {
         let wallet_file = get_wallets_file_path();
-        log::info!("📁 Loading from file: {}", wallet_file);
+        log::info!("📁 Looking for wallets at: {}", wallet_file);
+        
+        // Ensure storage directory exists
+        if let Err(e) = ensure_storage_dir() {
+            log::error!("❌ Storage directory error: {}", e);
+            return Vec::new();
+        }
         
         // Check if file exists
         if !Path::new(&wallet_file).exists() {
-            log::info!("ℹ️ Wallet file doesn't exist yet: {}", wallet_file);
+            log::info!("ℹ️ No existing wallet file found at: {}", wallet_file);
+            
+            // Debug: List directory contents
+            let storage_dir = get_storage_dir_simple();
+            if let Ok(entries) = std::fs::read_dir(&storage_dir) {
+                log::info!("📂 Directory contents of {}:", storage_dir);
+                for entry in entries {
+                    if let Ok(entry) = entry {
+                        log::info!("  - {}", entry.file_name().to_string_lossy());
+                    }
+                }
+            }
+            
             return Vec::new();
         }
         
@@ -316,13 +410,13 @@ pub fn load_wallets_from_storage() -> Vec<WalletInfo> {
                     Ok(wallets) => {
                         log::info!("✅ Successfully loaded {} wallets", wallets.len());
                         for (i, wallet) in wallets.iter().enumerate() {
-                            log::info!("  Wallet {}: {}", i + 1, wallet.name);
+                            log::info!("  Wallet {}: {} ({}...)", i + 1, wallet.name, &wallet.address[..8]);
                         }
                         wallets
                     }
                     Err(e) => {
                         log::error!("❌ Failed to parse wallets from {}: {}", wallet_file, e);
-                        log::error!("📄 File contents: {}", data);
+                        log::error!("📄 File contents preview: {}", &data.chars().take(200).collect::<String>());
                         Vec::new()
                     }
                 }
