@@ -3,9 +3,13 @@ use dioxus::prelude::*;
 use crate::hardware::{HardwareWallet, HardwareDeviceInfo, HardwareDeviceType};
 use std::sync::Arc;
 
-// Define the assets for device icons
-const ICON_UNRUGGABLE: Asset = asset!("/assets/icon.png");
-const ICON_LEDGER: Asset = asset!("/assets/icons/ledgerLogo.webp");
+// Define the assets for device icons - local assets
+//const ICON_UNRUGGABLE: Asset = asset!("/assets/icon.png");
+//const ICON_LEDGER: Asset = asset!("/assets/icons/ledgerLogo.webp");
+
+const ICON_UNRUGGABLE: Asset = asset!("https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icon.png");
+const ICON_LEDGER: Asset = asset!("https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledgerLogo.webp");
+
 
 #[component]
 pub fn HardwareWalletModal(
