@@ -1942,7 +1942,7 @@ pub fn WalletView() -> Element {
                             class: if active_tab() == "tokens" { "tab-button active" } else { "tab-button" },
                             onclick: move |_| active_tab.set("tokens".to_string()),
                             if bulk_send_mode() && active_tab() == "tokens" {
-                                "Select Tokens to Send"
+                                "Select Tokens"
                             } else {
                                 "Your Tokens"
                             }
