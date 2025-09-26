@@ -85,4 +85,7 @@ fi
 # Clean up temp directory
 rm -rf "$TEMP_DIR"
 
-echo "APK ready for distribution: $OUTPUT_APK"
+### 12) Checksums for release notes
+shasum -a 256 "$OUTPUT_APK" | tee "${OUTPUT_APK}.sha256"
+
+echo "✅ Finished. Upload universal apk ${OUTPUT_APK} (and .sha256) to GitHub Releases."

@@ -18,6 +18,8 @@ ANDROID_PROJECT_DIR="target/dx/${APP_NAME}/release/android"
 OUTPUT_DIR="dist/android"
 # The final name for the AAB file
 FINAL_AAB_NAME="${APP_NAME}-release.aab"
+# Path to the source icon (largest size from your Dioxus.toml assets; adjust if needed)
+SOURCE_ICON_PATH="assets/icons/icon.png"
 # --- End Configuration ---
 
 # Get the absolute path to the project root (where the script is located)
@@ -27,6 +29,7 @@ PROJECT_ROOT=$(pwd)
 ABS_ANDROID_PROJECT_DIR="$PROJECT_ROOT/$ANDROID_PROJECT_DIR"
 ABS_OUTPUT_DIR="$PROJECT_ROOT/$OUTPUT_DIR"
 ABS_FINAL_AAB_PATH="$ABS_OUTPUT_DIR/$FINAL_AAB_NAME"
+ABS_SOURCE_ICON="$PROJECT_ROOT/$SOURCE_ICON_PATH"
 
 # Check if the Android project directory exists
 if [ ! -d "$ABS_ANDROID_PROJECT_DIR" ]; then
@@ -142,8 +145,6 @@ fi
 
 echo "Set versionCode=${VERSION_CODE}, versionName=${VERSION_NAME}"
 
-
-
 # Ensure gradlew is executable (now relative to the 'app' directory)
 GRADLEW_PATH="./gradlew"
 if [ ! -x "$GRADLEW_PATH" ]; then
@@ -151,11 +152,39 @@ if [ ! -x "$GRADLEW_PATH" ]; then
   chmod +x "$GRADLEW_PATH"
 fi
 
+echo "Cleaning build artifacts..."
+"$GRADLEW_PATH" clean
+
+# Icon replacement step
+echo "Replacing default app icons with custom ones..."
+# Clean existing icons
+find app/src/main/res -name "ic_launcher*.png" -type f -delete
+find app/src/main/res -name "*.webp" -type f -delete
+rm -rf app/src/main/res/mipmap-anydpi-v26
+# Check for ImageMagick
+if ! command -v convert &> /dev/null; then
+  echo "Error: ImageMagick not installed. Please install it (e.g., brew install imagemagick) to generate icons automatically."
+  exit 1
+fi
+if [ ! -f "$ABS_SOURCE_ICON" ]; then
+  echo "Error: Source icon not found at $ABS_SOURCE_ICON"
+  exit 1
+fi
+# Generate icons for different densities
+for density_size in "mdpi 48" "hdpi 72" "xhdpi 96" "xxhdpi 144" "xxxhdpi 192"; do
+  density=$(echo $density_size | cut -d' ' -f1)
+  size=$(echo $density_size | cut -d' ' -f2)
+  dir="app/src/main/res/mipmap-${density}"
+  mkdir -p "$dir"
+  convert "$ABS_SOURCE_ICON" -resize "${size}x${size}" "$dir/ic_launcher.png"
+done
+echo "Custom icons generated and placed in res/mipmap-* directories."
+
 echo "Running Gradle bundleRelease task from $(pwd)..." # Should now be inside 'app'
-# Run the clean and bundleRelease tasks.
-echo "Running Gradle clean and bundleRelease tasks..."
-if "$GRADLEW_PATH" clean bundleRelease; then
-  echo "Gradle clean and bundleRelease successful."
+# Run the bundleRelease task (clean already done)
+echo "Running Gradle bundleRelease task..."
+if "$GRADLEW_PATH" bundleRelease; then
+  echo "Gradle bundleRelease successful."
 else
   echo "Error: Gradle build failed."
   # Change back to project root before exiting on failure
