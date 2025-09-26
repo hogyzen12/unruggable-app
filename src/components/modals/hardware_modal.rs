@@ -7,8 +7,8 @@ use std::sync::Arc;
 //const ICON_UNRUGGABLE: Asset = asset!("/assets/icon.png");
 //const ICON_LEDGER: Asset = asset!("/assets/icons/ledgerLogo.webp");
 
-const ICON_UNRUGGABLE: Asset = asset!("https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icon.png");
-const ICON_LEDGER: Asset = asset!("https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledgerLogo.webp");
+const ICON_UNRUGGABLE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icon.png";
+const ICON_LEDGER: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledgerLogo.webp";
 
 
 #[component]
