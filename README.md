@@ -25,6 +25,15 @@ MacOS
 simply execute macos_package.sh and let the script deal with it.
 Ensure parameters are correctly set.
 
+Windows
+cross compile from mac/use cargo stuff
+export X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR=/Users/hogyzen12/Downloads/openssl-3.5.3/x64
+export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1
+cargo xwin build --target x86_64-pc-windows-msvc --release
+ls target/x86_64-pc-windows-msvc/release
+add the dll file to the release
+zip dlls with the exe for functional exe
+
 
 Manual installation.
 hogyzen12@anons-MBP unruggable-app % find ./target -name "*.apk"
