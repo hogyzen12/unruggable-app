@@ -6865,3 +6865,7 @@ body:has(.token-item-selected) .token-item:hover {
         margin-right: auto;
     }
 }
+
+.wallet-header-enhanced {
+  margin-top: 30px !important;
+}
