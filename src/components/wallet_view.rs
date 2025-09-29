@@ -8,6 +8,7 @@ use crate::storage::{
     clear_rpc_storage,
     load_jito_settings_from_storage,
     save_jito_settings_to_storage,
+    delete_wallet_from_storage,
     JitoSettings
 };
 use crate::currency::{
@@ -28,7 +29,7 @@ use crate::currency_utils::{
     format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -456,6 +457,10 @@ pub fn WalletView() -> Element {
     //JITO Stuff
     let mut show_jito_modal = use_signal(|| false);
     let mut jito_settings = use_signal(|| load_jito_settings_from_storage());
+
+    //Additional Wallet features
+    let mut show_export_modal = use_signal(|| false);
+    let mut show_delete_confirmation = use_signal(|| false);
 
     // Balance management
     let mut balance = use_signal(|| 0.0);
@@ -1338,6 +1343,37 @@ pub fn WalletView() -> Element {
                             }
                             "Import Wallet"
                         }
+
+                        if current_wallet.is_some() && !hardware_connected() {
+                            button {
+                                class: "dropdown-item",
+                                onclick: move |_| {
+                                    show_export_modal.set(true);
+                                    show_dropdown.set(false);
+                                },
+                                div {
+                                    class: "dropdown-icon action-icon",
+                                    "📤"
+                                }
+                                "Export Wallet"
+                            }
+                        }
+
+                        // NEW: Delete Wallet button (only show if there's a current wallet and not hardware)
+                        if current_wallet.is_some() && !hardware_connected() {
+                            button {
+                                class: "dropdown-item delete-item",
+                                onclick: move |_| {
+                                    show_delete_confirmation.set(true);
+                                    show_dropdown.set(false);
+                                },
+                                div {
+                                    class: "dropdown-icon action-icon danger",
+                                    "🗑️"
+                                }
+                                "Delete Wallet"
+                            }
+                        }
                         
                         //if hardware_device_present() && !hardware_connected() {
                         //    button {
@@ -1372,19 +1408,6 @@ pub fn WalletView() -> Element {
                         button {
                             class: "dropdown-item",
                             onclick: move |_| {
-                                show_jito_modal.set(true);
-                                show_dropdown.set(false);
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                "⚡"
-                            }
-                            "JITO Settings"
-                        }
-
-                        button {
-                            class: "dropdown-item",
-                            onclick: move |_| {
                                 show_background_modal.set(true);
                                 show_dropdown.set(false);
                             },
@@ -1394,6 +1417,19 @@ pub fn WalletView() -> Element {
                             }
                             "Change Background"
                         }
+
+                        //button {
+                        //    class: "dropdown-item",
+                        //    onclick: move |_| {
+                        //        show_jito_modal.set(true);
+                        //        show_dropdown.set(false);
+                        //    },
+                        //    div {
+                        //        class: "dropdown-icon action-icon",
+                        //        "⚡"
+                        //    }
+                        //    "JITO Settings"
+                        //}
                     }
                 }
             }
@@ -1408,6 +1444,50 @@ pub fn WalletView() -> Element {
                         current_wallet_index.set(wallets.read().len() - 1);
                         show_wallet_modal.set(false);
                     }
+                }
+            }
+
+            // Export Wallet Modal
+            if show_export_modal() {
+                ExportWalletModal {
+                    wallet: wallets.read().get(current_wallet_index()).cloned(),
+                    onclose: move |_| show_export_modal.set(false)
+                }
+            }
+
+            // Delete Wallet Confirmation Modal  
+            if show_delete_confirmation() {
+                DeleteWalletModal {
+                    wallet: wallets.read().get(current_wallet_index()).cloned(),
+                    onconfirm: move |_| {
+                        // Get the current wallet info for deletion - separate the read operation
+                        let current_index = current_wallet_index();
+                        let wallet_address_to_delete = {
+                            // This scope ensures the read lock is dropped before we try to write
+                            wallets.read().get(current_index).map(|w| w.address.clone())
+                        };
+                        
+                        if let Some(wallet_address) = wallet_address_to_delete {
+                            // Delete the wallet from storage
+                            delete_wallet_from_storage(&wallet_address);
+                            
+                            // Reload wallets from storage (now we can safely write)
+                            wallets.set(load_wallets_from_storage());
+                            
+                            // Reset current index if needed
+                            let wallet_count = wallets.read().len();
+                            if wallet_count == 0 {
+                                current_wallet_index.set(0);
+                            } else if current_index >= wallet_count {
+                                current_wallet_index.set(wallet_count - 1);
+                            }
+                            
+                            // Reset balance
+                            balance.set(0.0);
+                        }
+                        show_delete_confirmation.set(false);
+                    },
+                    onclose: move |_| show_delete_confirmation.set(false)
                 }
             }
             

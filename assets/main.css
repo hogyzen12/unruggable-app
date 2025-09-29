@@ -6891,3 +6891,168 @@ body:has(.token-item-selected) .token-item:hover {
         }
     }
 }
+
+/* Export/Delete wallet modal specific styles */
+.wallet-name-display, .wallet-address-display {
+    padding: 12px;
+    background-color: #0a0a0a;
+    border-radius: 6px;
+    font-family: monospace;
+    color: #d1d5db;
+    border: 1px solid #374151;
+    word-break: break-all;
+}
+
+.wallet-delete-info {
+    margin: 16px 0;
+    padding: 16px;
+    background-color: rgba(239, 68, 68, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.wallet-delete-info .wallet-name {
+    font-weight: 600;
+    color: white;
+    margin-bottom: 8px;
+}
+
+.wallet-delete-info .wallet-address {
+    font-family: monospace;
+    color: #9ca3af;
+    word-break: break-all;
+    font-size: 14px;
+}
+
+.warning-message.danger {
+    background-color: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+    padding: 12px;
+    border-radius: 6px;
+    margin: 12px 0;
+    font-weight: 500;
+}
+
+.key-format-info {
+    font-size: 12px;
+    color: #6b7280;
+    margin-top: 8px;
+    font-style: italic;
+}
+
+.copy-hint {
+    font-size: 12px;
+    color: #10b981;
+    margin-top: 8px;
+    font-weight: 500;
+}
+
+/* Delete item styling in dropdown */
+.dropdown-item.delete-item {
+    border-top: 1px solid rgba(239, 68, 68, 0.2);
+    margin-top: 8px;
+    padding-top: 16px;
+}
+
+.dropdown-item.delete-item:hover {
+    background-color: rgba(239, 68, 68, 0.1);
+}
+
+.dropdown-icon.danger {
+    color: #ef4444;
+}
+
+/* Primary button danger variant */
+.modal-button.primary.danger {
+    background-color: #ef4444;
+    color: white;
+}
+
+.modal-button.primary.danger:hover {
+    background-color: #dc2626;
+}
+
+/* Export button styling */
+.dropdown-item .dropdown-icon.action-icon {
+    font-size: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Enhanced warning message styling */
+.warning-message {
+    background-color: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    color: #fbbf24;
+    padding: 12px;
+    border-radius: 6px;
+    margin: 12px 0;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+/* Private key display area */
+.private-key-display {
+    background-color: #0a0a0a;
+    border: 1px solid #374151;
+    border-radius: 6px;
+    padding: 16px;
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: #d1d5db;
+    word-break: break-all;
+    line-height: 1.4;
+    margin: 12px 0;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+/* Show key button styling */
+.show-key-button {
+    background-color: #6366f1;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 12px 24px;
+    cursor: pointer;
+    font-weight: 500;
+    font-size: 14px;
+    transition: background-color 0.2s;
+    margin-top: 12px;
+}
+
+.show-key-button:hover {
+    background-color: #4f46e5;
+}
+
+/* Ensure proper modal sizing for export/delete modals */
+.modal-content {
+    max-width: 500px;
+    width: 90vw;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+    .wallet-name-display, 
+    .wallet-address-display, 
+    .private-key-display {
+        font-size: 12px;
+        padding: 10px;
+    }
+    
+    .modal-buttons {
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    .modal-button {
+        width: 100%;
+    }
+}
+
+/* Ensure proper spacing between dropdown sections */
+.dropdown-divider + .dropdown-item {
+    margin-top: 0;
+}

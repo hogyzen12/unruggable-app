@@ -611,3 +611,66 @@ pub fn load_jito_settings_from_storage() -> JitoSettings {
 pub fn get_current_jito_settings() -> JitoSettings {
     load_jito_settings_from_storage()
 }
+
+/// Delete a wallet by address from storage
+pub fn delete_wallet_from_storage(wallet_address: &str) {
+    log::info!("🔄 Attempting to delete wallet: {}", wallet_address);
+    
+    let mut wallets = load_wallets_from_storage();
+    let original_count = wallets.len();
+    
+    // Remove wallet with matching address
+    wallets.retain(|wallet| wallet.address != wallet_address);
+    
+    if wallets.len() < original_count {
+        log::info!("✅ Wallet {} removed from memory", wallet_address);
+        
+        // Save updated wallet list
+        save_wallets_to_storage(&wallets);
+        log::info!("✅ Wallet deletion completed. {} wallets remaining.", wallets.len());
+    } else {
+        log::warn!("⚠️ Wallet {} not found in storage", wallet_address);
+    }
+}
+
+/// Save wallets list to storage (only add this if it doesn't already exist in your storage.rs)
+pub fn save_wallets_to_storage(wallets: &Vec<WalletInfo>) {
+    log::info!("🔄 Saving {} wallets to storage", wallets.len());
+    
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(wallets).unwrap();
+        storage.set_item("wallets", &serialized).unwrap();
+        log::info!("✅ Wallets saved to web storage");
+    }
+    
+    #[cfg(not(feature = "web"))]
+    {
+        match ensure_storage_dir() {
+            Ok(_) => {
+                let wallet_file = get_wallets_file_path();
+                match serde_json::to_string_pretty(wallets) {
+                    Ok(serialized) => {
+                        match std::fs::write(&wallet_file, &serialized) {
+                            Ok(_) => {
+                                log::info!("✅ Wallets successfully saved to: {}", wallet_file);
+                            }
+                            Err(e) => {
+                                log::error!("❌ Failed to write wallets to {}: {}", wallet_file, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("❌ Failed to serialize wallets: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("❌ Failed to ensure storage directory: {}", e);
+            }
+        }
+    }
+}
