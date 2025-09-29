@@ -6866,6 +6866,28 @@ body:has(.token-item-selected) .token-item:hover {
     }
 }
 
-.wallet-header-enhanced {
-  margin-top: 30px !important;
+/* Target Android devices based on screen characteristics */
+@media screen and (max-device-width: 480px) and (min-resolution: 2dppx) {
+    .wallet-header-enhanced {
+        margin-top: 30px !important;
+    }
+}
+
+/* Exclude iOS devices explicitly - more specific selectors */
+@supports (-webkit-touch-callout: none) {
+    /* iOS Safari specific - this should override for iOS */
+    @media screen and (max-device-width: 480px) {
+        .wallet-header-enhanced {
+            margin-top: 0px !important;
+        }
+    }
+}
+
+/* Additional iOS-specific override using safe area */
+@supports (padding: max(0px)) {
+    @media screen and (max-device-width: 480px) {
+        .wallet-header-enhanced {
+            margin-top: env(safe-area-inset-top, 0px) !important;
+        }
+    }
 }
