@@ -14,6 +14,7 @@ sh scripts/android.build.sh && sh scripts/android.bundle.sh && sh scripts/androi
 
 bundle and push to device. APK available for sideloading release as well.
 
+For other ditris use hosted assets to make sure it builds
 IPHONES
 tools and cargo make are in charge of building for real iphone deployment. 
 
@@ -27,9 +28,7 @@ Ensure parameters are correctly set.
 
 Windows
 cross compile from mac/use cargo stuff
-export X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR=/Users/hogyzen12/Downloads/openssl-3.5.3/x64
-export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1
-cargo xwin build --target x86_64-pc-windows-msvc --release
+export X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR=/Users/hogyzen12/Downloads/openssl-3.5.3/x64 && export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1 && cargo xwin build --target x86_64-pc-windows-msvc --release
 ls target/x86_64-pc-windows-msvc/release
 add the dll file to the release
 zip dlls with the exe for functional exe
