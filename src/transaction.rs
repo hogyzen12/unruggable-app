@@ -206,7 +206,7 @@ impl BulkTransactionBuilder {
 impl TransactionClient {
     /// Create a new transaction client
     pub fn new(rpc_url: Option<&str>) -> Self {
-        let url = rpc_url.unwrap_or("https://api.mainnet-beta.solana.com").to_string();
+        let url = rpc_url.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com").to_string();
         Self {
             client: Client::new(),
             rpc_url: url,

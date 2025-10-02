@@ -759,7 +759,7 @@ pub fn LendModal(
                                                         
                                                         match signer_result {
                                                             Ok(signed_b64) => {
-                                                                let rpc_url = custom_rpc_clone.unwrap_or("https://api.mainnet-beta.solana.com".to_string());
+                                                                let rpc_url = custom_rpc_clone.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string());
                                                                 match execute_jupiter_lend_transaction(signed_b64, rpc_url).await {
                                                                     Ok(sig) => sig,
                                                                     Err(e) => e
@@ -839,7 +839,7 @@ pub fn LendModal(
                                                         
                                                         match signer_result {
                                                             Ok(signed_b64) => {
-                                                                let rpc_url = custom_rpc_clone.unwrap_or("https://api.mainnet-beta.solana.com".to_string());
+                                                                let rpc_url = custom_rpc_clone.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string());
                                                                 match execute_jupiter_lend_transaction(signed_b64, rpc_url).await {
                                                                     Ok(sig) => sig,
                                                                     Err(e) => e

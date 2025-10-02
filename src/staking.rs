@@ -135,7 +135,7 @@ pub struct StakingClient {
 impl StakingClient {
     /// Create a new staking client
     pub fn new(rpc_url: Option<&str>) -> Self {
-        let url = rpc_url.unwrap_or("https://api.mainnet-beta.solana.com");
+        let url = rpc_url.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
         Self {
             transaction_client: TransactionClient::new(Some(url)),
             rpc_url: url.to_string(),

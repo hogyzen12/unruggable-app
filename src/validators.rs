@@ -179,7 +179,7 @@ pub async fn get_recommended_validators() -> Vec<ValidatorInfo> {
 /// Simplified validator data fetching - only use direct RPC values
 async fn fetch_live_validator_data(rpc_url: Option<&str>) -> Result<Vec<ValidatorInfo>, Box<dyn std::error::Error>> {
     let client = Client::new();
-    let url = rpc_url.unwrap_or("https://api.mainnet-beta.solana.com");
+    let url = rpc_url.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
     
     println!("🌐 Calling getVoteAccounts RPC method...");
     
