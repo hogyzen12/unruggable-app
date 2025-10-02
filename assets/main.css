@@ -7056,3 +7056,43 @@ body:has(.token-item-selected) .token-item:hover {
 .dropdown-divider + .dropdown-item {
     margin-top: 0;
 }
+
+/*
+/* Device Indicator Refresh Animation */
+.device-indicator img {
+    transition: all 0.3s ease;
+}
+
+.device-indicator img.refreshing {
+    animation: refreshSpin 1s ease-in-out;
+    opacity: 0.7;
+}
+
+@keyframes refreshSpin {
+    0% {
+        transform: rotate(0deg) scale(1);
+        opacity: 1;
+    }
+    50% {
+        transform: rotate(180deg) scale(0.9);
+        opacity: 0.6;
+    }
+    100% {
+        transform: rotate(360deg) scale(1);
+        opacity: 1;
+    }
+}
+
+/* Optional: Add a subtle pulse effect during refresh */
+.device-indicator.refreshing {
+    animation: devicePulse 2s ease-in-out;
+}
+
+@keyframes devicePulse {
+    0%, 100% {
+        background: rgba(255, 255, 255, 0.1);
+    }
+    50% {
+        background: rgba(99, 102, 241, 0.2);
+    }
+}

@@ -66,6 +66,7 @@ use rand::{thread_rng, Rng};
 //const ICON_BULK: Asset = asset!("/assets/icons/bulk.svg");
 //const ICON_SWAP: Asset = asset!("/assets/icons/swap.svg");
 //const ICON_LEND: Asset = asset!("/assets/icons/jupLendLogo.svg");
+const LOADING_SPINNER: Asset = asset!("/assets/icons/infinite-spinner.svg");
 
 //const DEVICE_LEDGER: Asset = asset!("assets/icons/ledger_device.webp");
 //const DEVICE_UNRGBL: Asset = asset!("assets/icons/unruggable_device.png");
@@ -527,6 +528,8 @@ pub fn WalletView() -> Element {
 
     // Add this signal near your other hardware wallet signals in wallet_view.rs
     let mut hardware_device_type = use_signal(|| None as Option<HardwareDeviceType>);
+    let mut refresh_trigger = use_signal(|| 0u32);
+    let mut is_refreshing = use_signal(|| false);
     
     // Load wallets from storage on component mount
     use_effect(move || {
@@ -733,6 +736,7 @@ pub fn WalletView() -> Element {
         let index = current_wallet_index();
         let hw_connected = hardware_connected();
         let hw_pubkey = hardware_pubkey();
+        let _ = refresh_trigger();
         
         let address = if hw_connected && hw_pubkey.is_some() {
             hw_pubkey.clone().unwrap()
@@ -1851,36 +1855,60 @@ pub fn WalletView() -> Element {
                     // Right side - Device/Wallet indicator
                     div {
                         class: "device-indicator",
+                        onclick: move |e| {
+                            e.stop_propagation();
+                            
+                            if is_refreshing() {
+                                println!("⏳ Already refreshing, please wait...");
+                                return;
+                            }
+                            
+                            println!("🔄 Tapped device indicator - showing spinner...");
+                            is_refreshing.set(true);
+                            refresh_trigger.set(refresh_trigger() + 1);
+                            
+                            spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+                                is_refreshing.set(false);
+                                println!("✅ Refresh animation complete");
+                            });
+                        },
                         
-                        // Only show device when hardware is actually CONNECTED (green indicator) 
-                        if hardware_connected() {
-                            // Show the appropriate device icon based on stored device type
+                        if is_refreshing() {
+                            img { 
+                                src: LOADING_SPINNER,
+                                alt: "Refreshing...",
+                                style: "cursor: pointer;"
+                            }
+                        } else if hardware_connected() {
                             match hardware_device_type() {
                                 Some(HardwareDeviceType::ESP32) => rsx! {
                                     img { 
                                         src: DEVICE_UNRGBL,
-                                        alt: "Unruggable Hardware Wallet"
+                                        alt: "Unruggable Hardware Wallet - Tap to Refresh",
+                                        style: "cursor: pointer;"
                                     }
                                 },
                                 Some(HardwareDeviceType::Ledger) => rsx! {
                                     img { 
                                         src: DEVICE_LEDGER,
-                                        alt: "Ledger Hardware Wallet"
+                                        alt: "Ledger Hardware Wallet - Tap to Refresh",
+                                        style: "cursor: pointer;"
                                     }
                                 },
                                 None => rsx! {
-                                    // Default to Unruggable since that's your main device
                                     img { 
                                         src: DEVICE_UNRGBL,
-                                        alt: "Hardware Wallet"
+                                        alt: "Hardware Wallet - Tap to Refresh",
+                                        style: "cursor: pointer;"
                                     }
                                 }
                             }
                         } else {
-                            // Not connected - show software wallet
                             img { 
                                 src: DEVICE_SOFTWARE,
-                                alt: "Software Wallet"
+                                alt: "Software Wallet - Tap to Refresh",
+                                style: "cursor: pointer;"
                             }
                         }
                     }
