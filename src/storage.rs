@@ -432,9 +432,19 @@ pub fn load_wallets_from_storage() -> Vec<WalletInfo> {
 pub fn import_wallet_from_key(private_key: &str, name: String) -> Result<WalletInfo, String> {
     let private_key = private_key.trim();
     
-    let key_bytes = bs58::decode(private_key)
-        .into_vec()
-        .map_err(|e| format!("Invalid base58 format: {}", e))?;
+    // Try to parse the key based on format
+    let key_bytes = if private_key.starts_with('[') && private_key.ends_with(']') {
+        // JSON array format: [252,183,...159,189]
+        parse_json_array_key(private_key)?
+    } else if private_key.contains(',') {
+        // Comma-separated format: 252,183,...159,189
+        parse_comma_separated_key(private_key)?
+    } else {
+        // Base58 format (original)
+        bs58::decode(private_key)
+            .into_vec()
+            .map_err(|e| format!("Invalid base58 format: {}", e))?
+    };
     
     let wallet_name = if name.is_empty() { 
         "Imported Wallet".to_string() 
@@ -445,6 +455,45 @@ pub fn import_wallet_from_key(private_key: &str, name: String) -> Result<WalletI
     let wallet = Wallet::from_private_key(&key_bytes, wallet_name)?;
     
     Ok(wallet.to_wallet_info())
+}
+
+// Helper function to parse JSON array format
+fn parse_json_array_key(key_str: &str) -> Result<Vec<u8>, String> {
+    serde_json::from_str::<Vec<u8>>(key_str)
+        .map_err(|e| format!("Invalid JSON array format: {}", e))
+}
+
+// Helper function to parse comma-separated format
+fn parse_comma_separated_key(key_str: &str) -> Result<Vec<u8>, String> {
+    key_str
+        .split(',')
+        .map(|s| {
+            s.trim()
+                .parse::<u8>()
+                .map_err(|e| format!("Invalid number in key: {}", e))
+        })
+        .collect::<Result<Vec<u8>, String>>()
+}
+
+// Optional: Add a validation function to check key format before import
+pub fn validate_key_format(private_key: &str) -> Result<String, String> {
+    let private_key = private_key.trim();
+    
+    if private_key.is_empty() {
+        return Err("Private key is empty".to_string());
+    }
+    
+    if private_key.starts_with('[') && private_key.ends_with(']') {
+        return Ok("JSON array format".to_string());
+    } else if private_key.contains(',') {
+        return Ok("Comma-separated format".to_string());
+    } else {
+        // Check if it's valid base58
+        bs58::decode(private_key)
+            .into_vec()
+            .map_err(|e| format!("Invalid base58 format: {}", e))?;
+        return Ok("Base58 format".to_string());
+    }
 }
 
 pub fn save_rpc_to_storage(rpc_url: &str) {
