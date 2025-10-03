@@ -28,19 +28,29 @@ Ensure parameters are correctly set.
 
 Windows
 cross compile from mac/use cargo stuff
-export X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR=/Users/hogyzen12/Downloads/openssl-3.5.3/x64 && export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1 && cargo xwin build --target x86_64-pc-windows-msvc --release
-ls target/x86_64-pc-windows-msvc/release
+export X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR=/Users/hogyzen12/Downloads/openssl-3.5.3/x64 && \
+export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1 && \
+cargo xwin build --target x86_64-pc-windows-msvc --release && \
+cp windows_dlls/*.dll target/x86_64-pc-windows-msvc/release/ && \
+cd target/x86_64-pc-windows-msvc/release && \
+zip unruggable-app-windows.zip unruggable.exe *.dll && \
+cd ../../..
 add the dll file to the release
 zip dlls with the exe for functional exe
 
+Cross compile for UBUNTU distribution
+HAVE TO HAVE cross (cargo install cross) 
+AND the Cross.toml with prebuild stuff.
+Will only run on UBUNTU 24, LTS till 29
 
-Manual installation.
+cross build --target x86_64-unknown-linux-gnu --release --no-default-features --features desktop && \
+cd target/x86_64-unknown-linux-gnu/release && \
+zip unruggable-linux.zip unruggable && \
+cd ../../..
+
+Manual installation on android device
 hogyzen12@anons-MBP unruggable-app % find ./target -name "*.apk"
-./target/dx/unruggable/release/android/app/app/build/outputs/apk/debug/app-debug.apk
-./target/dx/unruggable/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
 
 hogyzen12@anons-MacBook-Pro unruggable-app % adb install -r ./target/dx/unruggable/release/android/app/app/build/outputs/apk/debug/app-debug.apk
-Performing Streamed Install
-Success 
 
 

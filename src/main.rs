@@ -30,8 +30,8 @@ enum Route {
 //MAC and IoS bundling does nto adhere to the asset! macro.
 //Android does. For apple builds use hosted resources.
 
-//const MAIN_CSS_URL: &str ="https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
-const MAIN_CSS: Asset = asset!("/assets/main.css");
+const MAIN_CSS_URL: &str ="https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
+//const MAIN_CSS: Asset = asset!("/assets/main.css");
 
 // ── DESKTOP (macOS/Windows/Linux) ─────────────────────────────────────────────
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
@@ -70,9 +70,9 @@ fn App() -> Element {
     use_context_provider(|| sns_resolver);
 
     rsx! {
-        //document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
+        document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
+        document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
+        //document::Link { rel: "stylesheet", href: MAIN_CSS }
         Router::<Route> {}
     }
 }
