@@ -97,13 +97,13 @@ pub fn WalletModal(mode: String, onclose: EventHandler<()>, onsave: EventHandler
                         div {
                             class: "info-message",
                             "Click 'Generate Wallet' to create a new wallet"
-                            }
                         }
-                    } else {
+                    }
+                } else {
                     // Import mode
                     div {
                         class: "wallet-field",
-                        label {"Wallet Name:"}
+                        label { "Wallet Name:" }
                         input {
                             value: "{wallet_name}",
                             oninput: move |e| wallet_name.set(e.value()),
@@ -112,8 +112,9 @@ pub fn WalletModal(mode: String, onclose: EventHandler<()>, onsave: EventHandler
                     }
                     div {
                         class: "wallet-field",
-                        label {"Private Key:"
-                        button {
+                        label { 
+                            "Private Key:"
+                            button {
                                 class: "help-button",
                                 onclick: move |_| show_format_help.set(!show_format_help()),
                                 "ℹ️"
@@ -142,14 +143,17 @@ pub fn WalletModal(mode: String, onclose: EventHandler<()>, onsave: EventHandler
                             }
                         }
                     }
-                    
-                    div { class: "modal-buttons",
-                        button {
-                            class: "modal-button cancel",
-                            onclick: move |_| onclose.call(()),
-                            "Cancel"
-                        }
-                        if mode == "create" {
+                }
+                
+                // Buttons section
+                div { 
+                    class: "modal-buttons",
+                    button {
+                        class: "modal-button cancel",
+                        onclick: move |_| onclose.call(()),
+                        "Cancel"
+                    }
+                    if mode == "create" {
                         if generated_wallet().is_none() {
                             button {
                                 class: "modal-button primary",
