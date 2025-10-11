@@ -41,7 +41,7 @@ fn main() {
     std::env::set_var("DX_DISABLE_EDIT", "1");
     std::env::set_var("DIOXUS_DEVTOOLS", "0");
 
-    // Optional: prove it’s set when run from Terminal
+    // Optional: prove it's set when run from Terminal
     eprintln!(
         "DX edits OFF: DIOXUS_DISABLE_EDIT={:?}, DX_DISABLE_EDIT={:?}, DEVTOOLS={:?}",
         std::env::var("DIOXUS_DISABLE_EDIT"),
@@ -61,6 +61,10 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    // Check if onboarding has been completed
+    let mut show_onboarding = use_signal(|| true);
+    //let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
+    
     // Initialize SNS resolver with your RPC endpoint
     let sns_resolver = Arc::new(sns::SnsResolver::new(
         "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string() // Use your preferred RPC endpoint
@@ -73,6 +77,16 @@ fn App() -> Element {
         document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
         document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
         //document::Link { rel: "stylesheet", href: MAIN_CSS }
-        Router::<Route> {}
+        
+        // Show onboarding on first launch, otherwise show the main app
+        if show_onboarding() {
+            OnboardingFlow {
+                on_complete: move |_| {
+                    show_onboarding.set(false);
+                }
+            }
+        } else {
+            Router::<Route> {}
+        }
     }
 }

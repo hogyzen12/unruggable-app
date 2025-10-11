@@ -723,3 +723,61 @@ pub fn save_wallets_to_storage(wallets: &Vec<WalletInfo>) {
         }
     }
 }
+
+pub fn has_completed_onboarding() -> bool {
+    log::info!("🔄 Checking onboarding status");
+    
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        storage.get_item("onboarding_completed")
+            .unwrap()
+            .map(|val| val == "true")
+            .unwrap_or(false)
+    }
+    
+    #[cfg(not(feature = "web"))]
+    {
+        let storage_dir = get_storage_dir_simple();
+        let onboarding_file = format!("{}/onboarding_completed.txt", storage_dir);
+        
+        match std::fs::read_to_string(&onboarding_file) {
+            Ok(data) => {
+                let completed = data.trim() == "true";
+                log::info!("✅ Onboarding status: {}", completed);
+                completed
+            }
+            Err(_) => {
+                log::info!("📝 No onboarding file found - first launch");
+                false
+            }
+        }
+    }
+}
+
+pub fn mark_onboarding_completed() {
+    log::info!("✅ Marking onboarding as completed");
+    
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        storage.set_item("onboarding_completed", "true").unwrap();
+    }
+    
+    #[cfg(not(feature = "web"))]
+    {
+        if let Ok(_) = ensure_storage_dir() {
+            let storage_dir = get_storage_dir_simple();
+            let onboarding_file = format!("{}/onboarding_completed.txt", storage_dir);
+            
+            match std::fs::write(&onboarding_file, "true") {
+                Ok(_) => log::info!("✅ Onboarding completion saved"),
+                Err(e) => log::error!("❌ Failed to save onboarding status: {}", e),
+            }
+        }
+    }
+}
