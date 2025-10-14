@@ -37,6 +37,8 @@ spl-token = "8.0.0"
 spl-associated-token-account = "7.0.0"
 solana-client = "2.3.2"
 server_fn_macro_default = "0.8.3"
+squads-v4-client = { path = "../squads-v4-client" }
+borsh = "1.5.7"
 
 # Desktop/non-mobile specific dependencies
 [target.'cfg(not(any(target_os = "android")))'.dependencies]

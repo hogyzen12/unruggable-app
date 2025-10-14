@@ -8640,6 +8640,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "squads-v4-client"
+version = "0.1.0"
+dependencies = [
+ "borsh 1.5.7",
+ "serde",
+ "solana-client",
+ "solana-program",
+ "solana-sdk",
+ "thiserror 2.0.16",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9479,6 +9491,7 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bincode",
+ "borsh 1.5.7",
  "bs58",
  "chrono",
  "dioxus",
@@ -9510,6 +9523,7 @@ dependencies = [
  "solana-stake-interface",
  "spl-associated-token-account",
  "spl-token",
+ "squads-v4-client",
  "tokio",
  "tokio-serial",
 ]
