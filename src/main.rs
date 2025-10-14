@@ -18,6 +18,7 @@ mod sns;
 mod config;
 mod token_utils;
 mod squads;
+mod carrot;
 
 use components::*;
 

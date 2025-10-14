@@ -790,6 +790,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "carrot-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "borsh 1.5.7",
+ "solana-client",
+ "solana-sdk",
+ "spl-associated-token-account",
+ "spl-token",
+ "spl-token-2022",
+ "thiserror 2.0.16",
+]
+
+[[package]]
 name = "cc"
 version = "1.2.39"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9493,6 +9507,7 @@ dependencies = [
  "bincode",
  "borsh 1.5.7",
  "bs58",
+ "carrot-sdk",
  "chrono",
  "dioxus",
  "dioxus-desktop",

@@ -29,7 +29,7 @@ use crate::currency_utils::{
     format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal, CarrotModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -87,7 +87,8 @@ const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bulk.svg";
 const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
 const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/jupLendLogo.svg";
-const ICON_SQUADS: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/squadsLogo.svg"; // Using stake icon as placeholder
+const ICON_SQUADS: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/squadsLogo.svg";
+const ICON_CARROT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/carrotLogo.svg";
 
 const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
 const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
@@ -446,6 +447,7 @@ pub fn WalletView() -> Element {
     let mut show_stake_modal = use_signal(|| false);
     let mut show_swap_modal = use_signal(|| false);
     let mut show_squads_modal = use_signal(|| false);
+    let mut show_carrot_modal = use_signal(|| false);
 
     // Hardware wallet state
     let mut hardware_wallet = use_signal(|| None as Option<Arc<HardwareWallet>>);
@@ -1821,6 +1823,15 @@ pub fn WalletView() -> Element {
                 }
             }
             
+            if show_carrot_modal() {
+                CarrotModal {
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| show_carrot_modal.set(false),
+                }
+            }
+            
             if show_background_modal() {
                 BackgroundModal {
                     current_background: selected_background(),
@@ -2068,6 +2079,27 @@ pub fn WalletView() -> Element {
                             div {
                                 class: "action-label-segmented",
                                 "Squads"
+                            }
+                        }
+                        
+                        button {
+                            class: "action-button-segmented",
+                            onclick: move |_| {
+                                println!("🥕 Carrot button clicked!");
+                                show_carrot_modal.set(true);
+                            },
+                            
+                            div {
+                                class: "action-icon-segmented",
+                                img { 
+                                    src: "{ICON_CARROT}",
+                                    alt: "Carrot"
+                                }
+                            }
+                            
+                            div {
+                                class: "action-label-segmented",
+                                "Carrot"
                             }
                         }
                     }
