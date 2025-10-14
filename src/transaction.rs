@@ -23,6 +23,10 @@ use spl_associated_token_account::{
 };
 use std::collections::HashMap;
 
+// Token program IDs
+const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+
 // Add these constants for transaction size management
 const MAX_TRANSACTION_SIZE: usize = 1200; // Conservative limit (actual is ~1232)
 const ESTIMATED_INSTRUCTION_SIZE: usize = 150; // Estimated bytes per instruction
@@ -111,11 +115,15 @@ impl BulkTransactionBuilder {
                 println!("Will create ATA for mint {} -> {}", mint_str, to_token_account);
                 self.required_ata_creations.push(mint_pubkey);
                 
+                // Detect which token program this mint uses
+                let token_program_id = client.get_mint_program_id(&mint_pubkey).await
+                    .unwrap_or_else(|_| spl_token::id()); // Fallback to standard Token program
+                
                 let create_ata_instruction = create_associated_token_account(
                     &self.from_pubkey, // Payer
                     &self.to_pubkey,   // Owner
                     &mint_pubkey,      // Token mint
-                    &spl_token::id(),  // Token program ID
+                    &token_program_id, // Token program ID (Token or Token-2022)
                 );
                 instructions.push(create_ata_instruction);
             }
@@ -596,12 +604,16 @@ impl TransactionClient {
         if !self.account_exists(&to_token_account).await? {
             println!("Creating destination token account: {}", to_token_account);
             
+            // Detect which token program this mint uses
+            let token_program_id = self.get_mint_program_id(&mint_pubkey).await
+                .unwrap_or_else(|_| spl_token::id()); // Fallback to standard Token program
+            
             // Create associated token account for recipient
             let create_ata_instruction = create_associated_token_account(
                 &from_pubkey, // Payer (sender pays for account creation)
                 &to_pubkey,   // Owner of the new account
                 &mint_pubkey, // Token mint
-                &spl_token::id(), // Token program ID
+                &token_program_id, // Token program ID (Token or Token-2022)
             );
             
             instructions.push(create_ata_instruction);
@@ -666,6 +678,47 @@ impl TransactionClient {
         
         // Send the transaction
         self.send_transaction(&encoded_transaction).await
+    }
+
+    /// Detect which token program owns a mint account (Token or Token-2022)
+    async fn get_mint_program_id(&self, mint_pubkey: &Pubkey) -> Result<Pubkey, Box<dyn Error>> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [
+                mint_pubkey.to_string(),
+                {
+                    "encoding": "base64"
+                }
+            ]
+        });
+
+        let response = self.client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await?;
+
+        let json: Value = response.json().await?;
+        
+        if let Some(owner_str) = json["result"]["value"]["owner"].as_str() {
+            let owner = Pubkey::from_str(owner_str)?;
+            
+            // Check if it's Token-2022 program
+            let token_2022_id = Pubkey::from_str(TOKEN_2022_PROGRAM_ID)?;
+            if owner == token_2022_id {
+                println!("Mint {} uses Token-2022 program", mint_pubkey);
+                Ok(token_2022_id)
+            } else {
+                // Default to standard Token program
+                println!("Mint {} uses standard Token program", mint_pubkey);
+                Ok(spl_token::id())
+            }
+        } else {
+            // Default to standard Token program if we can't determine
+            Ok(spl_token::id())
+        }
     }
 
     /// Get token decimals for a given mint

@@ -37,31 +37,70 @@ impl CarrotClient {
         }
     }
 
+    /// Get token account balance via RPC (works for both Token and Token-2022)
+    async fn get_token_account_balance(&self, wallet_pubkey: &Pubkey, mint_pubkey: &Pubkey) -> Result<u64> {
+        // Get associated token account address
+        let token_program_id = self.get_mint_program_id(mint_pubkey).await?;
+        let ata = spl_associated_token_account::get_associated_token_address_with_program_id(
+            wallet_pubkey,
+            mint_pubkey,
+            &token_program_id,
+        );
+
+        // Get account info
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTokenAccountBalance",
+            "params": [
+                ata.to_string()
+            ]
+        });
+
+        let response = self.http_client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await?;
+
+        let json: Value = response.json().await?;
+
+        if let Some(amount_str) = json["result"]["value"]["amount"].as_str() {
+            let amount = amount_str.parse::<u64>()
+                .map_err(|e| format!("Failed to parse balance: {}", e))?;
+            Ok(amount)
+        } else {
+            // Account doesn't exist or has no balance
+            Ok(0)
+        }
+    }
+
     /// Get token balances for a wallet
     pub async fn get_balances(&self, wallet_pubkey: &Pubkey) -> Result<CarrotBalances> {
-        // Create SDK client for balance queries
-        let sdk_client = carrot_sdk::CarrotClient::new(self.rpc_url.clone());
-        
         let mut balances = CarrotBalances::default();
 
-        // Get USDC balance
-        if let Ok(usdc_balance) = sdk_client.get_asset_balance(wallet_pubkey, &carrot_sdk::USDC_MINT) {
+        // Get USDC balance (Token program)
+        if let Ok(usdc_balance) = self.get_token_account_balance(wallet_pubkey, &carrot_sdk::USDC_MINT).await {
             balances.usdc = usdc_balance as f64 / 1_000_000.0;
+            println!("[Carrot] USDC balance: {}", balances.usdc);
         }
 
-        // Get USDT balance
-        if let Ok(usdt_balance) = sdk_client.get_asset_balance(wallet_pubkey, &carrot_sdk::USDT_MINT) {
+        // Get USDT balance (Token program)
+        if let Ok(usdt_balance) = self.get_token_account_balance(wallet_pubkey, &carrot_sdk::USDT_MINT).await {
             balances.usdt = usdt_balance as f64 / 1_000_000.0;
+            println!("[Carrot] USDT balance: {}", balances.usdt);
         }
 
-        // Get pyUSD balance
-        if let Ok(pyusd_balance) = sdk_client.get_asset_balance(wallet_pubkey, &carrot_sdk::PYUSD_MINT) {
+        // Get pyUSD balance (Token-2022 program)
+        if let Ok(pyusd_balance) = self.get_token_account_balance(wallet_pubkey, &carrot_sdk::PYUSD_MINT).await {
             balances.pyusd = pyusd_balance as f64 / 1_000_000.0;
+            println!("[Carrot] pyUSD balance: {}", balances.pyusd);
         }
 
-        // Get CRT balance
-        if let Ok(crt_balance) = sdk_client.get_crt_balance(wallet_pubkey) {
+        // Get CRT balance (Token-2022 program)
+        if let Ok(crt_balance) = self.get_token_account_balance(wallet_pubkey, &carrot_sdk::CRT_MINT).await {
             balances.crt = crt_balance as f64 / 1_000_000_000.0;
+            println!("[Carrot] CRT balance: {}", balances.crt);
         }
 
         Ok(balances)
@@ -196,12 +235,20 @@ impl CarrotClient {
         // Build instructions
         let mut instructions = Vec::new();
         
-        // Create asset ATA if needed
+        // Detect which token program this mint uses
+        println!("[Carrot] Detecting token program for asset mint...");
+        let token_program_id = self.get_mint_program_id(asset_mint).await
+            .unwrap_or_else(|_| {
+                println!("[Carrot] Failed to detect program, using standard Token program");
+                spl_token::id()
+            });
+        
+        // Create asset ATA if needed (using detected program ID)
         let create_asset_ata_ix = spl_associated_token_account::instruction::create_associated_token_account_idempotent(
             &member_pubkey,
             &member_pubkey,
             asset_mint,
-            &spl_token::id(),
+            &token_program_id, // Use detected program ID (Token or Token-2022)
         );
         instructions.push(create_asset_ata_ix);
         
@@ -319,6 +366,51 @@ impl CarrotClient {
             Ok(blockhash)
         } else {
             Err("Failed to get blockhash".into())
+        }
+    }
+
+    /// Detect which token program owns a mint account (Token or Token-2022)
+    async fn get_mint_program_id(&self, mint_pubkey: &Pubkey) -> Result<Pubkey> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getAccountInfo",
+            "params": [
+                mint_pubkey.to_string(),
+                {
+                    "encoding": "base64"
+                }
+            ]
+        });
+
+        let response = self.http_client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await?;
+
+        let json: Value = response.json().await?;
+        
+        if let Some(owner_str) = json["result"]["value"]["owner"].as_str() {
+            let owner = Pubkey::from_str(owner_str)
+                .map_err(|e| format!("Invalid owner pubkey: {}", e))?;
+            
+            // Check if it's Token-2022 program
+            let token_2022_id = Pubkey::from_str(TOKEN_2022_PROGRAM_ID)
+                .map_err(|e| format!("Invalid Token-2022 program ID: {}", e))?;
+            
+            if owner == token_2022_id {
+                println!("[Carrot] Mint {} uses Token-2022 program", mint_pubkey);
+                Ok(token_2022_id)
+            } else {
+                // Default to standard Token program
+                println!("[Carrot] Mint {} uses standard Token program", mint_pubkey);
+                Ok(spl_token::id())
+            }
+        } else {
+            // Default to standard Token program if we can't determine
+            println!("[Carrot] Could not determine program for mint {}, defaulting to Token program", mint_pubkey);
+            Ok(spl_token::id())
         }
     }
 

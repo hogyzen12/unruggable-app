@@ -771,13 +771,42 @@ pub fn WalletView() -> Element {
             }
             
             
-            // Fetch token accounts
-            let filter = Some(rpc::TokenAccountFilter::ProgramId(
+            // Fetch token accounts from BOTH Token and Token-2022 programs
+            println!("Fetching token accounts from both Token and Token-2022 programs...");
+            
+            // Fetch from standard Token program
+            let filter_token = Some(rpc::TokenAccountFilter::ProgramId(
                 "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()
             ));
-            match rpc::get_token_accounts_by_owner(&address, filter, rpc_url.as_deref()).await {
-                Ok(token_accounts) => {
-                    println!("Raw token accounts for address {}: {:?}", address, token_accounts);
+            let token_accounts = rpc::get_token_accounts_by_owner(&address, filter_token, rpc_url.as_deref()).await
+                .unwrap_or_else(|e| {
+                    println!("Failed to fetch Token program accounts: {}", e);
+                    vec![]
+                });
+            
+            // Fetch from Token-2022 program
+            let filter_token22 = Some(rpc::TokenAccountFilter::ProgramId(
+                "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb".to_string()
+            ));
+            let token22_accounts = rpc::get_token_accounts_by_owner(&address, filter_token22, rpc_url.as_deref()).await
+                .unwrap_or_else(|e| {
+                    println!("Failed to fetch Token-2022 program accounts: {}", e);
+                    vec![]
+                });
+            
+            // Merge both sets of token accounts
+            let mut all_token_accounts = token_accounts;
+            let token22_count = token22_accounts.len();
+            all_token_accounts.extend(token22_accounts);
+            
+            println!("Found {} token accounts total ({} Token + {} Token-2022)", 
+                all_token_accounts.len(), 
+                all_token_accounts.len() - token22_count,
+                token22_count
+            );
+            
+            if !all_token_accounts.is_empty() {
+                    println!("Raw token accounts for address {}: {:?}", address, all_token_accounts);
                     
                     // Access the HashMap inside the Memo using read()
                     let verified_tokens_map = &verified_tokens_clone();
@@ -787,7 +816,7 @@ pub fn WalletView() -> Element {
                     let token_changes_snapshot = token_changes.read().clone();
                     println!("PRICE DEBUG: token_changes_snapshot in token creation: {:#?}", token_changes_snapshot);
                     
-                    let all_non_zero_accounts: Vec<_> = token_accounts
+                    let all_non_zero_accounts: Vec<_> = all_token_accounts
                         .into_iter()
                         .filter(|account| {
                             let is_non_zero = account.amount > 0.0;
@@ -966,31 +995,29 @@ pub fn WalletView() -> Element {
                     .collect();
 
                 tokens.set(final_tokens);
-                }
-                Err(e) => {
-                    println!("Failed to fetch token accounts for address {}: {}", address, e);
-                    
-                    // Get the most recent SOL price
-                    let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
-                    
-                    // Get multi-timeframe changes
-                    let multi_data_snapshot = multi_timeframe_data.read().clone();
-                    let (sol_change_1d, sol_change_3d, sol_change_7d) = get_multi_timeframe_changes("SOL", &multi_data_snapshot);
-                    
-                    tokens.set(vec![Token {
-                        mint: "So11111111111111111111111111111111111111112".to_string(),
-                        symbol: "SOL".to_string(),
-                        name: "Solana".to_string(),
-                        icon_type: ICON_SOL.to_string(),
-                        balance: balance(),
-                        value_usd: balance() * current_sol_price,
-                        price: current_sol_price,
-                        price_change: sol_change_1d,
-                        price_change_1d: sol_change_1d,
-                        price_change_3d: sol_change_3d,
-                        price_change_7d: sol_change_7d,
-                    }]);
-                }
+            } else {
+                println!("No token accounts found for address {}", address);
+                
+                // Get the most recent SOL price
+                let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
+                
+                // Get multi-timeframe changes
+                let multi_data_snapshot = multi_timeframe_data.read().clone();
+                let (sol_change_1d, sol_change_3d, sol_change_7d) = get_multi_timeframe_changes("SOL", &multi_data_snapshot);
+                
+                tokens.set(vec![Token {
+                    mint: "So11111111111111111111111111111111111111112".to_string(),
+                    symbol: "SOL".to_string(),
+                    name: "Solana".to_string(),
+                    icon_type: ICON_SOL.to_string(),
+                    balance: balance(),
+                    value_usd: balance() * current_sol_price,
+                    price: current_sol_price,
+                    price_change: sol_change_1d,
+                    price_change_1d: sol_change_1d,
+                    price_change_3d: sol_change_3d,
+                    price_change_7d: sol_change_7d,
+                }]);
             }
         });
     });
