@@ -29,7 +29,7 @@ use crate::currency_utils::{
     format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -87,6 +87,7 @@ const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bulk.svg";
 const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
 const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/jupLendLogo.svg";
+const ICON_SQUADS: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/squadsLogo.svg"; // Using stake icon as placeholder
 
 const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
 const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
@@ -444,6 +445,7 @@ pub fn WalletView() -> Element {
     let mut show_history_modal = use_signal(|| false);
     let mut show_stake_modal = use_signal(|| false);
     let mut show_swap_modal = use_signal(|| false);
+    let mut show_squads_modal = use_signal(|| false);
 
     // Hardware wallet state
     let mut hardware_wallet = use_signal(|| None as Option<Arc<HardwareWallet>>);
@@ -1784,29 +1786,41 @@ pub fn WalletView() -> Element {
                     hardware_wallet: hardware_wallet(),
                     custom_rpc: custom_rpc(),
                     onclose: move |_| show_lend_modal.set(false),
-                    onsuccess: move |signature| {
-                        println!("✅ Lend completed with signature: {}", signature);
-                        show_lend_modal.set(false);
-                        // Refresh balances after successful lend
-                        if let Some(wallet) = current_wallet.clone() {
-                            let address = wallet.address.clone();
-                            let rpc_url = custom_rpc();
-                            
-                            spawn(async move {
-                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                    Ok(sol_balance) => {
-                                        balance.set(sol_balance);
+                    onsuccess: {
+                        let wallet_for_refresh = current_wallet.clone();
+                        move |signature| {
+                            println!("✅ Lend completed with signature: {}", signature);
+                            show_lend_modal.set(false);
+                            // Refresh balances after successful lend
+                            if let Some(wallet) = wallet_for_refresh.clone() {
+                                let address = wallet.address.clone();
+                                let rpc_url = custom_rpc();
+                                
+                                spawn(async move {
+                                    match rpc::get_balance(&address, rpc_url.as_deref()).await {
+                                        Ok(sol_balance) => {
+                                            balance.set(sol_balance);
+                                        }
+                                        Err(e) => {
+                                            println!("Failed to refresh balance after lend: {}", e);
+                                        }
                                     }
-                                    Err(e) => {
-                                        println!("Failed to refresh balance after lend: {}", e);
-                                    }
-                                }
-                            });
+                                });
+                            }
                         }
                     }
                 }
             }
 
+            if show_squads_modal() {
+                SquadsModal {
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| show_squads_modal.set(false),
+                }
+            }
+            
             if show_background_modal() {
                 BackgroundModal {
                     current_background: selected_background(),
@@ -2033,6 +2047,27 @@ pub fn WalletView() -> Element {
                             div {
                                 class: "action-label-segmented",
                                 "Lend"
+                            }
+                        }
+                        
+                        button {
+                            class: "action-button-segmented",
+                            onclick: move |_| {
+                                println!("🏛️ Squads button clicked!");
+                                show_squads_modal.set(true);
+                            },
+                            
+                            div {
+                                class: "action-icon-segmented",
+                                img { 
+                                    src: "{ICON_SQUADS}",
+                                    alt: "Squads"
+                                }
+                            }
+                            
+                            div {
+                                class: "action-label-segmented",
+                                "Squads"
                             }
                         }
                     }
