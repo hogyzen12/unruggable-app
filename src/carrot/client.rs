@@ -4,6 +4,7 @@ use solana_sdk::{
     transaction::VersionedTransaction,
     message::VersionedMessage,
     instruction::Instruction,
+    system_instruction,
 };
 use std::error::Error as StdError;
 use std::str::FromStr;
@@ -12,6 +13,7 @@ use reqwest::Client as HttpClient;
 
 use crate::signing::TransactionSigner;
 use crate::carrot::types::{CarrotBalances, DepositResult, WithdrawResult};
+use crate::storage::get_current_jito_settings;
 
 type Result<T> = std::result::Result<T, Box<dyn StdError>>;
 
@@ -157,6 +159,15 @@ impl CarrotClient {
         )?;
         instructions.push(issue_ix);
         
+        // Check Jito settings and add tip if enabled
+        let jito_settings = get_current_jito_settings();
+        if jito_settings.jito_tx {
+            let jito_tip_address = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
+            let tip_ix = system_instruction::transfer(&member_pubkey, &jito_tip_address, 100_000);
+            instructions.push(tip_ix);
+            println!("[Carrot] Added Jito tip to deposit transaction");
+        }
+        
         // Get recent blockhash
         println!("[Carrot] Getting recent blockhash...");
         let recent_blockhash = self.get_recent_blockhash().await?;
@@ -260,6 +271,15 @@ impl CarrotClient {
             remaining_accounts,
         )?;
         instructions.push(redeem_ix);
+        
+        // Check Jito settings and add tip if enabled
+        let jito_settings = get_current_jito_settings();
+        if jito_settings.jito_tx {
+            let jito_tip_address = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
+            let tip_ix = system_instruction::transfer(&member_pubkey, &jito_tip_address, 100_000);
+            instructions.push(tip_ix);
+            println!("[Carrot] Added Jito tip to withdraw transaction");
+        }
         
         // Get recent blockhash
         println!("[Carrot] Getting recent blockhash...");
