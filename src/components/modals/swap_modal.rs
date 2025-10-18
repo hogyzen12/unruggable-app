@@ -9,14 +9,21 @@ use crate::signing::TransactionSigner;
 use crate::wallet::Wallet;
 use std::sync::Arc;
 use serde::{Deserialize, Serialize};
-use solana_sdk::transaction::VersionedTransaction;
+use solana_sdk::{
+    transaction::VersionedTransaction,
+    pubkey::Pubkey as SolanaPubkey,
+    hash::Hash as SolanaHash,
+};
+use crate::titan::{TitanClient, build_transaction_from_route};
+use crate::titan::SwapRoute as TitanSwapRoute;
 
 /// Sign a Jupiter Ultra transaction using the provided signer
 async fn sign_jupiter_transaction(
     signer: &dyn TransactionSigner,
     unsigned_transaction_b64: &str,
 ) -> Result<String, String> {
-    println!("🔐 Signing Jupiter Ultra transaction...");
+    println!("🔐 Signing transaction...");
+    println!("🔍 Signer type: {}", signer.get_name());
     
     // Decode the base64 unsigned transaction
     let unsigned_tx_bytes = match base64::decode(unsigned_transaction_b64) {
@@ -32,22 +39,43 @@ async fn sign_jupiter_transaction(
         Err(e) => return Err(format!("Failed to deserialize transaction: {}", e)),
     };
     
+    // Log transaction type for debugging
+    match &transaction.message {
+        solana_sdk::message::VersionedMessage::Legacy(_) => {
+            println!("📋 Transaction type: Legacy");
+        }
+        solana_sdk::message::VersionedMessage::V0(_) => {
+            println!("📋 Transaction type: V0 (with lookup tables)");
+        }
+    }
+    
     println!("📋 Transaction has {} signatures expected", transaction.signatures.len());
     
     // Serialize the transaction message for signing
     let message_bytes = transaction.message.serialize();
     println!("📝 Message to sign: {} bytes", message_bytes.len());
+    println!("🔍 Message bytes (first 32): {:02x?}", &message_bytes[..message_bytes.len().min(32)]);
     
     // Sign the message
+    println!("⏳ Waiting for hardware wallet signature...");
     let signature_bytes = match signer.sign_message(&message_bytes).await {
-        Ok(sig) => sig,
-        Err(e) => return Err(format!("Failed to sign message: {}", e)),
+        Ok(sig) => {
+            println!("✅ Hardware wallet returned signature: {} bytes", sig.len());
+            sig
+        }
+        Err(e) => {
+            println!("❌ Hardware wallet signing failed: {}", e);
+            return Err(format!("Failed to sign message: {}", e));
+        }
     };
     
     // Ensure we have exactly 64 bytes for the signature
     if signature_bytes.len() != 64 {
+        println!("❌ Invalid signature length from hardware wallet");
         return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()));
     }
+    
+    println!("🔍 Signature bytes (first 32): {:02x?}", &signature_bytes[..32]);
     
     // Convert to Solana signature
     let mut sig_array = [0u8; 64];
@@ -150,62 +178,49 @@ pub struct QuoteResponse {
     pub route_plan: Vec<serde_json::Value>,
 }
 
-// Token mint addresses
-fn get_token_mint(symbol: &str) -> &'static str {
-    match symbol {
-        "SOL" => "So11111111111111111111111111111111111111112",
-        "USDC" => "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
-        "USDT" => "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
-        "JUP" => "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
-        "BONK" => "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
-        "JTO" => "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
-        "JLP" => "27G8MtK7VtTcCHkpASjSDdkWWYfoqT6ggEuKidVJidD4",
-        _ => "So11111111111111111111111111111111111111112",
-    }
+// Get token mint address from actual token data
+fn get_token_mint<'a>(symbol: &str, tokens: &'a [Token]) -> &'a str {
+    tokens.iter()
+        .find(|t| t.symbol == symbol)
+        .map(|t| t.mint.as_str())
+        .unwrap_or("So11111111111111111111111111111111111111112") // Default to SOL if not found
 }
 
-// Get token decimals for proper amount conversion
-fn get_token_decimals(symbol: &str) -> u8 {
-    match symbol {
-        "USDC" | "USDT" => 6,  // USDC and USDT have 6 decimals
-        "BONK" => 5,           // BONK has 5 decimals  
-        _ => 9,                // SOL, JUP, JTO, JLP have 9 decimals
-    }
+// Get token decimals from tokens vector
+fn get_token_decimals(symbol: &str, tokens: &[Token]) -> u8 {
+    tokens.iter()
+        .find(|t| t.symbol == symbol)
+        .map(|t| t.decimals)
+        .unwrap_or(9) // Default to 9 decimals if token not found
 }
 
 // Convert human-readable amount to lamports/smallest unit
-fn to_lamports(amount: f64, symbol: &str) -> u64 {
-    let decimals = get_token_decimals(symbol);
+fn to_lamports(amount: f64, symbol: &str, tokens: &[Token]) -> u64 {
+    let decimals = get_token_decimals(symbol, tokens);
     (amount * 10_f64.powi(decimals as i32)) as u64
 }
 
 // Convert lamports/smallest unit to human-readable amount  
-fn from_lamports(lamports: u64, symbol: &str) -> f64 {
-    let decimals = get_token_decimals(symbol);
+fn from_lamports(lamports: u64, symbol: &str, tokens: &[Token]) -> f64 {
+    let decimals = get_token_decimals(symbol, tokens);
     lamports as f64 / 10_f64.powi(decimals as i32)
 }
 
 // Token icons
-const ICON_SOL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
-const ICON_USDC: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/usdcLogo.png";
-const ICON_USDT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/usdtLogo.png";
-const ICON_JTO: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jtoLogo.png";
-const ICON_JUP: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jupLogo.png";
-const ICON_JLP: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jlpLogo.png";
-const ICON_BONK: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
+// Default fallback icon for tokens without specific icons
 const ICON_32: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
 
-fn get_token_icon(symbol: &str) -> &'static str {
-    match symbol {
-        "SOL" => ICON_SOL,
-        "USDC" => ICON_USDC,
-        "USDT" => ICON_USDT,
-        "JTO" => ICON_JTO,
-        "JUP" => ICON_JUP,
-        "JLP" => ICON_JLP,
-        "BONK" => ICON_BONK,
-        _ => ICON_32,
-    }
+// Get token icon from actual token data
+fn get_token_icon<'a>(symbol: &str, tokens: &'a [Token]) -> &'a str {
+    tokens.iter()
+        .find(|t| t.symbol == symbol)
+        .map(|t| t.icon_type.as_str())
+        .unwrap_or(ICON_32)
+}
+
+// Get full token info by symbol
+fn get_token_by_symbol<'a>(symbol: &str, tokens: &'a [Token]) -> Option<&'a Token> {
+    tokens.iter().find(|t| t.symbol == symbol)
 }
 
 /// Hardware wallet approval overlay component for swap transactions
@@ -418,11 +433,29 @@ pub fn SwapModal(
     let mut current_order = use_signal(|| None as Option<UltraOrderResponse>);
     let mut fetching_order = use_signal(|| false);
 
+    // Titan Exchange state
+    let titan_client = use_signal(|| {
+        // Initialize Titan client with production global endpoint and JWT token
+        let client = TitanClient::new(
+            "partners.api.titan.exchange".to_string(),
+            ".fSI0QYG9jny2c6tWXEwl4JIFHYS1Twi2kiHjj-0e0tg".to_string(),
+        );
+        Arc::new(tokio::sync::Mutex::new(client))
+    });
+    let mut titan_quote = use_signal(|| None as Option<(String, TitanSwapRoute)>); // (provider_name, route)
+    let mut fetching_titan = use_signal(|| false);
+    let mut selected_provider = use_signal(|| None as Option<String>); // "Jupiter" or "Titan"
+    
+    // Store hardware wallet address (fetched async)
+    let mut hw_address = use_signal(|| None as Option<String>);
+
     // Clone tokens for closures - need separate clones for each closure
     let tokens_clone = tokens.clone();
     let tokens_clone2 = tokens.clone();
     let tokens_clone3 = tokens.clone();
     let tokens_clone4 = tokens.clone(); // For handle_amount_change
+    let tokens_clone5 = tokens.clone(); // For quote comparison use_effect
+    let tokens_clone6 = tokens.clone(); // For UI rendering
 
     // Show transaction success modal if swap completed
     if show_success_modal() {
@@ -459,18 +492,121 @@ pub fn SwapModal(
     // Clone values early to avoid move conflicts
     let hardware_wallet_clone = hardware_wallet.clone();
     let wallet_clone = wallet.clone();
+    let wallet_clone_for_titan = wallet.clone(); // Separate clone for Titan swap
     let hardware_wallet_clone2 = hardware_wallet.clone(); 
     let wallet_clone2 = wallet.clone();
+    let custom_rpc_clone = custom_rpc.clone();
+    
+    // Fetch hardware wallet address on mount
+    let hw_clone_for_effect = hardware_wallet.clone();
+    use_effect(move || {
+        if let Some(hw) = hw_clone_for_effect.clone() {
+            spawn(async move {
+                match hw.get_public_key().await {
+                    Ok(address) => {
+                        println!("📍 Hardware wallet address fetched: {}", address);
+                        hw_address.set(Some(address));
+                    }
+                    Err(e) => {
+                        println!("⚠️ Failed to get hardware wallet address: {}", e);
+                        hw_address.set(None);
+                    }
+                }
+            });
+        }
+    });
 
-    // Get user public key
+    // Get user public key - prioritize hardware wallet when present
     let get_user_pubkey = move || -> Option<String> {
+        // Check hardware wallet first - it takes precedence over software wallet
+        if let Some(_hw) = &hardware_wallet_clone {
+            // Get address from hardware wallet signal (pre-fetched)
+            if let Some(address) = hw_address() {
+                println!("📍 Using hardware wallet address: {}", address);
+                return Some(address);
+            } else {
+                println!("⚠️ Hardware wallet address not yet fetched");
+                return None;
+            }
+        }
+        
+        // Fall back to software wallet if no hardware wallet
         if let Some(wallet_info) = &wallet_clone {
-            Some(wallet_info.address.clone())
-        } else if let Some(_hw) = &hardware_wallet_clone {
-            Some("HARDWARE_WALLET_PUBKEY".to_string()) // TODO: Get real hardware wallet pubkey
+            let address = wallet_info.address.clone();
+            println!("📍 Using wallet address: {}", address);
+            Some(address)
         } else {
+            println!("⚠️ No wallet available");
             None
         }
+    };
+
+    // Titan Exchange: Fetch quotes with WebSocket streaming
+    let fetch_titan_quotes = move |input_mint: String, output_mint: String, amount_lamports: u64, user_pubkey: Option<String>| {
+        let client = titan_client();
+        spawn(async move {
+            // Prevent multiple simultaneous requests
+            if fetching_titan() {
+                return;
+            }
+            
+            fetching_titan.set(true);
+            
+            println!("🔷 Fetching Titan quotes...");
+            
+            // Get user pubkey - require valid address for transaction generation
+            let user_pk = match user_pubkey {
+                Some(pk) => {
+                    println!("📍 Titan user pubkey: {}", pk);
+                    pk
+                }
+                None => {
+                    println!("❌ No user pubkey available - cannot generate Titan transaction");
+                    fetching_titan.set(false);
+                    return;
+                }
+            };
+            
+            // Lock and use the client
+            let mut client_lock = client.lock().await;
+            
+            // Connect if not connected
+            if let Err(e) = client_lock.connect().await {
+                println!("❌ Failed to connect to Titan: {}", e);
+                fetching_titan.set(false);
+                return;
+            }
+            
+            // Request swap quotes
+            match client_lock.request_swap_quotes(
+                &input_mint,
+                &output_mint,
+                amount_lamports,
+                &user_pk,
+                Some(50), // 0.5% slippage
+            ).await {
+                Ok((provider_name, route)) => {
+                    println!("✅ Titan quote received from provider: {}", provider_name);
+                    println!("📊 Output amount: {} lamports", route.out_amount);
+                    println!("🔍 Transaction field present: {}", route.transaction.is_some());
+                    if let Some(ref tx) = route.transaction {
+                        println!("📄 Transaction size: {} bytes", tx.len());
+                    } else {
+                        println!("⚠️ No transaction data in Titan quote!");
+                    }
+                    titan_quote.set(Some((provider_name, route)));
+                }
+                Err(e) => {
+                    println!("❌ Failed to get Titan quote: {}", e);
+                    titan_quote.set(None);
+                }
+            }
+            
+            // Close connection
+            let _ = client_lock.close().await;
+            
+            fetching_titan.set(false);
+        });
     };
 
     // Jupiter Ultra API: Fetch order with better error handling
@@ -523,7 +659,7 @@ pub fn SwapModal(
                                     }
                                     println!("📃 Fee BPS: {}", order.fee_bps);
                                     
-                                    if let Some(tx) = &order.transaction {
+                                    if let Some(ref tx) = order.transaction {
                                         if !tx.is_empty() {
                                             println!("📃 ✅ Transaction ready for signing ({} chars)", tx.len());
                                         } else {
@@ -551,6 +687,50 @@ pub fn SwapModal(
             }
             
             fetching_order.set(false);
+        });
+    };
+
+    // Titan Exchange: Execute transaction via direct Solana RPC submission
+    let execute_titan_swap = move |signed_transaction_b64: String, custom_rpc: Option<String>| {
+        spawn(async move {
+            println!("🔷 Executing Titan swap via Solana RPC...");
+            
+            // Convert base64 signed transaction to bytes
+            let signed_tx_bytes = match base64::decode(&signed_transaction_b64) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    println!("❌ Failed to decode base64 transaction: {}", e);
+                    swapping.set(false);
+                    error_message.set(Some(format!("Transaction decode error: {}", e)));
+                    return;
+                }
+            };
+            
+            println!("📄 Decoded transaction: {} bytes", signed_tx_bytes.len());
+            
+            // Encode to base58 for Solana RPC submission
+            let signed_tx_b58 = bs58::encode(&signed_tx_bytes).into_string();
+            
+            println!("📝 Encoded to base58: {} chars", signed_tx_b58.len());
+            
+            // Create transaction client with custom RPC if provided
+            let rpc_url = custom_rpc.as_deref();
+            let transaction_client = TransactionClient::new(rpc_url);
+            
+            // Submit directly to Solana RPC
+            match transaction_client.send_transaction(&signed_tx_b58).await {
+                Ok(signature) => {
+                    println!("✅ Titan swap executed successfully! Signature: {}", signature);
+                    transaction_signature.set(signature);
+                    swapping.set(false);
+                    show_success_modal.set(true);
+                }
+                Err(e) => {
+                    println!("❌ Titan swap failed: {}", e);
+                    swapping.set(false);
+                    error_message.set(Some(format!("Swap failed: {}", e)));
+                }
+            }
         });
     };
 
@@ -695,7 +875,9 @@ pub fn SwapModal(
     let mut handle_amount_change = move |value: String| {
         selling_amount.set(value.clone());
         error_message.set(None);
-        current_order.set(None); // Clear previous order immediately
+        current_order.set(None); // Clear previous Jupiter order
+        titan_quote.set(None); // Clear previous Titan quote
+        selected_provider.set(None); // Clear provider selection
         
         if !value.is_empty() {
             if let Ok(amount) = value.parse::<f64>() {
@@ -721,32 +903,107 @@ pub fn SwapModal(
                 };
                 buying_amount.set(fallback_formatted);
                 
-                // Only fetch Jupiter order if we have sufficient balance
+                // Fetch quotes from BOTH Jupiter and Titan in parallel
                 if amount <= selling_balance && amount > 0.0 {
-                    let amount_lamports = to_lamports(amount, &selling_token());
+                    let amount_lamports = to_lamports(amount, &selling_token(), &tokens_clone4);
                     
-                    let input_mint = get_token_mint(&selling_token()).to_string();
-                    let output_mint = get_token_mint(&buying_token()).to_string();
+                    let input_mint = get_token_mint(&selling_token(), &tokens_clone4).to_string();
+                    let output_mint = get_token_mint(&buying_token(), &tokens_clone4).to_string();
                     let user_pubkey = get_user_pubkey();
+                    
+                    // Clone for each async call
+                    let input_mint_jup = input_mint.clone();
+                    let output_mint_jup = output_mint.clone();
+                    let user_pubkey_jup = user_pubkey.clone();
+                    
+                    let input_mint_titan = input_mint.clone();
+                    let output_mint_titan = output_mint.clone();
+                    let user_pubkey_titan = user_pubkey.clone();
                     
                     // Add small delay to prevent too many API calls
                     spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                        fetch_jupiter_ultra_order(input_mint, output_mint, amount_lamports, user_pubkey);
+                        
+                        // Spawn both quote requests in parallel
+                        println!("🔄 Fetching quotes from both Jupiter and Titan...");
+                        
+                        // Jupiter request
+                        fetch_jupiter_ultra_order(input_mint_jup, output_mint_jup, amount_lamports, user_pubkey_jup);
+                        
+                        // Titan request (runs in parallel)
+                        fetch_titan_quotes(input_mint_titan, output_mint_titan, amount_lamports, user_pubkey_titan);
                     });
                 }
             }
         } else {
             buying_amount.set("0.00".to_string());
             current_order.set(None);
+            titan_quote.set(None);
         }
     };
 
-    // Update buying amount when Jupiter Ultra order changes
+    // Quote comparison logic: Compare Jupiter and Titan quotes and select the best
     use_effect(move || {
-        if let Some(order) = current_order() {
+        let jupiter_quote = current_order();
+        let titan_q = titan_quote();
+        
+        // Compare quotes if both are available
+        if let (Some(jupiter_order), Some((provider_name, titan_route))) = (jupiter_quote.clone(), titan_q.clone()) {
+            // Parse output amounts
+            let jupiter_output = jupiter_order.out_amount.parse::<u64>().unwrap_or(0);
+            let titan_output = titan_route.out_amount;
+            
+            println!("📊 Quote Comparison:");
+            println!("   Jupiter: {} lamports", jupiter_output);
+            println!("   Titan ({}): {} lamports", provider_name, titan_output);
+            
+            // Select the provider with higher output (better for user)
+            if titan_output > jupiter_output {
+                println!("🏆 Titan wins with {} more lamports", titan_output - jupiter_output);
+                selected_provider.set(Some("Titan".to_string()));
+                
+                // Update buying amount with Titan quote
+                let converted_amount = from_lamports(titan_output, &buying_token(), &tokens_clone5);
+                let formatted = if converted_amount < 0.01 && converted_amount > 0.0 {
+                    format!("{:.6}", converted_amount)
+                } else {
+                    format!("{:.2}", converted_amount)
+                };
+                buying_amount.set(formatted);
+            } else {
+                println!("🏆 Jupiter wins with {} more lamports", jupiter_output - titan_output);
+                selected_provider.set(Some("Jupiter".to_string()));
+                
+                // Update buying amount with Jupiter quote
+                let converted_amount = from_lamports(jupiter_output, &buying_token(), &tokens_clone5);
+                let formatted = if converted_amount < 0.01 && converted_amount > 0.0 {
+                    format!("{:.6}", converted_amount)
+                } else {
+                    format!("{:.2}", converted_amount)
+                };
+                buying_amount.set(formatted);
+            }
+        } else if let Some(order) = jupiter_quote {
+            // Only Jupiter quote available
+            println!("📊 Only Jupiter quote available");
+            selected_provider.set(Some("Jupiter".to_string()));
+            
             let output_amount = order.out_amount.parse::<u64>().unwrap_or(0);
-            let converted_amount = from_lamports(output_amount, &buying_token());
+            let converted_amount = from_lamports(output_amount, &buying_token(), &tokens_clone5);
+            
+            let formatted = if converted_amount < 0.01 && converted_amount > 0.0 {
+                format!("{:.6}", converted_amount)
+            } else {
+                format!("{:.2}", converted_amount)
+            };
+            
+            buying_amount.set(formatted);
+        } else if let Some((provider_name, titan_route)) = titan_q {
+            // Only Titan quote available
+            println!("📊 Only Titan quote available from {}", provider_name);
+            selected_provider.set(Some("Titan".to_string()));
+            
+            let converted_amount = from_lamports(titan_route.out_amount, &buying_token(), &tokens_clone5);
             
             let formatted = if converted_amount < 0.01 && converted_amount > 0.0 {
                 format!("{:.6}", converted_amount)
@@ -769,6 +1026,9 @@ pub fn SwapModal(
                 return;
             }
 
+            // Clone custom_rpc at the start so it can be used in multiple spawn blocks
+            let custom_rpc_for_titan = custom_rpc_clone.clone();
+
             // Double-check balance validation
             if let Ok(amount) = selling_amount().parse::<f64>() {
                 let selling_balance = tokens_clone3.iter()
@@ -781,8 +1041,152 @@ pub fn SwapModal(
                     return;
                 }
 
-                // Check if we have a valid Jupiter Ultra order
-                if let Some(order) = current_order() {
+                // Check which provider won the quote comparison
+                let provider = selected_provider();
+                
+                if provider == Some("Titan".to_string()) {
+                    // Titan won - build transaction from instructions
+                    if let Some((provider_name, titan_route)) = titan_quote() {
+                        println!("✅ Using Titan ({}) for swap", provider_name);
+                        println!("📊 Building transaction from {} instructions", titan_route.instructions.len());
+                        
+                        swapping.set(true);
+                        error_message.set(None);
+                        
+                        // Get user pubkey for transaction building - prioritize hardware wallet
+                        // Check hardware wallet FIRST, then fall back to software wallet
+                        let user_pubkey_str = if let Some(address) = hw_address() {
+                            Some(address)
+                        } else if let Some(wallet_info) = &wallet_clone_for_titan {
+                            Some(wallet_info.address.clone())
+                        } else {
+                            None
+                        };
+                        
+                        let user_pubkey_str = match user_pubkey_str {
+                            Some(pk) => pk,
+                            None => {
+                                error_message.set(Some("No wallet available".to_string()));
+                                swapping.set(false);
+                                return;
+                            }
+                        };
+                        
+                        // Parse pubkey
+                        let user_pubkey = match user_pubkey_str.parse::<SolanaPubkey>() {
+                            Ok(pk) => pk,
+                            Err(e) => {
+                                error_message.set(Some(format!("Invalid pubkey: {}", e)));
+                                swapping.set(false);
+                                return;
+                            }
+                        };
+                        
+                        // Clone values for the async block
+                        let hw_clone = hardware_wallet_clone2.clone();
+                        let wallet_info_clone = wallet_clone2.clone();
+                        let custom_rpc_titan = custom_rpc_for_titan.clone();
+                        
+                        // Build transaction from Titan's instructions
+                        spawn(async move {
+                            println!("🔧 Fetching recent blockhash...");
+                            
+                            // Create RPC client to fetch recent blockhash
+                            let rpc_client = TransactionClient::new(custom_rpc_titan.as_deref());
+                            
+                            // Fetch recent blockhash
+                            let recent_blockhash = match rpc_client.get_recent_blockhash().await {
+                                Ok(hash) => {
+                                    println!("✅ Recent blockhash: {}", hash);
+                                    hash
+                                }
+                                Err(e) => {
+                                    println!("❌ Failed to fetch blockhash: {}", e);
+                                    swapping.set(false);
+                                    error_message.set(Some(format!("Failed to get blockhash: {}", e)));
+                                    return;
+                                }
+                            };
+                            
+                            // Build transaction from Titan route with lookup tables
+                            let rpc_url = custom_rpc_titan.as_deref().unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
+                            let unsigned_tx_bytes = match build_transaction_from_route(
+                                &titan_route,
+                                user_pubkey,
+                                recent_blockhash,
+                                rpc_url,
+                            ).await {
+                                Ok(bytes) => {
+                                    println!("✅ Transaction built: {} bytes", bytes.len());
+                                    bytes
+                                }
+                                Err(e) => {
+                                    println!("❌ Failed to build transaction: {}", e);
+                                    swapping.set(false);
+                                    error_message.set(Some(format!("Failed to build transaction: {}", e)));
+                                    return;
+                                }
+                            };
+                            
+                            // Convert to base64 for signing
+                            let unsigned_tx_b64 = base64::encode(&unsigned_tx_bytes);
+                            
+                            // Continue with signing flow
+                            // Determine if this is a hardware wallet transaction
+                            let is_hardware = hw_clone.is_some();
+                            was_hardware_transaction.set(is_hardware);
+                            
+                            if is_hardware {
+                                show_hardware_approval.set(true);
+                            }
+                            
+                            println!("🔐 Signing Titan transaction...");
+                            
+                            // Create the appropriate signer
+                            let signing_result = if let Some(hw) = hw_clone {
+                                println!("💻 Using hardware wallet signer");
+                                let hw_signer = HardwareSigner::from_wallet(hw);
+                                sign_jupiter_transaction(&hw_signer, &unsigned_tx_b64).await
+                            } else if let Some(wallet_info) = wallet_info_clone {
+                                println!("🔑 Using software wallet signer");
+                                match Wallet::from_wallet_info(&wallet_info) {
+                                    Ok(wallet) => {
+                                        let sw_signer = SoftwareSigner::new(wallet);
+                                        sign_jupiter_transaction(&sw_signer, &unsigned_tx_b64).await
+                                    }
+                                    Err(e) => {
+                                        Err(format!("Failed to load wallet: {}", e))
+                                    }
+                                }
+                            } else {
+                                Err("No wallet available for signing".to_string())
+                            };
+                            
+                            if is_hardware {
+                                show_hardware_approval.set(false);
+                            }
+                            
+                            match signing_result {
+                                Ok(signed_transaction_b64) => {
+                                    println!("✅ Transaction signed successfully!");
+                                    println!("🚀 Submitting to Solana RPC...");
+                                    
+                                    // Execute Titan swap via direct Solana RPC submission
+                                    execute_titan_swap(signed_transaction_b64, custom_rpc_for_titan);
+                                }
+                                Err(e) => {
+                                    println!("❌ Transaction signing failed: {}", e);
+                                    swapping.set(false);
+                                    error_message.set(Some(format!("Failed to sign transaction: {}", e)));
+                                }
+                            }
+                        });
+                    } else {
+                        error_message.set(Some("No Titan quote available".to_string()));
+                    }
+                } else if provider == Some("Jupiter".to_string()) || current_order().is_some() {
+                    // Jupiter won OR fallback to Jupiter if available
+                    if let Some(order) = current_order() {
                     // Check for order-level errors
                     if let Some(error_msg) = &order.error_message {
                         error_message.set(Some(format!("Cannot swap: {}", error_msg)));
@@ -860,8 +1264,12 @@ pub fn SwapModal(
                         error_message.set(Some("No transaction data available".to_string()));
                         swapping.set(false);
                     }
+                    } else {
+                        error_message.set(Some("No transaction data available".to_string()));
+                        swapping.set(false);
+                    }
                 } else {
-                    error_message.set(Some("No quote available - please wait or try a different amount".to_string()));
+                    error_message.set(Some("No quote available - please wait for quotes".to_string()));
                 }
             }
         }
@@ -926,14 +1334,14 @@ pub fn SwapModal(
                 onclick: move |e| e.stop_propagation(),
                 style: "
                     background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
-                    border-radius: 24px;
+                    border-radius: 20px;
                     padding: 0;
-                    width: 340px;
-                    max-width: 95vw;
-                    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-                    border: 1px solid rgba(148, 163, 184, 0.1);
+                    width: min(420px, calc(100vw - 32px));
+                    max-width: 420px;
+                    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+                    border: 1px solid rgba(148, 163, 184, 0.15);
                     overflow: hidden;
-                    margin: 0 auto;
+                    margin: 16px auto;
                 ",
                 
                 // Modal header
@@ -943,15 +1351,16 @@ pub fn SwapModal(
                         display: flex;
                         justify-content: space-between;
                         align-items: center;
-                        padding: 20px 24px 16px;
-                        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+                        padding: 24px;
+                        border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+                        background: rgba(15, 23, 42, 0.4);
                     ",
                     h2 { 
                         class: "swap-title-v2",
                         style: "
                             color: #f8fafc;
-                            font-size: 20px;
-                            font-weight: 600;
+                            font-size: 22px;
+                            font-weight: 700;
                             margin: 0;
                             letter-spacing: -0.025em;
                         ",
@@ -960,16 +1369,16 @@ pub fn SwapModal(
                     button {
                         class: "swap-close-button-v2",
                         style: "
-                            background: none;
-                            border: none;
-                            color: #94a3b8;
-                            font-size: 24px;
+                            background: rgba(30, 41, 59, 0.6);
+                            border: 1px solid rgba(148, 163, 184, 0.2);
+                            color: #cbd5e1;
+                            font-size: 20px;
                             cursor: pointer;
-                            padding: 4px;
-                            border-radius: 8px;
+                            padding: 0;
+                            border-radius: 10px;
                             transition: all 0.2s ease;
-                            width: 32px;
-                            height: 32px;
+                            min-width: 44px;
+                            min-height: 44px;
                             display: flex;
                             align-items: center;
                             justify-content: center;
@@ -984,13 +1393,14 @@ pub fn SwapModal(
                     div {
                         class: "error-message",
                         style: "
-                            padding: 12px;
-                            background-color: #7f1d1d;
-                            border: 1px solid #dc2626;
+                            padding: 16px;
+                            background-color: rgba(127, 29, 29, 0.2);
+                            border: 1px solid rgba(220, 38, 38, 0.4);
                             color: #fca5a5;
-                            border-radius: 8px;
+                            border-radius: 12px;
                             margin: 16px 24px;
                             font-size: 14px;
+                            line-height: 1.5;
                         ",
                         "{error}"
                     }
@@ -999,7 +1409,7 @@ pub fn SwapModal(
                 // Selling section
                 div {
                     class: "swap-section",
-                    style: "padding: 16px 24px 12px;",
+                    style: "padding: 20px 24px 16px;",
                     
                     div {
                         class: "swap-section-header",
@@ -1007,15 +1417,15 @@ pub fn SwapModal(
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            margin-bottom: 12px;
+                            margin-bottom: 16px;
                         ",
                         span { 
-                            style: "color: #94a3b8; font-size: 14px;",
+                            style: "color: #94a3b8; font-size: 15px; font-weight: 500;",
                             "You're selling" 
                         }
                         span { 
                             class: "swap-balance",
-                            style: "color: #cbd5e1; font-size: 12px;",
+                            style: "color: #cbd5e1; font-size: 13px;",
                             "Balance: {selling_balance():.6} {selling_token()}"
                         }
                     }
@@ -1026,33 +1436,40 @@ pub fn SwapModal(
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            background: rgba(15, 23, 42, 0.6);
-                            border: 1px solid rgba(148, 163, 184, 0.15);
-                            border-radius: 12px;
-                            padding: 18px 20px;
-                            gap: 20px;
+                            background: rgba(15, 23, 42, 0.8);
+                            border: 2px solid rgba(99, 102, 241, 0.2);
+                            border-radius: 16px;
+                            padding: 20px;
+                            gap: 16px;
+                            transition: border-color 0.2s ease;
                         ",
                         
                         // Token selector
                         div {
                             class: "swap-token-side",
-                            style: "display: flex; align-items: center; gap: 8px;",
+                            style: "display: flex; align-items: center; gap: 12px; flex-shrink: 0;",
                             img {
                                 class: "swap-token-icon",
-                                style: "width: 24px; height: 24px; border-radius: 50%;",
-                                src: get_token_icon(&selling_token()),
+                                style: "width: 32px; height: 32px; border-radius: 50%;",
+                                src: get_token_icon(&selling_token(), &tokens_clone6),
                                 alt: selling_token()
                             }
                             select {
                                 class: "swap-token-picker",
                                 style: "
-                                    background: transparent;
-                                    border: none;
+                                    background: rgba(30, 41, 59, 0.9);
+                                    border: 1px solid rgba(148, 163, 184, 0.3);
+                                    border-radius: 10px;
                                     color: #ffffff;
-                                    font-size: 16px;
-                                    font-weight: 600;
+                                    font-size: 17px;
+                                    font-weight: 700;
                                     cursor: pointer;
                                     outline: none;
+                                    padding: 10px 14px;
+                                    min-height: 48px;
+                                    -webkit-appearance: none;
+                                    -moz-appearance: none;
+                                    appearance: none;
                                 ",
                                 value: selling_token(),
                                 onchange: move |e| {
@@ -1062,13 +1479,13 @@ pub fn SwapModal(
                                     current_order.set(None);
                                 },
                                 
-                                option { value: "SOL", "SOL" }
-                                option { value: "USDC", "USDC" }
-                                option { value: "USDT", "USDT" }
-                                option { value: "JUP", "JUP" }
-                                option { value: "BONK", "BONK" }
-                                option { value: "JTO", "JTO" }
-                                option { value: "JLP", "JLP" }
+                                // Dynamically generate options from user's tokens
+                                for token in tokens_clone6.iter() {
+                                    option { 
+                                        value: "{token.symbol}",
+                                        "{token.symbol}"
+                                    }
+                                }
                             }
                         }
                         
@@ -1081,7 +1498,7 @@ pub fn SwapModal(
                                 align-items: flex-end;
                                 justify-content: center;
                                 flex: 1;
-                                text-align: right;
+                                min-width: 0;
                             ",
                             input {
                                 class: "swap-amount-field",
@@ -1089,15 +1506,17 @@ pub fn SwapModal(
                                     background: transparent;
                                     border: none;
                                     color: #ffffff;
-                                    font-size: 24px;
+                                    font-size: 28px;
                                     font-weight: 700;
                                     text-align: right;
                                     width: 100%;
                                     outline: none;
                                     padding: 0;
                                     margin: 0;
+                                    min-height: 48px;
                                 ",
                                 r#type: "text",
+                                inputmode: "decimal",
                                 placeholder: "0.00",
                                 value: selling_amount(),
                                 oninput: move |e| handle_amount_change(e.value()),
@@ -1106,10 +1525,11 @@ pub fn SwapModal(
                             div {
                                 class: "swap-amount-usd",
                                 style: "
-                                    color: #9ca3af;
-                                    font-size: 12px;
+                                    color: #94a3b8;
+                                    font-size: 14px;
                                     text-align: right;
-                                    margin-top: 2px;
+                                    margin-top: 4px;
+                                    font-weight: 500;
                                 ",
                                 "${selling_usd_value():.2}"
                             }
@@ -1123,26 +1543,27 @@ pub fn SwapModal(
                     style: "
                         display: flex;
                         justify-content: center;
-                        margin: 8px 0;
+                        margin: 12px 0;
                         position: relative;
                         z-index: 10;
                     ",
                     button {
                         class: "swap-arrow-button",
                         style: "
-                            background-color: #374151;
-                            border: 2px solid #4b5563;
+                            background: linear-gradient(135deg, #374151 0%, #1f2937 100%);
+                            border: 2px solid rgba(99, 102, 241, 0.3);
                             border-radius: 50%;
-                            width: 44px;
-                            height: 44px;
+                            min-width: 48px;
+                            min-height: 48px;
                             color: #ffffff;
-                            font-size: 18px;
+                            font-size: 20px;
                             cursor: pointer;
                             transition: all 0.2s ease;
                             display: flex;
                             align-items: center;
                             justify-content: center;
                             font-weight: bold;
+                            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
                         ",
                         onclick: handle_token_swap,
                         "↕"
@@ -1152,7 +1573,7 @@ pub fn SwapModal(
                 // Buying section
                 div {
                     class: "swap-section",
-                    style: "padding: 16px 24px 12px;",
+                    style: "padding: 16px 24px 20px;",
                     
                     div {
                         class: "swap-section-header",
@@ -1160,15 +1581,15 @@ pub fn SwapModal(
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            margin-bottom: 12px;
+                            margin-bottom: 16px;
                         ",
                         span { 
-                            style: "color: #94a3b8; font-size: 14px;",
+                            style: "color: #94a3b8; font-size: 15px; font-weight: 500;",
                             "You're buying" 
                         }
                         span { 
                             class: "swap-balance",
-                            style: "color: #cbd5e1; font-size: 12px;",
+                            style: "color: #cbd5e1; font-size: 13px;",
                             "Balance: {buying_balance():.6} {buying_token()}"
                         }
                     }
@@ -1179,33 +1600,39 @@ pub fn SwapModal(
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            background: rgba(15, 23, 42, 0.6);
-                            border: 1px solid rgba(148, 163, 184, 0.15);
-                            border-radius: 12px;
-                            padding: 18px 20px;
-                            gap: 20px;
+                            background: rgba(15, 23, 42, 0.8);
+                            border: 2px solid rgba(148, 163, 184, 0.15);
+                            border-radius: 16px;
+                            padding: 20px;
+                            gap: 16px;
                         ",
                         
                         // Token selector
                         div {
                             class: "swap-token-side",
-                            style: "display: flex; align-items: center; gap: 8px;",
+                            style: "display: flex; align-items: center; gap: 12px; flex-shrink: 0;",
                             img {
                                 class: "swap-token-icon",
-                                style: "width: 24px; height: 24px; border-radius: 50%;",
-                                src: get_token_icon(&buying_token()),
+                                style: "width: 32px; height: 32px; border-radius: 50%;",
+                                src: get_token_icon(&buying_token(), &tokens_clone6),
                                 alt: buying_token()
                             }
                             select {
                                 class: "swap-token-picker",
                                 style: "
-                                    background: transparent;
-                                    border: none;
+                                    background: rgba(30, 41, 59, 0.9);
+                                    border: 1px solid rgba(148, 163, 184, 0.3);
+                                    border-radius: 10px;
                                     color: #ffffff;
-                                    font-size: 16px;
-                                    font-weight: 600;
+                                    font-size: 17px;
+                                    font-weight: 700;
                                     cursor: pointer;
                                     outline: none;
+                                    padding: 10px 14px;
+                                    min-height: 48px;
+                                    -webkit-appearance: none;
+                                    -moz-appearance: none;
+                                    appearance: none;
                                 ",
                                 value: buying_token(),
                                 onchange: move |e| {
@@ -1214,13 +1641,13 @@ pub fn SwapModal(
                                     current_order.set(None);
                                 },
                                 
-                                option { value: "USDC", "USDC" }
-                                option { value: "USDT", "USDT" }
-                                option { value: "SOL", "SOL" }
-                                option { value: "JUP", "JUP" }
-                                option { value: "BONK", "BONK" }
-                                option { value: "JTO", "JTO" }
-                                option { value: "JLP", "JLP" }
+                                // Dynamically generate options from user's tokens
+                                for token in tokens_clone6.iter() {
+                                    option { 
+                                        value: "{token.symbol}",
+                                        "{token.symbol}"
+                                    }
+                                }
                             }
                         }
                         
@@ -1233,34 +1660,33 @@ pub fn SwapModal(
                                 align-items: flex-end;
                                 justify-content: center;
                                 flex: 1;
-                                text-align: right;
+                                min-width: 0;
                             ",
-                            input {
+                            div {
                                 class: "swap-amount-field swap-amount-readonly",
                                 style: "
                                     background: transparent;
                                     border: none;
-                                    color: #9ca3af;
-                                    font-size: 24px;
+                                    color: #10b981;
+                                    font-size: 28px;
                                     font-weight: 700;
                                     text-align: right;
                                     width: 100%;
-                                    outline: none;
-                                    padding: 0;
-                                    margin: 0;
-                                    cursor: not-allowed;
+                                    min-height: 48px;
+                                    display: flex;
+                                    align-items: center;
+                                    justify-content: flex-end;
                                 ",
-                                r#type: "text",
-                                value: buying_amount(),
-                                readonly: true
+                                "{buying_amount()}"
                             }
                             div {
                                 class: "swap-amount-usd",
                                 style: "
-                                    color: #9ca3af;
-                                    font-size: 12px;
+                                    color: #94a3b8;
+                                    font-size: 14px;
                                     text-align: right;
-                                    margin-top: 2px;
+                                    margin-top: 4px;
+                                    font-weight: 500;
                                 ",
                                 "${buying_usd_value():.2}"
                             }
@@ -1272,24 +1698,44 @@ pub fn SwapModal(
                 div {
                     class: "swap-rate-section",
                     style: "
-                        background-color: #0f1419;
-                        border-radius: 8px;
-                        border: 1px solid #2a2a2a;
-                        padding: 12px 16px;
-                        margin: 16px 24px;
+                        background: rgba(15, 23, 42, 0.6);
+                        border-radius: 12px;
+                        border: 1px solid rgba(148, 163, 184, 0.15);
+                        padding: 16px;
+                        margin: 0 24px 20px;
                     ",
+                    
+                    // Show provider badge if a provider has been selected
+                    if let Some(provider) = selected_provider() {
+                        div {
+                            class: "provider-badge",
+                            style: "
+                                display: inline-block;
+                                padding: 6px 14px;
+                                border-radius: 8px;
+                                font-size: 13px;
+                                font-weight: 700;
+                                margin-bottom: 12px;
+                                background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+                                color: #ffffff;
+                                box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+                            ",
+                            "Best rate from {provider}"
+                        }
+                    }
+                    
                     div {
                         class: "swap-rate-row",
-                        style: "color: #9ca3af; font-size: 14px; margin-bottom: 4px;",
+                        style: "color: #cbd5e1; font-size: 14px; margin-bottom: 8px; font-weight: 500;",
                         {
-                            if fetching_order() {
+                            if fetching_order() || fetching_titan() {
                                 "Getting best rate...".to_string()
                             } else if let Some(order) = current_order() {
                                 let input_amount = order.in_amount.parse::<u64>().unwrap_or(0);
                                 let output_amount = order.out_amount.parse::<u64>().unwrap_or(0);
                                 
-                                let input_converted = from_lamports(input_amount, &selling_token());
-                                let output_converted = from_lamports(output_amount, &buying_token());
+                                let input_converted = from_lamports(input_amount, &selling_token(), &tokens);
+                                let output_converted = from_lamports(output_amount, &buying_token(), &tokens);
                                 
                                 let rate = if input_converted > 0.0 { output_converted / input_converted } else { 0.0 };
                                 
@@ -1299,7 +1745,7 @@ pub fn SwapModal(
                                     format!("{:.4}", rate)
                                 };
                                 
-                                format!("Rate: 1 {} = {} {} (Jupiter Ultra)", selling_token(), formatted_rate, buying_token())
+                                format!("Rate: 1 {} = {} {}", selling_token(), formatted_rate, buying_token())
                             } else {
                                 let rate = exchange_rate();
                                 let formatted_rate = if rate < 0.01 {
@@ -1312,67 +1758,50 @@ pub fn SwapModal(
                         }
                     }
                     
-                    // Show additional Jupiter Ultra info if available
+                    // Show additional info if available
                     if let Some(order) = current_order() {
                         div {
                             class: "swap-rate-row",
-                            style: "color: #9ca3af; font-size: 14px; margin-bottom: 4px;",
+                            style: "color: #94a3b8; font-size: 13px; margin-bottom: 4px;",
                             "Route: {order.router}"
                         }
                         if let Some(price_impact) = order.price_impact {
                             div {
                                 class: "swap-rate-row",
-                                style: "color: #9ca3af; font-size: 14px; margin-bottom: 4px;",
+                                style: "color: #94a3b8; font-size: 13px; margin-bottom: 4px;",
                                 "Price Impact: {price_impact:.4}%"
                             }
                         }
                         div {
                             class: "swap-rate-row",
-                            style: "color: #9ca3af; font-size: 14px; margin-bottom: 0;",
+                            style: "color: #94a3b8; font-size: 13px; margin-bottom: 0;",
                             "Fee: {order.fee_bps} bps"
                         }
                     }
                 }
                 
-                // Action buttons
+                // Action button
                 div {
                     class: "modal-buttons",
                     style: "
                         display: flex;
-                        gap: 12px;
-                        justify-content: space-between;
-                        padding: 0 24px 24px;
+                        padding: 0 24px 28px;
                     ",
-                    button {
-                        class: "modal-button secondary",
-                        style: "
-                            flex: 1;
-                            padding: 16px 24px;
-                            border-radius: 12px;
-                            border: none;
-                            cursor: pointer;
-                            font-size: 16px;
-                            font-weight: 600;
-                            transition: all 0.2s ease;
-                            background-color: #dc2626;
-                            color: white;
-                        ",
-                        onclick: move |_| onclose.call(()),
-                        "Cancel"
-                    }
                     button {
                         class: "modal-button primary",
                         style: "
-                            flex: 1;
-                            padding: 16px 24px;
-                            border-radius: 12px;
+                            width: 100%;
+                            padding: 18px 24px;
+                            border-radius: 14px;
                             border: none;
                             cursor: pointer;
-                            font-size: 16px;
-                            font-weight: 600;
+                            font-size: 18px;
+                            font-weight: 700;
                             transition: all 0.2s ease;
-                            background-color: #6366f1;
+                            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
                             color: white;
+                            min-height: 56px;
+                            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
                         ",
                         disabled: swapping() || selling_amount().is_empty() || fetching_order(),
                         onclick: handle_swap,

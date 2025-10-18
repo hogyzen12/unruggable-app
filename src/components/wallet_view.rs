@@ -939,19 +939,20 @@ pub fn WalletView() -> Element {
                                 get_fallback_icon(&symbol)  // Use fallback for no metadata
                             };
                             
-                            Token {
-                                mint: account.mint.clone(),
-                                symbol: symbol.clone(),
-                                name: token_name,
-                                icon_type,
-                                balance: account.amount,
-                                value_usd,
-                                price,
-                                price_change: change_1d,
-                                price_change_1d: change_1d,
-                                price_change_3d: change_3d,
-                                price_change_7d: change_7d,
-                            }
+                        Token {
+                            mint: account.mint.clone(),
+                            symbol: symbol.clone(),
+                            name: token_name,
+                            icon_type,
+                            balance: account.amount,
+                            value_usd,
+                            price,
+                            price_change: change_1d,
+                            price_change_1d: change_1d,
+                            price_change_3d: change_3d,
+                            price_change_7d: change_7d,
+                            decimals: account.decimals,
+                        }
                         })
                         .collect::<Vec<Token>>();
                         
@@ -975,6 +976,7 @@ pub fn WalletView() -> Element {
                         price_change_1d: sol_change_1d,
                         price_change_3d: sol_change_3d,
                         price_change_7d: sol_change_7d,
+                        decimals: 9, // SOL has 9 decimals
                     }];
                     raw_tokens.extend(new_tokens);
                     raw_tokens
@@ -1017,6 +1019,7 @@ pub fn WalletView() -> Element {
                     price_change_1d: sol_change_1d,
                     price_change_3d: sol_change_3d,
                     price_change_7d: sol_change_7d,
+                    decimals: 9, // SOL has 9 decimals
                 }]);
             }
         });

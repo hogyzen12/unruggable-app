@@ -12,6 +12,7 @@ pub struct Token {
     pub price_change_1d: f64,
     pub price_change_3d: f64,
     pub price_change_7d: f64,
+    pub decimals: u8,      // Token decimals for proper amount conversion
 }
 
 // Add after the existing Token struct

@@ -19,6 +19,7 @@ mod config;
 mod token_utils;
 mod squads;
 mod carrot;
+mod titan;
 
 use components::*;
 
