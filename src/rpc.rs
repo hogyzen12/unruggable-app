@@ -465,7 +465,7 @@ pub struct TransactionHistoryItem {
 /// Convert a timestamp to a human-readable date/time
 pub fn format_timestamp(timestamp: i64) -> String {
     let datetime = chrono::NaiveDateTime::from_timestamp_opt(timestamp, 0)
-        .unwrap_or_else(|| chrono::NaiveDateTime::from_timestamp_opt(0, 0).unwrap());
+        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap().naive_utc());
     datetime.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 

@@ -781,3 +781,205 @@ pub fn mark_onboarding_completed() {
         }
     }
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PIN Storage Functions
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PinData {
+    pub pin_hash: String,
+    pub salt: Vec<u8>,
+    pub failed_attempts: u32,
+}
+
+fn get_pin_file_path() -> String {
+    let storage_dir = get_storage_dir_simple();
+    format!("{}/pin.json", storage_dir)
+}
+
+/// Check if a PIN is set
+pub fn has_pin() -> bool {
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        storage.get_item("pin_data").unwrap().is_some()
+    }
+    
+    #[cfg(not(feature = "web"))]
+    {
+        let pin_file = get_pin_file_path();
+        Path::new(&pin_file).exists()
+    }
+}
+
+/// Save PIN hash and salt
+pub fn save_pin(pin: &str) -> Result<(), String> {
+    use crate::pin::{hash_pin, generate_salt};
+    
+    log::info!("🔐 Saving PIN to storage");
+    
+    let pin_hash = hash_pin(pin);
+    let salt = generate_salt();
+    
+    let pin_data = PinData {
+        pin_hash,
+        salt: salt.to_vec(),
+        failed_attempts: 0,
+    };
+    
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(&pin_data)
+            .map_err(|e| format!("Failed to serialize PIN data: {}", e))?;
+        storage.set_item("pin_data", &serialized)
+            .map_err(|_| "Failed to save PIN to web storage".to_string())?;
+        log::info!("✅ PIN saved to web storage");
+        Ok(())
+    }
+    
+    #[cfg(not(feature = "web"))]
+    {
+        ensure_storage_dir()
+            .map_err(|e| format!("Failed to ensure storage directory: {}", e))?;
+        
+        let pin_file = get_pin_file_path();
+        let serialized = serde_json::to_string_pretty(&pin_data)
+            .map_err(|e| format!("Failed to serialize PIN data: {}", e))?;
+        
+        std::fs::write(&pin_file, serialized)
+            .map_err(|e| format!("Failed to write PIN file: {}", e))?;
+        
+        log::info!("✅ PIN saved to: {}", pin_file);
+        Ok(())
+    }
+}
+
+/// Verify PIN and return salt if correct
+pub fn verify_pin(pin: &str) -> Result<Vec<u8>, String> {
+    use crate::pin::hash_pin;
+    
+    if is_pin_locked() {
+        return Err("PIN is locked due to too many failed attempts".to_string());
+    }
+    
+    let mut pin_data = load_pin_data()?;
+    let pin_hash = hash_pin(pin);
+    
+    if pin_hash == pin_data.pin_hash {
+        // Correct PIN - reset failed attempts
+        pin_data.failed_attempts = 0;
+        let _ = save_pin_data(&pin_data);
+        log::info!("✅ PIN verified successfully");
+        Ok(pin_data.salt)
+    } else {
+        // Wrong PIN - increment failed attempts
+        pin_data.failed_attempts += 1;
+        log::warn!("❌ PIN verification failed. Attempts: {}/10", pin_data.failed_attempts);
+        let _ = save_pin_data(&pin_data);
+        
+        if pin_data.failed_attempts >= 10 {
+            Err("PIN locked due to too many failed attempts".to_string())
+        } else {
+            Err(format!("Incorrect PIN. {} attempts remaining", 10 - pin_data.failed_attempts))
+        }
+    }
+}
+
+/// Check if PIN is locked
+pub fn is_pin_locked() -> bool {
+    if let Ok(pin_data) = load_pin_data() {
+        pin_data.failed_attempts >= 10
+    } else {
+        false
+    }
+}
+
+/// Get salt for encryption (used when PIN is already verified)
+pub fn get_pin_salt() -> Result<Vec<u8>, String> {
+    let pin_data = load_pin_data()?;
+    Ok(pin_data.salt)
+}
+
+/// Load PIN data from storage
+fn load_pin_data() -> Result<PinData, String> {
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let data = storage.get_item("pin_data")
+            .map_err(|_| "Failed to access web storage".to_string())?
+            .ok_or_else(|| "No PIN data found".to_string())?;
+        
+        serde_json::from_str(&data)
+            .map_err(|e| format!("Failed to parse PIN data: {}", e))
+    }
+    
+    #[cfg(not(feature = "web"))]
+    {
+        let pin_file = get_pin_file_path();
+        let data = std::fs::read_to_string(&pin_file)
+            .map_err(|_| "No PIN data found".to_string())?;
+        
+        serde_json::from_str(&data)
+            .map_err(|e| format!("Failed to parse PIN data: {}", e))
+    }
+}
+
+/// Save PIN data to storage
+fn save_pin_data(pin_data: &PinData) -> Result<(), String> {
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(pin_data)
+            .map_err(|e| format!("Failed to serialize PIN data: {}", e))?;
+        storage.set_item("pin_data", &serialized)
+            .map_err(|_| "Failed to save PIN data to web storage".to_string())?;
+        Ok(())
+    }
+    
+    #[cfg(not(feature = "web"))]
+    {
+        let pin_file = get_pin_file_path();
+        let serialized = serde_json::to_string_pretty(pin_data)
+            .map_err(|e| format!("Failed to serialize PIN data: {}", e))?;
+        
+        std::fs::write(&pin_file, serialized)
+            .map_err(|e| format!("Failed to write PIN file: {}", e))?;
+        
+        Ok(())
+    }
+}
+
+/// Remove PIN from storage
+pub fn remove_pin() -> Result<(), String> {
+    log::info!("🔐 Removing PIN from storage");
+    
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        storage.remove_item("pin_data")
+            .map_err(|_| "Failed to remove PIN from web storage".to_string())?;
+        log::info!("✅ PIN removed from web storage");
+        Ok(())
+    }
+    
+    #[cfg(not(feature = "web"))]
+    {
+        let pin_file = get_pin_file_path();
+        std::fs::remove_file(&pin_file)
+            .map_err(|e| format!("Failed to remove PIN file: {}", e))?;
+        log::info!("✅ PIN removed from storage");
+        Ok(())
+    }
+}

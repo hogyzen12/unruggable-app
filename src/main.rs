@@ -20,6 +20,7 @@ mod token_utils;
 mod squads;
 mod carrot;
 mod titan;
+mod pin;
 
 use components::*;
 
@@ -30,11 +31,16 @@ enum Route {
     WalletView {},
 }
 
-//MAC and IoS bundling does nto adhere to the asset! macro.
-//Android does. For apple builds use hosted resources.
+// MAC and iOS bundling does not adhere to the asset! macro.
+// Android does. For apple builds use hosted resources.
 
-//const MAIN_CSS_URL: &str ="https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
-const MAIN_CSS: Asset = asset!("/assets/main.css");
+// For iOS/macOS builds, uncomment the remote URLs and comment out the asset! macros
+const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
+const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
+
+// For local/Android builds, use the asset! macro
+//const MAIN_CSS: Asset = asset!("/assets/main.css");
+//const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
 
 // ── DESKTOP (macOS/Windows/Linux) ─────────────────────────────────────────────
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
@@ -68,6 +74,9 @@ fn App() -> Element {
     let mut show_onboarding = use_signal(|| true);
     //let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
     
+    // Check if PIN is set and locked
+    let mut is_locked = use_signal(|| storage::has_pin());
+    
     // Initialize SNS resolver with your RPC endpoint
     let sns_resolver = Arc::new(sns::SnsResolver::new(
         "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string() // Use your preferred RPC endpoint
@@ -77,18 +86,31 @@ fn App() -> Element {
     use_context_provider(|| sns_resolver);
 
     rsx! {
-        //document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
+        // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
+        document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
+        document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
+        document::Link { rel: "stylesheet", href: PIN_CSS_URL }
         
-        // Show onboarding on first launch, otherwise show the main app
-        if show_onboarding() {
+        // For local/Android builds, use these lines (comment out for iOS/macOS)
+        //document::Link { rel: "stylesheet", href: MAIN_CSS }
+        //document::Link { rel: "stylesheet", href: PIN_CSS }
+        
+        // Show PIN unlock if PIN is set and app is locked
+        if is_locked() {
+            PinUnlock {
+                on_unlock: move |_| {
+                    is_locked.set(false);
+                }
+            }
+        } else if show_onboarding() {
+            // Show onboarding on first launch
             OnboardingFlow {
                 on_complete: move |_| {
                     show_onboarding.set(false);
                 }
             }
         } else {
+            // Show main app
             Router::<Route> {}
         }
     }
