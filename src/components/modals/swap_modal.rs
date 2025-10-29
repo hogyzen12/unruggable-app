@@ -368,21 +368,21 @@ pub fn SwapTransactionSuccessModal(
                         div {
                             class: "explorer-buttons",
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solana_explorer_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
                                 "Solana Explorer"
                             }
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solscan_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
                                 "Solscan"
                             }
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solana_fm_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
@@ -394,7 +394,7 @@ pub fn SwapTransactionSuccessModal(
                 
                 div { class: "modal-buttons",
                     button {
-                        class: "modal-button primary",
+                        class: "button-standard primary",
                         onclick: move |_| onclose.call(()),
                         "Close"
                     }
@@ -1788,7 +1788,7 @@ pub fn SwapModal(
                         padding: 0 24px 28px;
                     ",
                     button {
-                        class: "modal-button primary",
+                        class: "button-standard primary",
                         style: "
                             width: 100%;
                             padding: 18px 24px;

@@ -29,7 +29,7 @@ use crate::currency_utils::{
     format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal, CarrotModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal, CarrotModal, BonkStakingModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -89,6 +89,7 @@ const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/jupLendLogo.svg";
 const ICON_SQUADS: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/squadsLogo.svg";
 const ICON_CARROT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/carrotLogo.svg";
+const ICON_BONK_STAKE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bonkLogo.svg";
 
 const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
 const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
@@ -448,6 +449,10 @@ pub fn WalletView() -> Element {
     let mut show_swap_modal = use_signal(|| false);
     let mut show_squads_modal = use_signal(|| false);
     let mut show_carrot_modal = use_signal(|| false);
+    let mut show_bonk_staking_modal = use_signal(|| false);
+    
+    // Integrations collapse/expand state
+    let mut show_integrations = use_signal(|| false);
 
     // Hardware wallet state
     let mut hardware_wallet = use_signal(|| None as Option<Arc<HardwareWallet>>);
@@ -1862,6 +1867,21 @@ pub fn WalletView() -> Element {
                 }
             }
             
+            if show_bonk_staking_modal() {
+                BonkStakingModal {
+                    tokens: tokens(),
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| show_bonk_staking_modal.set(false),
+                    onsuccess: move |sig| {
+                        println!("BONK stake successful: {}", sig);
+                        // Trigger wallet refresh
+                        refresh_trigger.set(refresh_trigger() + 1);
+                    },
+                }
+            }
+            
             if show_background_modal() {
                 BackgroundModal {
                     current_background: selected_background(),
@@ -1974,6 +1994,7 @@ pub fn WalletView() -> Element {
                 div {
                     class: "action-buttons-segmented",
                     
+                    // Primary action buttons row (always visible)
                     div {
                         class: "action-buttons-grid",
                         
@@ -2070,66 +2091,120 @@ pub fn WalletView() -> Element {
                             }
                         }
                         
+                        // Integrations button (replaces Lend in primary row)
                         button {
                             class: "action-button-segmented",
                             onclick: move |_| {
-                                println!("💰 Lend button clicked!");
-                                show_lend_modal.set(true);
+                                show_integrations.set(!show_integrations());
+                                println!("Integrations button clicked - showing: {}", !show_integrations());
                             },
                             
                             div {
                                 class: "action-icon-segmented",
-                                img { 
-                                    src: "{ICON_LEND}",
-                                    alt: "Lend"
+                                div {
+                                    style: "font-size: 20px; color: white;",
+                                    if show_integrations() {
+                                        "▼"
+                                    } else {
+                                        "▶"
+                                    }
                                 }
                             }
                             
                             div {
                                 class: "action-label-segmented",
-                                "Lend"
+                                "Integrations"
                             }
                         }
-                        
-                        button {
-                            class: "action-button-segmented",
-                            onclick: move |_| {
-                                println!("🏛️ Squads button clicked!");
-                                show_squads_modal.set(true);
-                            },
+                    }
+                    
+                    // Integrations row (conditional - only shown when integrations are expanded)
+                    if show_integrations() {
+                        div {
+                            class: "integrations-row",
                             
-                            div {
-                                class: "action-icon-segmented",
-                                img { 
-                                    src: "{ICON_SQUADS}",
-                                    alt: "Squads"
+                            button {
+                                class: "action-button-segmented",
+                                onclick: move |_| {
+                                    println!("Lend button clicked!");
+                                    show_lend_modal.set(true);
+                                },
+                                
+                                div {
+                                    class: "action-icon-segmented",
+                                    img { 
+                                        src: "{ICON_LEND}",
+                                        alt: "Lend"
+                                    }
+                                }
+                                
+                                div {
+                                    class: "action-label-segmented",
+                                    "Lend"
                                 }
                             }
                             
-                            div {
-                                class: "action-label-segmented",
-                                "Squads"
-                            }
-                        }
-                        
-                        button {
-                            class: "action-button-segmented",
-                            onclick: move |_| {
-                                println!("🥕 Carrot button clicked!");
-                                show_carrot_modal.set(true);
-                            },
-                            
-                            div {
-                                class: "action-icon-segmented",
-                                img { 
-                                    src: "{ICON_CARROT}",
-                                    alt: "Carrot"
+                            button {
+                                class: "action-button-segmented",
+                                onclick: move |_| {
+                                    println!("Squads button clicked!");
+                                    show_squads_modal.set(true);
+                                },
+                                
+                                div {
+                                    class: "action-icon-segmented",
+                                    img { 
+                                        src: "{ICON_SQUADS}",
+                                        alt: "Squads"
+                                    }
+                                }
+                                
+                                div {
+                                    class: "action-label-segmented",
+                                    "Squads"
                                 }
                             }
                             
-                            div {
-                                class: "action-label-segmented",
-                                "Carrot"
+                            button {
+                                class: "action-button-segmented",
+                                onclick: move |_| {
+                                    println!("Carrot button clicked!");
+                                    show_carrot_modal.set(true);
+                                },
+                                
+                                div {
+                                    class: "action-icon-segmented",
+                                    img { 
+                                        src: "{ICON_CARROT}",
+                                        alt: "Carrot"
+                                    }
+                                }
+                                
+                                div {
+                                    class: "action-label-segmented",
+                                    "Carrot"
+                                }
+                            }
+                            
+                            button {
+                                class: "action-button-segmented",
+                                onclick: move |_| {
+                                    println!("BONK Stake button clicked!");
+                                    show_bonk_staking_modal.set(true);
+                                },
+                                
+                                div {
+                                    class: "action-icon-segmented",
+                                    img { 
+                                        src: "{ICON_BONK}",
+                                        alt: "BONK Stake"
+                                    }
+                                }
+                                
+                                div {
+                                    class: "action-label-segmented",
+                                    "BONK Stake"
+                                }
                             }
                         }
                     }

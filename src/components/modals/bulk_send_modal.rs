@@ -363,9 +363,17 @@ pub fn BulkSendModal(
                 }
                 
                 // Modal header with close button - matching other modals
-                h2 { 
-                    class: "modal-title", 
-                    "Bulk Send Tokens" 
+                div {
+                    class: "modal-header",
+                    h2 { 
+                        class: "modal-title", 
+                        "Bulk Send Tokens" 
+                    }
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
+                    }
                 }
                 
                 // Show error if any
@@ -515,11 +523,6 @@ pub fn BulkSendModal(
                 
                 div { 
                     class: "modal-buttons",
-                    button {
-                        class: "modal-button cancel",
-                        onclick: move |_| onclose.call(()),
-                        "Cancel"
-                    }
                     button {
                         class: "modal-button primary",
                         disabled: sending() || !all_amounts_valid() || resolved_recipient.read().is_none(), // ← UPDATED VALIDATION

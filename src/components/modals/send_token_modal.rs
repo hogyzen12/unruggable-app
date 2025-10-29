@@ -301,9 +301,17 @@ pub fn SendTokenModal(
                     }
                 }
 
-                h2 { 
-                    class: "modal-title", 
-                    "Send {token_symbol}"
+                div {
+                    class: "modal-header",
+                    h2 { 
+                        class: "modal-title", 
+                        "Send {token_symbol}"
+                    }
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
+                    }
                 }
 
                 // Token info section
@@ -376,11 +384,6 @@ pub fn SendTokenModal(
                 }
 
                 div { class: "modal-buttons",
-                    button {
-                        class: "modal-button cancel",
-                        onclick: move |_| onclose.call(()),
-                        "Cancel"
-                    }
                     button {
                         class: "modal-button primary",
                         onclick: move |_| {

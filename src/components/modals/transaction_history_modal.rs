@@ -304,7 +304,7 @@ pub fn TransactionHistoryModal(
                 // Footer with action buttons
                 div { class: "modal-buttons",
                     button {
-                        class: "modal-button primary",
+                        class: "button-standard primary",
                         onclick: move |_| onclose.call(()),
                         "Close"
                     }

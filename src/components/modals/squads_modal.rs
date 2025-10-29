@@ -152,13 +152,13 @@ fn ApprovalSuccessModal(
                         div {
                             class: "explorer-buttons",
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solana_explorer_url}",
                                 target: "_blank",
                                 "Solana Explorer"
                             }
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solscan_url}",
                                 target: "_blank",
                                 "Solscan"
@@ -170,7 +170,7 @@ fn ApprovalSuccessModal(
                 div { 
                     class: "modal-buttons",
                     button {
-                        class: "modal-button primary",
+                        class: "button-standard primary",
                         onclick: move |_| onclose.call(()),
                         "Close"
                     }
@@ -379,9 +379,17 @@ pub fn SquadsModal(
                 }
 
                 // Header
-                h2 { 
-                    class: "modal-title",
-                    "Squads Multisig"
+                div {
+                    class: "modal-header",
+                    h2 { 
+                        class: "modal-title",
+                        "Squads Multisig"
+                    }
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
+                    }
                 }
 
                 // Show error if any
@@ -646,7 +654,7 @@ pub fn SquadsModal(
                                                                     if tx.approved_count >= multisig.threshold {
                                                                         // Transaction is approved and ready to execute
                                                                         button {
-                                                                            class: "modal-button primary",
+                                                                            class: "button-standard primary",
                                                                             disabled: approving(),
                                                                             style: "width: 100%; background: #10b981;",
                                                                             onclick: {
@@ -716,7 +724,7 @@ pub fn SquadsModal(
                                                                         }
                                                                     } else {
                                                                         button {
-                                                                            class: "modal-button primary",
+                                                                            class: "button-standard primary",
                                                                             disabled: approving(),
                                                                             style: "width: 100%;",
                                                                             onclick: {
@@ -794,16 +802,7 @@ pub fn SquadsModal(
                     }
                 }
 
-                div {
 
-                    class: "modal-buttons",
-                    style: "margin-top: 20px;",
-                    button {
-                        class: "modal-button",
-                        onclick: move |_| onclose.call(()),
-                        "Close"
-                    }
-                }
             }
         }
     }

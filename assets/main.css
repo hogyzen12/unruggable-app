@@ -614,35 +614,38 @@ body {
     background-color: #1f2937;
 }
 
-/* Modal styles */
+/* Modal styles - Updated to match onboarding theme */
 .modal-backdrop {
     position: fixed;
     top: 0;
     left: 0;
     width: 100%;
     height: 100%;
-    background-color: rgba(0, 0, 0, 0.8);
+    background-color: rgba(0, 0, 0, 0.95);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 2000;
+    backdrop-filter: blur(4px);
 }
 
 .modal-content {
-    background-color: #1f2937;
+    background-color: #0f0f0f;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 16px;
     padding: 24px;
     width: 90%;
     max-width: 480px;
     max-height: 90vh;
     overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
 }
 
 .modal-title {
     font-size: 24px;
     font-weight: 600;
     margin-bottom: 20px;
-    color: white;
+    color: #ffffff;
 }
 
 .wallet-field {
@@ -660,24 +663,27 @@ body {
 .wallet-field textarea {
     width: 100%;
     padding: 12px;
-    background-color: #0a0a0a;
-    border: 1px solid #2a2a2a;
+    background-color: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
     color: white;
     font-size: 16px;
-    box-sizing: border-box; /* Add this to prevent overflow */
+    box-sizing: border-box;
+    transition: all 0.2s ease;
 }
 
 /* Special styling for recipient address input to match address display */
 .wallet-field input[placeholder="Enter Solana address"] {
     font-family: monospace;
-    font-size: 11.5px; /* Match address display font size */
+    font-size: 11.5px;
 }
 
 .wallet-field input:focus,
 .wallet-field textarea:focus {
     outline: none;
-    border-color: #6366f1;
+    border-color: #f59e0b;
+    box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.1);
+    background-color: rgba(0, 0, 0, 0.6);
 }
 
 .wallet-field textarea {
@@ -689,19 +695,19 @@ body {
 
 .address-display,
 .private-key-display {
-    width: 100%; /* Ensure full width */
+    width: 100%;
     padding: 12px;
-    background-color: #0a0a0a;
-    border: 1px solid #2a2a2a; /* Add border to match inputs */
+    background-color: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
     color: white;
     font-family: monospace;
-    font-size: 11.5px; /* Smaller font to fit on one line */
-    word-break: keep-all; /* Prevent breaking */
-    white-space: nowrap; /* Keep on single line */
-    overflow: hidden; /* Hide overflow */
-    text-overflow: ellipsis; /* Show ... for overflow */
-    box-sizing: border-box; /* Add this to prevent overflow */
+    font-size: 11.5px;
+    word-break: keep-all;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    box-sizing: border-box;
 }
 
 .private-key-warning {
@@ -716,16 +722,20 @@ body {
 
 .show-key-button {
     padding: 8px 16px;
-    background-color: #6366f1;
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
     color: white;
     border-radius: 8px;
     border: none;
     cursor: pointer;
     font-size: 14px;
+    font-weight: 600;
+    transition: all 0.2s ease;
 }
 
 .show-key-button:hover {
-    background-color: #4f46e5;
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
 
 .modal-buttons {
@@ -742,24 +752,30 @@ body {
     cursor: pointer;
     font-size: 16px;
     font-weight: 500;
+    transition: all 0.2s ease;
 }
 
 .modal-button.cancel {
-    background-color: #374151;
+    background-color: transparent;
+    border: 2px solid rgba(255, 255, 255, 0.2);
     color: white;
 }
 
 .modal-button.cancel:hover {
-    background-color: #4b5563;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
 }
 
 .modal-button.primary {
-    background-color: #6366f1;
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
     color: white;
+    font-weight: 600;
 }
 
 .modal-button.primary:hover {
-    background-color: #4f46e5;
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
 }
 
 .generated-wallet {
@@ -989,8 +1005,10 @@ body {
     cursor: not-allowed;
 }
 
-.modal-button:disabled:hover {
-    background-color: #6366f1;
+.modal-button.primary:disabled:hover {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    transform: none;
+    box-shadow: none;
 }
 
 .key-format-info {
@@ -1020,12 +1038,14 @@ body {
 
 /* RPC modal button styles */
 .modal-button.secondary {
-    background-color: #4b5563;
+    background-color: transparent;
+    border: 2px solid rgba(255, 255, 255, 0.2);
     color: white;
 }
 
 .modal-button.secondary:hover {
-    background-color: #6b7280;
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
 }
 
 .modal-button:disabled {
@@ -1747,15 +1767,17 @@ body {
 .modal-close-button {
     background: none;
     border: none;
-    color: #9ca3af;
+    color: rgba(255, 255, 255, 0.7);
     font-size: 24px;
     cursor: pointer;
     padding: 0;
     margin: 0;
+    transition: all 0.2s ease;
 }
 
 .modal-close-button:hover {
-    color: #ffffff;
+    color: #f59e0b;
+    transform: scale(1.1);
 }
 
 .transaction-address {
@@ -4987,7 +5009,7 @@ body:has(.token-item-selected) .token-item:hover {
 .modal-close-button {
     background: none;
     border: none;
-    color: #9ca3af;
+    color: rgba(255, 255, 255, 0.7);
     font-size: 24px;
     cursor: pointer;
     padding: 4px;
@@ -4996,8 +5018,9 @@ body:has(.token-item-selected) .token-item:hover {
 }
 
 .modal-close-button:hover {
-    background-color: #374151;
-    color: #ffffff;
+    color: #f59e0b;
+    background-color: rgba(245, 158, 11, 0.1);
+    transform: scale(1.1);
 }
 
 .modal-body {
@@ -6750,6 +6773,32 @@ body:has(.token-item-selected) .token-item:hover {
     max-width: 100%;
 }
 
+/* Integrations row - collapsible second row */
+.integrations-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+        max-height: 0;
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+        max-height: 200px;
+    }
+}
+
 .action-button-segmented {
     display: flex;
     flex-direction: column;
@@ -7370,5 +7419,132 @@ body:has(.token-item-selected) .token-item:hover {
     
     .onboarding-progress {
         margin: 12px 0 12px;
+    }
+}
+
+/* ============================================
+   UNIFIED BUTTON SYSTEM
+   Based on onboarding pattern, adapted for modals
+   ============================================ */
+
+/* Base button styles - shared across all variants */
+.button-standard {
+    padding: 12px 24px;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 16px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+/* Primary variant - main action buttons */
+.button-standard.primary {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: white;
+    font-weight: 600;
+}
+
+.button-standard.primary:hover {
+    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.button-standard.primary:active {
+    transform: translateY(0);
+}
+
+/* Secondary variant - cancel/close actions */
+.button-standard.secondary {
+    background-color: transparent;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    color: white;
+}
+
+.button-standard.secondary:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Danger variant - destructive actions */
+.button-standard.danger {
+    background-color: #dc2626;
+    color: white;
+}
+
+.button-standard.danger:hover {
+    background-color: #b91c1c;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(220, 38, 38, 0.3);
+}
+
+/* Ghost variant - minimal style for links/explorer buttons */
+.button-standard.ghost {
+    background-color: transparent;
+    color: #ffffff;
+    border: 1px solid #374151;
+    padding: 10px 16px;
+}
+
+.button-standard.ghost:hover {
+    background-color: #374151;
+    border-color: #4b5563;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Icon variant - icon-only buttons */
+.button-standard.icon {
+    padding: 8px;
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    background-color: #374151;
+}
+
+.button-standard.icon:hover {
+    background-color: #4b5563;
+}
+
+/* Disabled state - works for all variants */
+.button-standard:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none !important;
+    box-shadow: none !important;
+}
+
+.button-standard.primary:disabled:hover {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+}
+
+.button-standard.secondary:disabled:hover {
+    background-color: transparent;
+}
+
+.button-standard.danger:disabled:hover {
+    background-color: #dc2626;
+}
+
+/* Responsive sizing for smaller screens */
+@media (max-width: 480px) {
+    .button-standard {
+        font-size: 14px;
+        padding: 10px 20px;
+    }
+    
+    .modal-buttons {
+        flex-direction: column-reverse;
+    }
+    
+    .modal-buttons .button-standard {
+        width: 100%;
     }
 }

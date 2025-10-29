@@ -16,7 +16,15 @@ pub fn RpcModal(current_rpc: Option<String>, onclose: EventHandler<()>, onsave: 
                 class: "modal-content",
                 onclick: move |e| e.stop_propagation(),
                 
-                h2 { class: "modal-title", "RPC Settings" }
+                div {
+                    class: "modal-header",
+                    h2 { class: "modal-title", "RPC Settings" }
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
+                    }
+                }
                 
                 // Show error if any
                 if let Some(error) = error_message() {
@@ -49,12 +57,12 @@ pub fn RpcModal(current_rpc: Option<String>, onclose: EventHandler<()>, onsave: 
                 
                 div { class: "modal-buttons",
                     button {
-                        class: "modal-button cancel",
+                        class: "button-standard secondary",
                         onclick: move |_| onclose.call(()),
                         "Cancel"
                     }
                     button {
-                        class: "modal-button secondary",
+                        class: "button-standard secondary",
                         onclick: move |_| {
                             testing.set(true);
                             error_message.set(None);
@@ -79,7 +87,7 @@ pub fn RpcModal(current_rpc: Option<String>, onclose: EventHandler<()>, onsave: 
                         if testing() { "Testing..." } else { "Test RPC" }
                     }
                     button {
-                        class: "modal-button primary",
+                        class: "button-standard primary",
                         onclick: move |_| {
                             onsave.call(rpc_url());
                         },

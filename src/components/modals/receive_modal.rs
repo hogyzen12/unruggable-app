@@ -51,7 +51,15 @@ pub fn ReceiveModal(
                 class: "modal-content receive-modal",
                 onclick: move |e| e.stop_propagation(),
                 
-                h2 { class: "modal-title", "Receive" }
+                div {
+                    class: "modal-header",
+                    h2 { class: "modal-title", "Receive" }
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
+                    }
+                }
                 
                 // Info message
                 div {
@@ -125,15 +133,6 @@ pub fn ReceiveModal(
                             class: "hardware-info",
                             "🔐 This is your hardware wallet address - keep your device safe!"
                         }
-                    }
-                }
-                
-                // Close button
-                div { class: "modal-buttons",
-                    button {
-                        class: "modal-button primary",
-                        onclick: move |_| onclose.call(()),
-                        "Done"
                     }
                 }
             }

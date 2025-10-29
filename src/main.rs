@@ -19,6 +19,7 @@ mod config;
 mod token_utils;
 mod squads;
 mod carrot;
+mod bonk_staking;
 mod titan;
 mod pin;
 
@@ -35,12 +36,12 @@ enum Route {
 // Android does. For apple builds use hosted resources.
 
 // For iOS/macOS builds, uncomment the remote URLs and comment out the asset! macros
-const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
-const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
+//const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
+//const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
 
 // For local/Android builds, use the asset! macro
-//const MAIN_CSS: Asset = asset!("/assets/main.css");
-//const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
+const MAIN_CSS: Asset = asset!("/assets/main.css");
+const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
 
 // ── DESKTOP (macOS/Windows/Linux) ─────────────────────────────────────────────
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
@@ -87,13 +88,13 @@ fn App() -> Element {
 
     rsx! {
         // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
-        document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        document::Link { rel: "stylesheet", href: PIN_CSS_URL }
+        //document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
+        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
+        //document::Link { rel: "stylesheet", href: PIN_CSS_URL }
         
         // For local/Android builds, use these lines (comment out for iOS/macOS)
-        //document::Link { rel: "stylesheet", href: MAIN_CSS }
-        //document::Link { rel: "stylesheet", href: PIN_CSS }
+        document::Link { rel: "stylesheet", href: MAIN_CSS }
+        document::Link { rel: "stylesheet", href: PIN_CSS }
         
         // Show PIN unlock if PIN is set and app is locked
         if is_locked() {

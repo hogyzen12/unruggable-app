@@ -291,11 +291,19 @@ pub fn SendModalWithHardware(
                     }
                 }
 
-                h2 { class: "modal-title",
-                    if hardware_wallet.is_some() {
-                        "Send SOL (Hardware Wallet)"
-                    } else {
-                        "Send SOL"
+                div {
+                    class: "modal-header",
+                    h2 { class: "modal-title",
+                        if hardware_wallet.is_some() {
+                            "Send SOL (Hardware Wallet)"
+                        } else {
+                            "Send SOL"
+                        }
+                    }
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
                     }
                 }
 
@@ -365,11 +373,6 @@ pub fn SendModalWithHardware(
                 }
 
                 div { class: "modal-buttons",
-                    button {
-                        class: "modal-button cancel",
-                        onclick: move |_| onclose.call(()),
-                        "Cancel"
-                    }
                     button {
                         class: "modal-button primary",
                         onclick: move |_| {

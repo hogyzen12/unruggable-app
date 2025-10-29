@@ -150,13 +150,13 @@ fn TransactionSuccessModal(
                         div {
                             class: "explorer-buttons",
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solana_explorer_url}",
                                 target: "_blank",
                                 "Solana Explorer"
                             }
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solscan_url}",
                                 target: "_blank",
                                 "Solscan"
@@ -168,7 +168,7 @@ fn TransactionSuccessModal(
                 div { 
                     class: "modal-buttons",
                     button {
-                        class: "modal-button primary",
+                        class: "button-standard primary",
                         onclick: move |_| onclose.call(()),
                         "Close"
                     }
@@ -317,7 +317,7 @@ pub fn CarrotModal(
         match selected_asset().as_ref() {
             "USDC" => USDC_MINT,
             "USDT" => USDT_MINT,
-            "pyUSD" => PYUSD_MINT,
+            //"pyUSD" => PYUSD_MINT,
             _ => USDC_MINT,
         }
     };
@@ -327,7 +327,7 @@ pub fn CarrotModal(
         match selected_asset().as_ref() {
             "USDC" => balances().usdc,
             "USDT" => balances().usdt,
-            "pyUSD" => balances().pyusd,
+            //"pyUSD" => balances().pyusd,
             _ => 0.0,
         }
     };
@@ -355,9 +355,17 @@ pub fn CarrotModal(
                 }
 
                 // Header
-                h2 { 
-                    class: "modal-title",
-                    "Carrot Protocol"
+                div {
+                    class: "modal-header",
+                    h2 { 
+                        class: "modal-title",
+                        "Carrot Protocol"
+                    }
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
+                    }
                 }
 
                 // Show error if any
@@ -386,7 +394,7 @@ pub fn CarrotModal(
                         div {
                             style: "display: flex; gap: 8px; margin-bottom: 16px;",
                             button {
-                                class: if selected_operation() == "deposit" { "modal-button primary" } else { "modal-button secondary" },
+                                class: if selected_operation() == "deposit" { "button-standard primary" } else { "button-standard secondary" },
                                 style: "flex: 1; padding: 8px; font-size: 13px;",
                                 onclick: move |_| {
                                     selected_operation.set("deposit");
@@ -396,7 +404,7 @@ pub fn CarrotModal(
                                 "Deposit"
                             }
                             button {
-                                class: if selected_operation() == "withdraw" { "modal-button primary" } else { "modal-button secondary" },
+                                class: if selected_operation() == "withdraw" { "button-standard primary" } else { "button-standard secondary" },
                                 style: "flex: 1; padding: 8px; font-size: 13px;",
                                 onclick: move |_| {
                                     selected_operation.set("withdraw");
@@ -421,7 +429,7 @@ pub fn CarrotModal(
                             div {
                                 style: "display: flex; gap: 6px;",
                                 button {
-                                    class: if selected_asset() == "USDC" { "modal-button primary" } else { "modal-button secondary" },
+                                    class: if selected_asset() == "USDC" { "button-standard primary" } else { "button-standard secondary" },
                                     style: "flex: 1; padding: 6px; font-size: 11px;",
                                     onclick: move |_| {
                                         selected_asset.set("USDC");
@@ -432,7 +440,7 @@ pub fn CarrotModal(
                                     "USDC"
                                 }
                                 button {
-                                    class: if selected_asset() == "USDT" { "modal-button primary" } else { "modal-button secondary" },
+                                    class: if selected_asset() == "USDT" { "button-standard primary" } else { "button-standard secondary" },
                                     style: "flex: 1; padding: 6px; font-size: 11px;",
                                     onclick: move |_| {
                                         selected_asset.set("USDT");
@@ -442,17 +450,17 @@ pub fn CarrotModal(
                                     },
                                     "USDT"
                                 }
-                                button {
-                                    class: if selected_asset() == "pyUSD" { "modal-button primary" } else { "modal-button secondary" },
-                                    style: "flex: 1; padding: 6px; font-size: 11px;",
-                                    onclick: move |_| {
-                                        selected_asset.set("pyUSD");
-                                        if selected_operation() == "deposit" {
-                                            amount_input.set(String::new());
-                                        }
-                                    },
-                                    "pyUSD"
-                                }
+                                //button {
+                                //    class: if selected_asset() == "pyUSD" { "button-standard primary" } else { "button-standard secondary" },
+                                //    style: "flex: 1; padding: 6px; font-size: 11px;",
+                                //    onclick: move |_| {
+                                //        selected_asset.set("pyUSD");
+                                //        if selected_operation() == "deposit" {
+                                //            amount_input.set(String::new());
+                                //        }
+                                //    },
+                                //    "pyUSD"
+                                //}
                             }
                             div {
                                 style: "margin-top: 4px; font-size: 10px; opacity: 0.7;",
@@ -489,7 +497,7 @@ pub fn CarrotModal(
                                     }
                                 }
                                 button {
-                                    class: "modal-button secondary",
+                                    class: "button-standard secondary",
                                     style: "padding: 8px 16px; font-size: 11px;",
                                     onclick: move |_| {
                                         let max_amount = if selected_operation() == "deposit" {
@@ -507,7 +515,7 @@ pub fn CarrotModal(
                         // Action button
                         div {
                             button {
-                                class: "modal-button primary",
+                                class: "button-standard primary",
                                 disabled: processing() || amount_input().is_empty(),
                                 style: "width: 100%; padding: 12px; font-size: 14px;",
                                 onclick: {
@@ -606,12 +614,7 @@ pub fn CarrotModal(
                                 }
                             }
                             
-                            button {
-                                class: "modal-button secondary",
-                                style: "width: 100%; margin-top: 10px;",
-                                onclick: move |_| onclose.call(()),
-                                "Close"
-                            }
+
                         }
                     }
                 }

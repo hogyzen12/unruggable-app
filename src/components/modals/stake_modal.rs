@@ -248,21 +248,21 @@ fn StakeSuccessModal(
                         div {
                             class: "explorer-buttons",
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solana_explorer_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
                                 "Solana Explorer"
                             }
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solscan_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
                                 "Solscan"
                             }
                             a {
-                                class: "explorer-button",
+                                class: "button-standard ghost",
                                 href: "{solana_fm_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
@@ -272,13 +272,7 @@ fn StakeSuccessModal(
                     }
                 }
                 
-                div { class: "modal-buttons",
-                    button {
-                        class: "modal-button primary",
-                        onclick: move |_| onclose.call(()),
-                        "Close"
-                    }
-                }
+
             }
         }
     }
@@ -434,27 +428,7 @@ pub fn StakeModal(
         }
     });
 
-    // Determine which address to show based on wallet type
-    let display_address = if let Some(hw) = &hardware_wallet {
-        let mut hw_address = use_signal(|| None as Option<String>);
 
-        let hw_clone = hardware_wallet.clone();
-        use_effect(move || {
-            if let Some(hw) = &hw_clone {
-                let hw = hw.clone();
-                spawn(async move {
-                    if let Ok(pubkey) = hw.get_public_key().await {
-                        hw_address.set(Some(pubkey));
-                    }
-                });
-            }
-        });
-        hw_address().unwrap_or_else(|| "Hardware Wallet".to_string())
-    } else if let Some(w) = &wallet {
-        w.address.clone()
-    } else {
-        "No Wallet".to_string()
-    };
 
     // Calculate total staked amount
     let total_staked = stake_accounts().iter()
@@ -533,6 +507,12 @@ pub fn StakeModal(
                             "My Staked Sol"
                         }
                     }
+                    
+                    button {
+                        class: "modal-close-button",
+                        onclick: move |_| onclose.call(()),
+                        "×"
+                    }
                 }
 
                 // Show error if any
@@ -549,11 +529,7 @@ pub fn StakeModal(
                     // Conditional content based on mode
                     if mode() == ModalMode::Stake {
                         // Original staking interface
-                        div {
-                            class: "wallet-field",
-                            label { "From Address:" }
-                            div { class: "address-display", "{display_address}" }
-                        }
+
 
                         div {
                             class: "wallet-field",
@@ -1040,15 +1016,10 @@ pub fn StakeModal(
 
                 div { 
                     class: "modal-buttons",
-                    button {
-                        class: "modal-button cancel",
-                        onclick: move |_| onclose.call(()),
-                        "Close"
-                    }
                     
                     if mode() == ModalMode::Stake {
                         button {
-                            class: "modal-button primary",
+                            class: "button-standard primary",
                             disabled: staking() || amount().is_empty() || amount().parse::<f64>().unwrap_or(0.0) < 0.01 || selected_validator().is_none(),
                             onclick: move |_| {
                                 error_message.set(None);
@@ -1123,7 +1094,7 @@ pub fn StakeModal(
                     } else {
                         if !stake_accounts().is_empty() {
                             button {
-                                class: "modal-button secondary",
+                                class: "button-standard secondary",
                                 disabled: loading_stakes(),
                                 onclick: {
                                     // Clone props outside the closure to avoid move issues

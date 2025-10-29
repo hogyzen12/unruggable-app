@@ -7,7 +7,7 @@ edition = "2021"
 [dependencies]
 # Core dependencies for all platforms
 #EDGE
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "a8230d8",  features = ["fullstack", "mobile", "router"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "a8230d8", features = ["fullstack", "mobile", "router"] }
 #ALPHA - passing all builds & bundles + device deployment
 #dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011",  features = ["fullstack", "mobile", "router"] }
 #STABLE - fails android
@@ -43,9 +43,12 @@ spl-token = "8.0.0"
 spl-associated-token-account = "7.0.0"
 solana-client = "2.3.2"
 server_fn_macro_default = "0.8.3"
-squads-v4-client = { path = "../squads-v4-client" }
-carrot-sdk = { path = "../carrot-sdk" }
+squads-v4-client = "0.1.0"
+carrot-sdk = "0.1.0"
+bonk-staking-rewards = "0.1.0"
 borsh = "1.5.7"
+axum = "0.8.6"
+dioxus-liveview = { version = "0.6.2", features = ["axum"] }
 
 # Desktop/non-mobile specific dependencies
 [target.'cfg(not(any(target_os = "android")))'.dependencies]
