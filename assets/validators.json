@@ -15418,6 +15418,19 @@
     "data_center_host": null
   },
   {
+    "account": "BULKzVM41WAyQZfL34vxqdsYwEYH9mJAJyzRS4xraf8b",
+    "keybase_name": "BULK Validator",
+    "keybase_id": null,
+    "keybase_www_url": "https://www.bulk.trade/",
+    "keybase_details": null,
+    "keybase_avatar_url": null,
+    "updated_at": "2025-08-28T03:45:05",
+    "vote_account": "BULKEEKf9Hjy4nwCthjzheEk4joH23LLXttAHjqEZmB2",
+    "autonomous_system_number": 420690,
+    "data_center": "420690-DE-Fechenheim",
+    "data_center_host": null
+  },
+  {
     "account": "6xWLi1TDSh65fWsSqE1zdvANTSuVDRMx4ghsGJwgunS8",
     "keybase_name": "Solana Validator",
     "keybase_id": "0xermes",

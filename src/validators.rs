@@ -61,6 +61,16 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             is_default: true,
         },
         ValidatorInfo {
+            identity: "BULKzVM41WAyQZfL34vxqdsYwEYH9mJAJyzRS4xraf8b".to_string(), 
+            vote_account: "BULKEEKf9Hjy4nwCthjzheEk4joH23LLXttAHjqEZmB2".to_string(),
+            name: "BULK".to_string(),
+            description: "One Exchange. Infinite Markets.".to_string(),
+            commission: 0.0,
+            active_stake: 100.0,
+            skip_rate: 0.5,
+            is_default: false,
+        },
+        ValidatorInfo {
             identity: "6xWLi1TDSh65fWsSqE1zdvANTSuVDRMx4ghsGJwgunS8".to_string(),
             vote_account: "BbM5kJgrwEj3tYFfBPnjcARB54wDUHkXmLUTkazUmt2x".to_string(),
             name: "Jito Validator".to_string(),
