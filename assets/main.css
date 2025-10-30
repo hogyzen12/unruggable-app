@@ -153,6 +153,22 @@ body {
     align-items: center;
     justify-content: center;
     font-size: 20px;
+    box-sizing: border-box;
+    position: relative;
+}
+
+/* Prevent flex from affecting absolutely positioned indicator */
+.profile-icon > .hardware-indicator {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    margin: 0 !important;
+    flex: none !important;
+    display: block !important;
 }
 
 .menu-icon {
@@ -1144,7 +1160,8 @@ body {
 /* Hardware wallet indicator styles */
 .profile-icon {
     position: relative;
-    transition: all 0.3s ease;
+    transition: transform 0.2s ease, box-shadow 0.3s ease;
+    box-sizing: border-box;
 }
 
 .profile-icon.connected {
@@ -1166,59 +1183,223 @@ body {
 .profile-icon {
     position: relative;
     cursor: pointer;
-    transition: transform 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.3s ease;
+    overflow: visible;
+    box-sizing: border-box;
 }
 
 .profile-icon.hardware-present {
     cursor: pointer;
+    animation: icon-pulse 1.5s ease-in-out infinite;
+}
+
+/* Force indicator positioning when device is detected - CATCHES ALL STATES */
+.profile-icon.hardware-present > .hardware-indicator,
+.profile-icon.hardware-present > .hardware-indicator.default,
+.profile-icon.hardware-present > .hardware-indicator.present,
+.profile-icon.hardware-present > .hardware-indicator.connected {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    margin: 0 !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    flex: none !important;
+    display: block !important;
+    transform: none !important;
+    contain: layout style paint !important;
 }
 
 .profile-icon.hardware-connected {
     cursor: default;
 }
 
+/* Force indicator positioning when device is connected - CATCHES ALL STATES */
+.profile-icon.hardware-connected > .hardware-indicator,
+.profile-icon.hardware-connected > .hardware-indicator.default,
+.profile-icon.hardware-connected > .hardware-indicator.present,
+.profile-icon.hardware-connected > .hardware-indicator.connected {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    margin: 0 !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    flex: none !important;
+    display: block !important;
+    transform: none !important;
+    contain: layout style paint !important;
+}
+
 .profile-icon:hover {
     transform: scale(1.05);
 }
 
-/* Hardware status indicator dot */
+/* Ensure indicator child doesn't inherit transforms */
+.profile-icon .hardware-indicator {
+    transform: none !important;
+}
+
+/* ABSOLUTE CATCH-ALL: Any indicator in profile-icon, any state, any time */
+.profile-icon > div.hardware-indicator,
+.profile-icon > .hardware-indicator {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    flex: none !important;
+    display: block !important;
+    transform: none !important;
+    contain: layout style paint !important;
+}
+
+/* Hardware status indicator dot - ABSOLUTELY LOCKED */
 .hardware-indicator {
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    bottom: -2px;
-    right: -2px;
-    border: 2px solid #0f0f0f;
-    transition: background-color 0.3s ease;
+    position: absolute !important;
+    width: 10px !important;
+    height: 10px !important;
+    border-radius: 50% !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    border: 2px solid #0f0f0f !important;
+    transition-property: background-color, box-shadow !important;
+    transition-duration: 0.3s, 0.3s !important;
+    transition-timing-function: ease, ease !important;
+    transition-delay: 0s, 0s !important;
+    transform: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    flex: none !important;
+    display: block !important;
+    contain: layout style paint !important;
 }
 
 /* Default state - always visible, grey when no hardware */
 .hardware-indicator.default {
-    background-color: #4b5563;  /* Grey - no device present */
+    background-color: #4b5563 !important;  /* Grey - no device present */
+}
+
+/* Nuclear option: Force positioning in default state */
+.profile-icon > .hardware-indicator.default {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    flex: none !important;
+    display: block !important;
+    transform: none !important;
 }
 
 .hardware-indicator.present {
-    background-color: #fbbf24;  /* Yellow - device present but not connected */
-    animation: pulse 2s ease-in-out infinite;
+    background-color: #fde047 !important;  /* Brighter Yellow - device present but not connected */
+    animation: pulse 1.5s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(253, 224, 71, 0.6) !important;
+}
+
+/* Nuclear option: Force positioning when both classes are present */
+.profile-icon.hardware-present > .hardware-indicator.present {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    flex: none !important;
+    display: block !important;
+    transform: none !important;
 }
 
 .hardware-indicator.connected {
-    background-color: #10b981;  /* Green - device connected */
+    background-color: #10b981 !important;  /* Green - device connected */
     animation: none;
 }
 
-/* Pulse animation for present but not connected state */
+/* Nuclear option: Force positioning when device is connected */
+.profile-icon.hardware-connected > .hardware-indicator.connected {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    flex: none !important;
+    display: block !important;
+    transform: none !important;
+}
+
+/* Pulse animation for present but not connected state - Enhanced */
 @keyframes pulse {
     0% {
-        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7);
+        box-shadow: 0 0 0 0 rgba(253, 224, 71, 0.8), 0 0 8px rgba(253, 224, 71, 0.6);
     }
-    70% {
-        box-shadow: 0 0 0 10px rgba(251, 191, 36, 0);
+    50% {
+        box-shadow: 0 0 0 8px rgba(253, 224, 71, 0.4), 0 0 12px rgba(253, 224, 71, 0.8);
     }
     100% {
-        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+        box-shadow: 0 0 0 14px rgba(253, 224, 71, 0), 0 0 8px rgba(253, 224, 71, 0.6);
     }
+}
+
+/* Pulse animation for the profile icon when hardware is present */
+@keyframes icon-pulse {
+    0% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.7;
+        transform: scale(1.15);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+/* FINAL NUCLEAR OVERRIDE: Catches transition moment from default to present */
+div.profile-icon > div.hardware-indicator,
+div.profile-icon.hardware-present > div.hardware-indicator,
+div.profile-icon.hardware-present > div.hardware-indicator.default,
+div.profile-icon.hardware-present > div.hardware-indicator.present,
+div.profile-icon.hardware-connected > div.hardware-indicator,
+div.profile-icon.hardware-connected > div.hardware-indicator.connected {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    flex: none !important;
+    display: block !important;
+    transform: none !important;
+    contain: layout style paint !important;
 }
 
 /* Hardware wallet items in dropdown */
@@ -1253,10 +1434,9 @@ body {
     background-color: #b91c1c;
 }
 
-/* Profile icon states */
+/* Profile icon states - use box-shadow instead of border to avoid layout shift */
 .profile-icon.hardware-connected {
-    border: 2px solid #10b981;
-    border-radius: 50%;
+    box-shadow: 0 0 0 2px #10b981;
 }
 
 /* Recipient balance display */
@@ -2608,9 +2788,20 @@ input:checked + .toggle-slider:before {
     margin-bottom: 4px;
 }
 
+.validator-description-text {
+    font-size: 12px;
+    color: #d1d5db;
+    margin-bottom: 6px;
+    word-break: break-all;
+    overflow-wrap: break-word;
+    line-height: 1.5;
+}
+
 .validator-stats {
     font-size: 11px;
     color: #9ca3af;
+    word-break: break-all;
+    overflow-wrap: break-word;
 }
 
 /* Field Hint for minimum stake */
@@ -3460,10 +3651,26 @@ input:checked + .toggle-slider:before {
 .profile-icon {
     position: relative;
     cursor: pointer;
-    transition: transform 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.3s ease;
     flex-shrink: 0;
     width: 32px;
     height: 32px;
+    overflow: visible;
+    box-sizing: border-box;
+}
+
+/* Prevent flex from affecting absolutely positioned indicator - mobile */
+.profile-icon > .hardware-indicator {
+    position: absolute !important;
+    top: auto !important;
+    right: -2px !important;
+    bottom: -2px !important;
+    left: auto !important;
+    align-self: initial !important;
+    justify-self: initial !important;
+    margin: 0 !important;
+    flex: none !important;
+    display: block !important;
 }
 
 .profile-icon img {
@@ -3495,43 +3702,6 @@ input:checked + .toggle-slider:before {
     content: '☰';
     color: white;
     font-size: 16px;
-}
-
-.hardware-indicator {
-    position: absolute;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    bottom: -1px;
-    right: -1px;
-    border: 1px solid #0f0f0f;
-    transition: background-color 0.3s ease;
-}
-
-.hardware-indicator.default {
-    background-color: #4b5563;
-}
-
-.hardware-indicator.present {
-    background-color: #fbbf24;
-    animation: pulse 2s ease-in-out infinite;
-}
-
-.hardware-indicator.connected {
-    background-color: #10b981;
-    animation: none;
-}
-
-@keyframes pulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.7);
-    }
-    70% {
-        box-shadow: 0 0 0 6px rgba(251, 191, 36, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
-    }
 }
 
 /* Clean fix for Send Modal field sizing - replace existing rules */
@@ -7489,6 +7659,14 @@ body:has(.token-item-selected) .token-item:hover {
     justify-content: center;
     gap: 8px;
     white-space: nowrap;
+}
+
+/* Allow wrapping for full-width buttons in modals */
+.modal-content .button-standard[style*="width: 100%"],
+.stake-modal .button-standard[style*="width: 100%"] {
+    white-space: normal;
+    text-align: center;
+    min-height: 48px;
 }
 
 /* Primary variant - main action buttons */

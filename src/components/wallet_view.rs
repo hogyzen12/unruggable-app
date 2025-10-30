@@ -1153,6 +1153,7 @@ pub fn WalletView() -> Element {
                         }
                         classes
                     },
+                    style: "position: relative; overflow: visible;",
                     onclick: move |e| {
                         e.stop_propagation();
                         if hardware_device_present() {
@@ -1165,15 +1166,16 @@ pub fn WalletView() -> Element {
                     }
                     div {
                         class: {
-                            let indicator_class = if hardware_connected() { 
-                                "hardware-indicator connected" 
-                            } else if hardware_device_present() { 
-                                "hardware-indicator present" 
+                            let indicator_class = if hardware_connected() {
+                                "hardware-indicator connected"
+                            } else if hardware_device_present() {
+                                "hardware-indicator present"
                             } else {
                                 "hardware-indicator default"
                             };
                             indicator_class.to_string()
-                        }
+                        },
+                        style: "position: absolute !important; top: auto !important; right: -2px !important; bottom: -2px !important; left: auto !important; margin: 0 !important; padding: 0 !important; display: block !important; transform: none !important; transition: background-color 0.3s ease, box-shadow 0.3s ease !important; transition-property: background-color, box-shadow !important;"
                     }
                 }
 
