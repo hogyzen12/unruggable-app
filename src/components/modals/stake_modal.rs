@@ -478,15 +478,7 @@ pub fn StakeModal(
                 // Header with toggle
                 div {
                     class: "modal-header-with-toggle",
-                    h2 { 
-                        class: "modal-title",
-                        if mode() == ModalMode::Stake {
-                            "Stake SOL"
-                        } else {
-                            "My Staked Sol"
-                        }
-                    }
-                    
+
                     div {
                         class: "mode-toggle",
                         button {
@@ -663,26 +655,6 @@ pub fn StakeModal(
                         // My Stakes interface with modern UI
                         div {
                             class: "stakes-overview-modern",
-                            
-                            // Compact summary header (replaces the old stakes-summary grid)
-                            div {
-                                class: "stakes-summary-compact",
-                                span { class: "summary-label", "TOTAL STAKED" }
-                                span { class: "summary-value", "{total_staked:.6} SOL" }
-                                span { class: "summary-label", "STAKE ACCOUNTS" }
-                                span { class: "summary-count", "{stake_accounts().len()}" }
-                            }
-
-                            // Merge info (only show if merges available)
-                            if !merge_groups().is_empty() {
-                                div {
-                                    class: "merge-simple-section",
-                                    div {
-                                        class: "merge-simple-info",
-                                        "🔗 Found {merge_groups().len()} merge opportunities to consolidate your stake accounts"
-                                    }
-                                }
-                            }
 
                             // Loading state (preserved)
                             if loading_stakes() {
@@ -709,12 +681,44 @@ pub fn StakeModal(
                                         "You don't have any active stake accounts yet. Switch to 'Stake SOL' to create your first stake account."
                                     }
                                 }
-                            } 
+                            }
                             // Modern stake accounts list
                             else {
+                                // Summary Section
+                                div {
+                                    class: "stakes-summary-section",
+                                    div {
+                                        class: "stakes-summary-title",
+                                        "Total Staked"
+                                    }
+                                    div {
+                                        class: "stakes-summary-amount",
+                                        {
+                                            let total_staked: f64 = stake_accounts()
+                                                .iter()
+                                                .map(|account| (account.balance.saturating_sub(account.rent_exempt_reserve)) as f64 / 1_000_000_000.0)
+                                                .sum();
+                                            format!("{:.5} SOL", total_staked)
+                                        }
+                                    }
+                                    div {
+                                        class: "stakes-summary-accounts",
+                                        "Stake Accounts: {stake_accounts().len()}"
+                                    }
+                                }
+
+                                // Merge info (only show if merges available)
+                                // COMMENTED OUT: Merge feature disabled for now
+                                // if !merge_groups().is_empty() {
+                                //     div {
+                                //         class: "merge-info-banner",
+                                //         "🔗 {merge_groups().len()} merge opportunities available"
+                                //     }
+                                // }
+
                                 div {
                                     class: "stakes-list-modern",
-                                    
+
                                     for account in stake_accounts() {
                                         div {
                                             key: "{account.pubkey}",
@@ -1092,68 +1096,9 @@ pub fn StakeModal(
                             }
                         }
                     } else {
-                        if !stake_accounts().is_empty() {
-                            button {
-                                class: "button-standard secondary",
-                                disabled: loading_stakes(),
-                                onclick: {
-                                    // Clone props outside the closure to avoid move issues
-                                    let wallet_for_refresh = wallet.clone();
-                                    let hardware_wallet_for_refresh = hardware_wallet.clone();
-                                    let custom_rpc_for_refresh = custom_rpc.clone();
-                                    
-                                    move |_| {
-                                        // Manually trigger refresh
-                                        loading_stakes.set(true);
-                                        error_message.set(None);
-                        
-                                        let wallet_clone = wallet_for_refresh.clone();
-                                        let hardware_wallet_clone = hardware_wallet_for_refresh.clone();
-                                        let custom_rpc_clone = custom_rpc_for_refresh.clone();
-                        
-                                        spawn(async move {
-                                            // Get wallet address
-                                            let wallet_address = if let Some(hw) = &hardware_wallet_clone {
-                                                match hw.get_public_key().await {
-                                                    Ok(addr) => addr,
-                                                    Err(e) => {
-                                                        error_message.set(Some(format!("Failed to get hardware wallet address: {}", e)));
-                                                        loading_stakes.set(false);
-                                                        return;
-                                                    }
-                                                }
-                                            } else if let Some(w) = &wallet_clone {
-                                                w.address.clone()
-                                            } else {
-                                                error_message.set(Some("No wallet available".to_string()));
-                                                loading_stakes.set(false);
-                                                return;
-                                            };
-                        
-                                            // Scan for stake accounts
-                                            match staking::scan_stake_accounts(&wallet_address, custom_rpc_clone.as_deref()).await {
-                                                Ok(accounts) => {
-                                                    println!("✅ Refreshed: Found {} stake accounts", accounts.len());
-                                                    stake_accounts.set(accounts);
-                                                    loading_stakes.set(false);
-                                                }
-                                                Err(e) => {
-                                                    println!("❌ Refresh error: {}", e);
-                                                    error_message.set(Some(format!("Failed to refresh: {}", e)));
-                                                    loading_stakes.set(false);
-                                                }
-                                            }
-                                        });
-                                    }
-                                },
-                                if loading_stakes() {
-                                    "🔄 Refreshing..."
-                                } else {
-                                    "🔄 Refresh"
-                                }
-                            }
-                        }
-                        if mode() == ModalMode::MyStakes && !merge_groups().is_empty() {
+                        // COMMENTED OUT: Merge button disabled for now
+                        // Show merge button at bottom for My Staked Sol view
+                        if false && mode() == ModalMode::MyStakes && !merge_groups().is_empty() {
                             button {
                                 class: "modal-button merge-simple",
                                 disabled: merging(),

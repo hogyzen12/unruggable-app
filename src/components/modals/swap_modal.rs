@@ -17,6 +17,8 @@ use solana_sdk::{
 use crate::titan::{TitanClient, build_transaction_from_route};
 use crate::titan::SwapRoute as TitanSwapRoute;
 
+const ICON_SWITCH: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/SWITCH.svg";
+
 /// Sign a Jupiter Ultra transaction using the provided signer
 async fn sign_jupiter_transaction(
     signer: &dyn TransactionSigner,
@@ -1333,27 +1335,27 @@ pub fn SwapModal(
                 class: "modal-content swap-modal-v2",
                 onclick: move |e| e.stop_propagation(),
                 style: "
-                    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+                    background: #2C2C2C;
                     border-radius: 20px;
                     padding: 0;
                     width: min(420px, calc(100vw - 32px));
                     max-width: 420px;
-                    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-                    border: 1px solid rgba(148, 163, 184, 0.15);
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
                     overflow: hidden;
                     margin: 16px auto;
                 ",
                 
                 // Modal header
-                div { 
+                div {
                     class: "swap-header-v2",
                     style: "
                         display: flex;
                         justify-content: space-between;
                         align-items: center;
                         padding: 24px;
-                        border-bottom: 1px solid rgba(148, 163, 184, 0.15);
-                        background: rgba(15, 23, 42, 0.4);
+                        border-bottom: none;
+                        background: transparent;
                     ",
                     h2 { 
                         class: "swap-title-v2",
@@ -1369,16 +1371,16 @@ pub fn SwapModal(
                     button {
                         class: "swap-close-button-v2",
                         style: "
-                            background: rgba(30, 41, 59, 0.6);
-                            border: 1px solid rgba(148, 163, 184, 0.2);
-                            color: #cbd5e1;
-                            font-size: 20px;
+                            background: none;
+                            border: none;
+                            color: white;
+                            font-size: 28px;
                             cursor: pointer;
                             padding: 0;
-                            border-radius: 10px;
+                            border-radius: 0;
                             transition: all 0.2s ease;
-                            min-width: 44px;
-                            min-height: 44px;
+                            min-width: 32px;
+                            min-height: 32px;
                             display: flex;
                             align-items: center;
                             justify-content: center;
@@ -1393,14 +1395,14 @@ pub fn SwapModal(
                     div {
                         class: "error-message",
                         style: "
-                            padding: 16px;
-                            background-color: rgba(127, 29, 29, 0.2);
-                            border: 1px solid rgba(220, 38, 38, 0.4);
+                            padding: 12px 16px;
+                            background-color: rgba(220, 38, 38, 0.1);
+                            border: 1px solid #dc2626;
                             color: #fca5a5;
-                            border-radius: 12px;
+                            border-radius: 10px;
                             margin: 16px 24px;
-                            font-size: 14px;
-                            line-height: 1.5;
+                            font-size: 13px;
+                            text-align: center;
                         ",
                         "{error}"
                     }
@@ -1436,9 +1438,9 @@ pub fn SwapModal(
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            background: rgba(15, 23, 42, 0.8);
-                            border: 2px solid rgba(99, 102, 241, 0.2);
-                            border-radius: 16px;
+                            background: #1a1a1a;
+                            border: 1.5px solid #4a4a4a;
+                            border-radius: 12px;
                             padding: 20px;
                             gap: 16px;
                             transition: border-color 0.2s ease;
@@ -1457,8 +1459,8 @@ pub fn SwapModal(
                             select {
                                 class: "swap-token-picker",
                                 style: "
-                                    background: rgba(30, 41, 59, 0.9);
-                                    border: 1px solid rgba(148, 163, 184, 0.3);
+                                    background: #2a2a2a;
+                                    border: 1px solid #5a5a5a;
                                     border-radius: 10px;
                                     color: #ffffff;
                                     font-size: 17px;
@@ -1550,8 +1552,8 @@ pub fn SwapModal(
                     button {
                         class: "swap-arrow-button",
                         style: "
-                            background: linear-gradient(135deg, #374151 0%, #1f2937 100%);
-                            border: 2px solid rgba(99, 102, 241, 0.3);
+                            background: #3a3a3a;
+                            border: 1.5px solid #5a5a5a;
                             border-radius: 50%;
                             min-width: 48px;
                             min-height: 48px;
@@ -1566,7 +1568,11 @@ pub fn SwapModal(
                             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
                         ",
                         onclick: handle_token_swap,
-                        "↕"
+                        img {
+                            src: "{ICON_SWITCH}",
+                            alt: "Switch",
+                            style: "width: 24px; height: 24px; transform: rotate(90deg); filter: brightness(0) invert(1);"
+                        }
                     }
                 }
                 
@@ -1600,9 +1606,9 @@ pub fn SwapModal(
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            background: rgba(15, 23, 42, 0.8);
-                            border: 2px solid rgba(148, 163, 184, 0.15);
-                            border-radius: 16px;
+                            background: #1a1a1a;
+                            border: 1.5px solid #4a4a4a;
+                            border-radius: 12px;
                             padding: 20px;
                             gap: 16px;
                         ",
@@ -1620,8 +1626,8 @@ pub fn SwapModal(
                             select {
                                 class: "swap-token-picker",
                                 style: "
-                                    background: rgba(30, 41, 59, 0.9);
-                                    border: 1px solid rgba(148, 163, 184, 0.3);
+                                    background: #2a2a2a;
+                                    border: 1px solid #5a5a5a;
                                     border-radius: 10px;
                                     color: #ffffff;
                                     font-size: 17px;
@@ -1698,9 +1704,9 @@ pub fn SwapModal(
                 div {
                     class: "swap-rate-section",
                     style: "
-                        background: rgba(15, 23, 42, 0.6);
+                        background: #1a1a1a;
                         border-radius: 12px;
-                        border: 1px solid rgba(148, 163, 184, 0.15);
+                        border: 1.5px solid #4a4a4a;
                         padding: 16px;
                         margin: 0 24px 20px;
                     ",
@@ -1714,11 +1720,11 @@ pub fn SwapModal(
                                 padding: 6px 14px;
                                 border-radius: 8px;
                                 font-size: 13px;
-                                font-weight: 700;
+                                font-weight: 600;
                                 margin-bottom: 12px;
-                                background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+                                background: #3a3a3a;
                                 color: #ffffff;
-                                box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+                                border: 1px solid #5a5a5a;
                             ",
                             "Best rate from {provider}"
                         }
@@ -1792,16 +1798,18 @@ pub fn SwapModal(
                         style: "
                             width: 100%;
                             padding: 18px 24px;
-                            border-radius: 14px;
+                            border-radius: 12px;
                             border: none;
                             cursor: pointer;
-                            font-size: 18px;
+                            font-size: 16px;
                             font-weight: 700;
+                            text-transform: uppercase;
+                            letter-spacing: 0.5px;
                             transition: all 0.2s ease;
-                            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-                            color: white;
+                            background: white;
+                            color: #1a1a1a;
                             min-height: 56px;
-                            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
+                            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
                         ",
                         disabled: swapping() || selling_amount().is_empty() || fetching_order(),
                         onclick: handle_swap,

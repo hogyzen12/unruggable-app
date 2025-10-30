@@ -604,7 +604,7 @@ pub fn SquadsModal(
                                                 
                                                 // Pending Transactions inline
                                                 div {
-                                                    style: "margin-top: 20px; padding-top: 20px; border-top: 1px solid #374151;",
+                                                    style: "margin-top: 20px; padding-top: 20px; border-top: 1px solid #3a3a3a;",
                                                     
                                                     div {
                                                         class: "validator-name-modern",
@@ -626,7 +626,7 @@ pub fn SquadsModal(
                                                                         for tx in pending_txs.clone() {
                                                                             div {
                                                                 key: "{tx.transaction}",
-                                                                style: "margin-top: 15px; padding: 15px; background: rgba(59, 130, 246, 0.1); border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.3);",
+                                                                style: "margin-top: 15px; padding: 15px; background: #1a1a1a; border-radius: 12px; border: 1.5px solid #4a4a4a;",
                                                                 
                                                                 div {
                                                                     class: "validator-name-modern",
@@ -656,7 +656,7 @@ pub fn SquadsModal(
                                                                         button {
                                                                             class: "button-standard primary",
                                                                             disabled: approving(),
-                                                                            style: "width: 100%; background: #10b981;",
+                                                                            style: "width: 100%; background: white; color: #1a1a1a; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 12px; padding: 14px 24px;",
                                                                             onclick: {
                                                                                 let tx_index = tx.transaction_index;
                                                                                 let multisig_addr = tx.multisig;
@@ -719,14 +719,14 @@ pub fn SquadsModal(
                                                                         }
                                                                     } else if tx.has_approved {
                                                                         div {
-                                                                            style: "color: #22c55e; font-weight: 600;",
+                                                                            style: "color: #9ca3af; font-weight: 600; text-align: center; padding: 12px; background: #2a2a2a; border-radius: 8px;",
                                                                             "✓ You have approved"
                                                                         }
                                                                     } else {
                                                                         button {
                                                                             class: "button-standard primary",
                                                                             disabled: approving(),
-                                                                            style: "width: 100%;",
+                                                                            style: "width: 100%; background: white; color: #1a1a1a; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 12px; padding: 14px 24px;",
                                                                             onclick: {
                                                                                 let tx_index = tx.transaction_index;
                                                                                 let multisig_addr = tx.multisig;

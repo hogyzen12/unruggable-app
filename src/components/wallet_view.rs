@@ -88,8 +88,14 @@ const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
 const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/jupLendLogo.svg";
 const ICON_SQUADS: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/squadsLogo.svg";
-const ICON_CARROT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/carrotLogo.svg";
-const ICON_BONK_STAKE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bonkLogo.svg";
+const ICON_CARROT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/CARROT.svg";
+const ICON_BONK_STAKE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/BONK.svg";
+const ICON_WALLET: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/WALLETS.svg";
+const ICON_CREATE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ADD_wallet.svg";
+const ICON_IMPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/IMPORT_wallet.svg";
+const ICON_EXPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/EXPORT_wallet.svg";
+const ICON_DELETE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/DELETE_wallet.svg";
+const ICON_RPC: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/RPC.svg";
 
 const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
 const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
@@ -1314,7 +1320,11 @@ pub fn WalletView() -> Element {
                                 },
                                 div {
                                     class: "dropdown-icon",
-                                    "💗"
+                                    img {
+                                        src: "{ICON_WALLET}",
+                                        alt: "Wallet",
+                                        style: "width: 24px; height: 24px;"
+                                    }
                                 }
                                 div {
                                     class: "wallet-info",
@@ -1369,7 +1379,11 @@ pub fn WalletView() -> Element {
                             },
                             div {
                                 class: "dropdown-icon action-icon",
-                                "+"
+                                img {
+                                    src: "{ICON_CREATE}",
+                                    alt: "Import",
+                                    style: "width: 24px; height: 24px;"
+                                }
                             }
                             "Create Wallet"
                         }
@@ -1383,7 +1397,11 @@ pub fn WalletView() -> Element {
                             },
                             div {
                                 class: "dropdown-icon action-icon",
-                                "📥"
+                                img {
+                                    src: "{ICON_IMPORT}",
+                                    alt: "Import",
+                                    style: "width: 24px; height: 24px;"
+                                }
                             }
                             "Import Wallet"
                         }
@@ -1397,7 +1415,11 @@ pub fn WalletView() -> Element {
                                 },
                                 div {
                                     class: "dropdown-icon action-icon",
-                                    "📤"
+                                    img {
+                                        src: "{ICON_EXPORT}",
+                                        alt: "Export",
+                                        style: "width: 24px; height: 24px;"
+                                    }
                                 }
                                 "Export Wallet"
                             }
@@ -1413,7 +1435,11 @@ pub fn WalletView() -> Element {
                                 },
                                 div {
                                     class: "dropdown-icon action-icon danger",
-                                    "🗑️"
+                                    img {
+                                        src: "{ICON_DELETE}",
+                                        alt: "Delete",
+                                        style: "width: 24px; height: 24px;"
+                                    }
                                 }
                                 "Delete Wallet"
                             }
@@ -1444,23 +1470,27 @@ pub fn WalletView() -> Element {
                             },
                             div {
                                 class: "dropdown-icon action-icon",
-                                "🔗"
+                                img {
+                                    src: "{ICON_RPC}",
+                                    alt: "RPC",
+                                    style: "width: 24px; height: 24px;"
+                                }
                             }
                             "RPC Settings"
                         }
                 
-                        button {
-                            class: "dropdown-item",
-                            onclick: move |_| {
-                                show_background_modal.set(true);
-                                show_dropdown.set(false);
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                "🎨"
-                            }
-                            "Change Background"
-                        }
+                        //button {
+                        //    class: "dropdown-item",
+                        //    onclick: move |_| {
+                        //        show_background_modal.set(true);
+                        //        show_dropdown.set(false);
+                        //    },
+                        //    div {
+                        //        class: "dropdown-icon action-icon",
+                        //        "🎨"
+                        //    }
+                        //    "Change Background"
+                        //}
 
                         //button {
                         //    class: "dropdown-item",
@@ -2196,7 +2226,7 @@ pub fn WalletView() -> Element {
                                 div {
                                     class: "action-icon-segmented",
                                     img { 
-                                        src: "{ICON_BONK}",
+                                        src: "{ICON_BONK_STAKE}",
                                         alt: "BONK Stake"
                                     }
                                 }

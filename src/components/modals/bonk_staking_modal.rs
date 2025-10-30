@@ -79,7 +79,7 @@ pub fn BonkStakingModal(
     let wallet_address = use_signal(|| wallet.as_ref().map(|w| w.address.clone()));
     
     // State management
-    let mut selected_mode = use_signal(|| "view".to_string()); // "view" or "stake"
+    let mut selected_mode = use_signal(|| "stake".to_string()); // "view" or "stake" - default to stake page
     let mut amount = use_signal(|| "".to_string());
     let mut selected_duration = use_signal(|| 30u64);
     let mut processing = use_signal(|| false);
@@ -188,11 +188,42 @@ pub fn BonkStakingModal(
                     }
                 }
                 
+                // Header
                 div {
-                    class: "modal-header",
-                    h2 { class: "modal-title", "BONK Staking" }
+                    style: "
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 24px;
+                        border-bottom: none;
+                        background: transparent;
+                    ",
+                    h2 {
+                        style: "
+                            color: #f8fafc;
+                            font-size: 22px;
+                            font-weight: 700;
+                            margin: 0;
+                            letter-spacing: -0.025em;
+                        ",
+                        "BONK Staking"
+                    }
                     button {
-                        class: "modal-close-button",
+                        style: "
+                            background: none;
+                            border: none;
+                            color: white;
+                            font-size: 28px;
+                            cursor: pointer;
+                            padding: 0;
+                            border-radius: 0;
+                            transition: all 0.2s ease;
+                            min-width: 32px;
+                            min-height: 32px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        ",
                         onclick: move |_| onclose.call(()),
                         "×"
                     }
@@ -203,24 +234,23 @@ pub fn BonkStakingModal(
                 }
                 
                 div { class: "modal-body",
-                    
-                    // Mode selector
+
+                    // Mode toggle
                     div {
-                        style: "display: flex; gap: 8px; margin-bottom: 16px;",
+                        class: "mode-toggle",
+                        style: "margin-bottom: 16px;",
                         button {
-                            class: if selected_mode() == "view" { "button-standard primary" } else { "button-standard secondary" },
-                            style: "flex: 1; padding: 10px; font-size: 14px;",
+                            class: if selected_mode() == "view" { "toggle-button active" } else { "toggle-button" },
                             onclick: move |_| selected_mode.set("view".to_string()),
                             "My Positions"
                         }
                         button {
-                            class: if selected_mode() == "stake" { "button-standard primary" } else { "button-standard secondary" },
-                            style: "flex: 1; padding: 10px; font-size: 14px;",
+                            class: if selected_mode() == "stake" { "toggle-button active" } else { "toggle-button" },
                             onclick: move |_| selected_mode.set("stake".to_string()),
                             "Stake BONK"
                         }
                     }
-                    
+
                     // View Mode - Positions
                     if selected_mode() == "view" {
                         if fetching_stakes() {
@@ -231,14 +261,14 @@ pub fn BonkStakingModal(
                                 div {
                                     style: "display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;",
                                     div {
-                                        style: "background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px;",
-                                        div { style: "font-size: 11px; opacity: 0.7; margin-bottom: 4px;", "Total Locked" }
-                                        div { style: "font-size: 20px; font-weight: 600;", "{total_locked:.2} BONK" }
+                                        style: "background: #1a1a1a; border: 1.5px solid #4a4a4a; border-radius: 12px; padding: 16px;",
+                                        div { style: "font-size: 11px; color: #9ca3af; margin-bottom: 4px;", "Total Locked" }
+                                        div { style: "font-size: 20px; font-weight: 600; color: white;", "{total_locked:.2} BONK" }
                                     }
                                     div {
-                                        style: "background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px;",
-                                        div { style: "font-size: 11px; opacity: 0.7; margin-bottom: 4px;", "Claimable" }
-                                        div { style: "font-size: 20px; font-weight: 600; color: #22c55e;", "{total_claimable:.2} BONK" }
+                                        style: "background: #1a1a1a; border: 1.5px solid #4a4a4a; border-radius: 12px; padding: 16px;",
+                                        div { style: "font-size: 11px; color: #9ca3af; margin-bottom: 4px;", "Claimable" }
+                                        div { style: "font-size: 20px; font-weight: 600; color: white;", "{total_claimable:.2} BONK" }
                                     }
                                 }
                                 
@@ -246,7 +276,7 @@ pub fn BonkStakingModal(
                                 if total_claimable > 0.0 {
                                     button {
                                         class: "button-standard primary",
-                                        style: "width: 100%; margin-bottom: 20px;",
+                                        style: "width: 100%; margin-bottom: 20px; background: white; color: #1a1a1a; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 12px; padding: 14px 24px;",
                                         disabled: processing(),
                                         onclick: move |_| {
                                             processing.set(true);
@@ -270,27 +300,27 @@ pub fn BonkStakingModal(
                                         for stake in active_stakes() {
                                             div {
                                                 key: "{stake.unlock_time}",
-                                                style: "background: rgba(255,255,255,0.03); border-radius: 12px; padding: 16px; margin-bottom: 12px; border: 1px solid rgba(255,255,255,0.1);",
+                                                style: "background: #1a1a1a; border: 1.5px solid #4a4a4a; border-radius: 12px; padding: 16px; margin-bottom: 12px;",
                                                 div {
                                                     style: "display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;",
                                                     div {
-                                                        div { style: "font-size: 18px; font-weight: 600;", "{stake.amount:.2} BONK" }
-                                                        div { style: "font-size: 11px; opacity: 0.6; margin-top: 2px;", "{stake.duration_days} days" }
+                                                        div { style: "font-size: 18px; font-weight: 600; color: white;", "{stake.amount:.2} BONK" }
+                                                        div { style: "font-size: 11px; color: #9ca3af; margin-top: 2px;", "{stake.duration_days} days" }
                                                     }
                                                     div {
-                                                        style: if stake.is_unlocked { "background: #22c55e; color: white; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 600;" } else { "background: rgba(255,255,255,0.1); padding: 4px 12px; border-radius: 20px; font-size: 11px;" },
+                                                        style: if stake.is_unlocked { "background: #3a3a3a; color: white; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; border: 1px solid #5a5a5a;" } else { "background: #2a2a2a; padding: 6px 12px; border-radius: 8px; font-size: 11px; border: 1px solid #4a4a4a;" },
                                                         if stake.is_unlocked { "Unlocked" } else { "Locked" }
                                                     }
                                                 }
                                                 div {
                                                     style: "display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px;",
                                                     div {
-                                                        div { style: "opacity: 0.6; margin-bottom: 2px;", "Multiplier" }
-                                                        div { style: "font-weight: 600;", "{stake.multiplier}x" }
+                                                        div { style: "color: #9ca3af; margin-bottom: 2px;", "Multiplier" }
+                                                        div { style: "font-weight: 600; color: white;", "{stake.multiplier}x" }
                                                     }
                                                     div {
-                                                        div { style: "opacity: 0.6; margin-bottom: 2px;", "Unlock Time" }
-                                                        div { style: "font-weight: 600;", "{stake.unlock_time}" }
+                                                        div { style: "color: #9ca3af; margin-bottom: 2px;", "Unlock Time" }
+                                                        div { style: "font-weight: 600; color: white;", "{stake.unlock_time}" }
                                                     }
                                                 }
                                             }
@@ -309,15 +339,15 @@ pub fn BonkStakingModal(
                             div {
                                 // Available balance
                                 div {
-                                    style: "background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px; margin-bottom: 16px;",
-                                    div { style: "font-size: 11px; opacity: 0.7; margin-bottom: 4px;", "Available Balance" }
-                                    div { style: "font-size: 20px; font-weight: 600;", "{bonk_balance:.2} BONK" }
+                                    style: "background: #1a1a1a; border: 1.5px solid #4a4a4a; border-radius: 12px; padding: 16px; margin-bottom: 16px;",
+                                    div { style: "font-size: 11px; color: #9ca3af; margin-bottom: 4px;", "Available Balance" }
+                                    div { style: "font-size: 20px; font-weight: 600; color: white;", "{bonk_balance:.2} BONK" }
                                 }
                                 
                                 // Amount input
                                 div {
                                     style: "margin-bottom: 16px;",
-                                    label { style: "display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600;", "Amount to Stake:" }
+                                    label { style: "display: block; margin-bottom: 10px; color: #9ca3af; font-size: 13px; font-weight: 500;", "Amount to Stake:" }
                                     div {
                                         style: "display: flex; gap: 6px;",
                                         input {
@@ -333,7 +363,7 @@ pub fn BonkStakingModal(
                                         }
                                         button {
                                             class: "button-standard secondary",
-                                            style: "padding: 8px 16px; font-size: 11px;",
+                                            style: "padding: 10px 16px; font-size: 11px; background: #3a3a3a; color: white; border: 1px solid #5a5a5a; border-radius: 8px; font-weight: 600;",
                                             onclick: move |_| amount.set(format!("{:.2}", bonk_balance())),
                                             "Max"
                                         }
@@ -343,7 +373,7 @@ pub fn BonkStakingModal(
                                 // Lock duration selector (improved cards)
                                 div {
                                     style: "margin-bottom: 16px;",
-                                    label { style: "display: block; margin-bottom: 8px; font-size: 12px; font-weight: 600;", "Select Lock Duration:" }
+                                    label { style: "display: block; margin-bottom: 10px; color: #9ca3af; font-size: 13px; font-weight: 500;", "Select Lock Duration:" }
                                     div {
                                         style: "display: grid; grid-template-columns: 1fr 1fr; gap: 8px;",
                                         for (days, label, multiplier) in duration_options {
@@ -351,8 +381,8 @@ pub fn BonkStakingModal(
                                                 key: "{days}",
                                                 class: if selected_duration() == days { "duration-card-selected" } else { "duration-card" },
                                                 onclick: move |_| selected_duration.set(days),
-                                                div { style: "font-size: 16px; font-weight: 600; margin-bottom: 4px;", "{label}" }
-                                                div { style: "font-size: 11px; opacity: 0.7;", "{multiplier}x weight" }
+                                                div { style: "font-size: 16px; font-weight: 600; color: white; margin-bottom: 4px;", "{label}" }
+                                                div { style: "font-size: 11px; color: #9ca3af;", "{multiplier}x weight" }
                                             }
                                         }
                                     }
@@ -371,11 +401,11 @@ pub fn BonkStakingModal(
                                         
                                         rsx! {
                                             div {
-                                                style: "background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px; margin-bottom: 16px;",
-                                                h4 { style: "font-size: 14px; margin-bottom: 12px;", "Stake Summary" }
-                                                div { style: "display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px;", span { "Amount:" } span { "{amt:.2} BONK" } }
-                                                div { style: "display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px;", span { "Duration:" } span { "{duration} days" } }
-                                                div { style: "display: flex; justify-content: space-between; font-size: 13px; font-weight: 600;", span { "Weight Multiplier:" } span { style: "color: #22c55e;", "{multiplier}x" } }
+                                                style: "background: #1a1a1a; border: 1.5px solid #4a4a4a; border-radius: 12px; padding: 16px; margin-bottom: 16px;",
+                                                h4 { style: "font-size: 14px; margin-bottom: 12px; color: white;", "Stake Summary" }
+                                                div { style: "display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; color: white;", span { "Amount:" } span { "{amt:.2} BONK" } }
+                                                div { style: "display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 13px; color: white;", span { "Duration:" } span { "{duration} days" } }
+                                                div { style: "display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; color: white;", span { "Weight Multiplier:" } span { "{multiplier}x" } }
                                             }
                                         }
                                     } else {
@@ -386,7 +416,7 @@ pub fn BonkStakingModal(
                                 // Stake button
                                 button {
                                     class: "button-standard primary",
-                                    style: "width: 100%; padding: 12px; font-size: 14px;",
+                                    style: "width: 100%; background: white; color: #1a1a1a; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 12px; padding: 14px 24px;",
                                     disabled: processing() || amount().is_empty(),
                                     onclick: {
                                         let wallet_c = wallet.clone();

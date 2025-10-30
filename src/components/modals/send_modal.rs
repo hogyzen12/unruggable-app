@@ -292,16 +292,44 @@ pub fn SendModalWithHardware(
                 }
 
                 div {
-                    class: "modal-header",
-                    h2 { class: "modal-title",
+                    style: "
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 24px;
+                        border-bottom: none;
+                        background: transparent;
+                    ",
+                    h2 {
+                        style: "
+                            color: #f8fafc;
+                            font-size: 22px;
+                            font-weight: 700;
+                            margin: 0;
+                            letter-spacing: -0.025em;
+                        ",
                         if hardware_wallet.is_some() {
-                            "Send SOL (Hardware Wallet)"
+                            "Send SOL"
                         } else {
                             "Send SOL"
                         }
                     }
                     button {
-                        class: "modal-close-button",
+                        style: "
+                            background: none;
+                            border: none;
+                            color: white;
+                            font-size: 28px;
+                            cursor: pointer;
+                            padding: 0;
+                            border-radius: 0;
+                            transition: all 0.2s ease;
+                            min-width: 32px;
+                            min-height: 32px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        ",
                         onclick: move |_| onclose.call(()),
                         "×"
                     }
@@ -313,12 +341,6 @@ pub fn SendModalWithHardware(
                         class: "error-message",
                         "{error}"
                     }
-                }
-
-                div {
-                    class: "wallet-field",
-                    label { "From Address:" }
-                    div { class: "address-display", "{display_address}" }
                 }
 
                 div {

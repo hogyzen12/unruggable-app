@@ -356,13 +356,40 @@ pub fn CarrotModal(
 
                 // Header
                 div {
-                    class: "modal-header",
-                    h2 { 
-                        class: "modal-title",
+                    style: "
+                        display: flex;
+                        justify-content: space-between;
+                        align-items: center;
+                        padding: 24px;
+                        border-bottom: none;
+                        background: transparent;
+                    ",
+                    h2 {
+                        style: "
+                            color: #f8fafc;
+                            font-size: 22px;
+                            font-weight: 700;
+                            margin: 0;
+                            letter-spacing: -0.025em;
+                        ",
                         "Carrot Protocol"
                     }
                     button {
-                        class: "modal-close-button",
+                        style: "
+                            background: none;
+                            border: none;
+                            color: white;
+                            font-size: 28px;
+                            cursor: pointer;
+                            padding: 0;
+                            border-radius: 0;
+                            transition: all 0.2s ease;
+                            min-width: 32px;
+                            min-height: 32px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                        ",
                         onclick: move |_| onclose.call(()),
                         "×"
                     }
@@ -388,14 +415,12 @@ pub fn CarrotModal(
                         }
                     }
                     else {
-                        // Mobile-optimized vertical layout
-                        
-                        // Operation selector (Deposit/Withdraw)
+                        // Operation toggle
                         div {
-                            style: "display: flex; gap: 8px; margin-bottom: 16px;",
+                            class: "mode-toggle",
+                            style: "margin-bottom: 16px;",
                             button {
-                                class: if selected_operation() == "deposit" { "button-standard primary" } else { "button-standard secondary" },
-                                style: "flex: 1; padding: 8px; font-size: 13px;",
+                                class: if selected_operation() == "deposit" { "toggle-button active" } else { "toggle-button" },
                                 onclick: move |_| {
                                     selected_operation.set("deposit");
                                     amount_input.set(String::new());
@@ -404,8 +429,7 @@ pub fn CarrotModal(
                                 "Deposit"
                             }
                             button {
-                                class: if selected_operation() == "withdraw" { "button-standard primary" } else { "button-standard secondary" },
-                                style: "flex: 1; padding: 8px; font-size: 13px;",
+                                class: if selected_operation() == "withdraw" { "toggle-button active" } else { "toggle-button" },
                                 onclick: move |_| {
                                     selected_operation.set("withdraw");
                                     amount_input.set(String::new());
@@ -418,8 +442,8 @@ pub fn CarrotModal(
                         // Asset selector
                         div {
                             style: "margin-bottom: 10px;",
-                            label { 
-                                style: "display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600;",
+                            label {
+                                style: "display: block; margin-bottom: 10px; color: #9ca3af; font-size: 13px; font-weight: 500;",
                                 if selected_operation() == "deposit" {
                                     "Select Asset:"
                                 } else {
@@ -430,7 +454,7 @@ pub fn CarrotModal(
                                 style: "display: flex; gap: 6px;",
                                 button {
                                     class: if selected_asset() == "USDC" { "button-standard primary" } else { "button-standard secondary" },
-                                    style: "flex: 1; padding: 6px; font-size: 11px;",
+                                    style: if selected_asset() == "USDC" { "flex: 1; padding: 8px; font-size: 12px; background: white; color: #1a1a1a; font-weight: 700; border-radius: 8px;" } else { "flex: 1; padding: 8px; font-size: 12px; background: #2a2a2a; color: white; border: 1px solid #4a4a4a; border-radius: 8px; font-weight: 600;" },
                                     onclick: move |_| {
                                         selected_asset.set("USDC");
                                         if selected_operation() == "deposit" {
@@ -441,7 +465,7 @@ pub fn CarrotModal(
                                 }
                                 button {
                                     class: if selected_asset() == "USDT" { "button-standard primary" } else { "button-standard secondary" },
-                                    style: "flex: 1; padding: 6px; font-size: 11px;",
+                                    style: if selected_asset() == "USDT" { "flex: 1; padding: 8px; font-size: 12px; background: white; color: #1a1a1a; font-weight: 700; border-radius: 8px;" } else { "flex: 1; padding: 8px; font-size: 12px; background: #2a2a2a; color: white; border: 1px solid #4a4a4a; border-radius: 8px; font-weight: 600;" },
                                     onclick: move |_| {
                                         selected_asset.set("USDT");
                                         if selected_operation() == "deposit" {
@@ -463,7 +487,7 @@ pub fn CarrotModal(
                                 //}
                             }
                             div {
-                                style: "margin-top: 4px; font-size: 10px; opacity: 0.7;",
+                                style: "margin-top: 6px; font-size: 11px; color: #8a8a8a;",
                                 if selected_operation() == "deposit" {
                                     "Available: {get_asset_balance():.2} {selected_asset()}"
                                 } else {
@@ -475,8 +499,8 @@ pub fn CarrotModal(
                         // Amount input with inline Max button
                         div {
                             style: "margin-bottom: 12px;",
-                            label { 
-                                style: "display: block; margin-bottom: 6px; font-size: 12px; font-weight: 600;",
+                            label {
+                                style: "display: block; margin-bottom: 10px; color: #9ca3af; font-size: 13px; font-weight: 500;",
                                 if selected_operation() == "deposit" {
                                     "Amount ({selected_asset()}):"
                                 } else {
@@ -498,7 +522,7 @@ pub fn CarrotModal(
                                 }
                                 button {
                                     class: "button-standard secondary",
-                                    style: "padding: 8px 16px; font-size: 11px;",
+                                    style: "padding: 10px 16px; font-size: 11px; background: #3a3a3a; color: white; border: 1px solid #5a5a5a; border-radius: 8px; font-weight: 600;",
                                     onclick: move |_| {
                                         let max_amount = if selected_operation() == "deposit" {
                                             get_asset_balance()
@@ -517,7 +541,7 @@ pub fn CarrotModal(
                             button {
                                 class: "button-standard primary",
                                 disabled: processing() || amount_input().is_empty(),
-                                style: "width: 100%; padding: 12px; font-size: 14px;",
+                                style: "width: 100%; background: white; color: #1a1a1a; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 12px; padding: 14px 24px;",
                                 onclick: {
                                     let wallet_c = wallet.clone();
                                     let hw_c = hardware_wallet.clone();
