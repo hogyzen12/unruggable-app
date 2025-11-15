@@ -18,6 +18,8 @@ use std::str::FromStr;
 
 use super::types::{SwapRoute, Instruction, AccountMeta, Pubkey};
 use crate::storage::get_current_jito_settings;
+use crate::transaction::TransactionClient;
+use crate::timeout;
 
 /// Convert Titan's 32-byte pubkey to Solana Pubkey
 fn titan_pubkey_to_solana(pubkey: &Pubkey) -> Result<SolanaPubkey, String> {
@@ -146,30 +148,45 @@ pub async fn build_transaction_from_route(
     recent_blockhash: Hash,
     rpc_url: &str,
 ) -> Result<Vec<u8>, String> {
-    println!("🔧 Building transaction from Titan route");
+    println!("Building transaction from Titan route");
     println!("   Instructions: {}", route.instructions.len());
     println!("   Lookup tables: {}", route.address_lookup_tables.len());
     
+    // Get current slot and build timeout instruction (FIRST)
+    let tx_client = TransactionClient::new(Some(rpc_url));
+    let current_slot = tx_client.get_current_slot().await
+        .map_err(|e| format!("Failed to get current slot: {}", e))?;
+    let timeout_ix = timeout::build_timeout_instruction_from_current(
+        current_slot,
+        timeout::DEFAULT_SLOT_WINDOW,
+    )?;
+    println!("   Added timeout protection: current_slot={}, max_slot={}", 
+        current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
+    
     // Convert Titan instructions to Solana instructions
-    let instructions: Result<Vec<SolanaInstruction>, String> = route.instructions
+    let titan_instructions: Result<Vec<SolanaInstruction>, String> = route.instructions
         .iter()
         .map(titan_instruction_to_solana)
         .collect();
     
-    let mut instructions = instructions?;
-    println!("   ✓ Converted {} instructions", instructions.len());
+    let titan_instructions = titan_instructions?;
+    println!("   Converted {} Titan instructions", titan_instructions.len());
     
-    // Add Jito tip if enabled (following Carrot pattern)
+    // Build instructions with timeout FIRST
+    let mut instructions = vec![timeout_ix];
+    instructions.extend(titan_instructions);
+    
+    // Add Jito tip if enabled
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
         let jito_tip_address = SolanaPubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")
             .map_err(|e| format!("Invalid Jito tip address: {}", e))?;
         
-        // Add 0.0001 SOL tip (100,000 lamports) - same as Carrot
+        // Add 0.0001 SOL tip (100,000 lamports)
         let tip_ix = system_instruction::transfer(&payer, &jito_tip_address, 100_000);
         instructions.push(tip_ix);
         
-        println!("   ✓ Added Jito tip (0.0001 SOL) to Titan swap");
+        println!("   Added Jito tip (0.0001 SOL) to Titan swap");
     }
     
     // Fetch lookup table accounts if any are provided

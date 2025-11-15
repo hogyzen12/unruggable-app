@@ -6993,7 +6993,7 @@ body:has(.token-item-selected) .token-item:hover {
 /* Integrations row - collapsible second row */
 .integrations-row {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 8px;
     width: 100%;
     max-width: 100%;

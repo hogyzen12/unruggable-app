@@ -190,10 +190,17 @@ fn get_token_mint<'a>(symbol: &str, tokens: &'a [Token]) -> &'a str {
 
 // Get token decimals from tokens vector
 fn get_token_decimals(symbol: &str, tokens: &[Token]) -> u8 {
-    tokens.iter()
-        .find(|t| t.symbol == symbol)
-        .map(|t| t.decimals)
-        .unwrap_or(9) // Default to 9 decimals if token not found
+    // First try to find the token in the tokens array
+    if let Some(token) = tokens.iter().find(|t| t.symbol == symbol) {
+        return token.decimals;
+    }
+
+    // Fallback to known token decimals if not found in array
+    match symbol {
+        "USDC" | "USDT" => 6,  // Stablecoins use 6 decimals
+        "SOL" => 9,             // SOL uses 9 decimals
+        _ => 9,                 // Default to 9 decimals for unknown tokens
+    }
 }
 
 // Convert human-readable amount to lamports/smallest unit
@@ -291,10 +298,9 @@ pub fn SwapTransactionSuccessModal(
     was_hardware_wallet: bool,
     onclose: EventHandler<()>,
 ) -> Element {
-    // Explorer links for multiple explorers
-    let solana_explorer_url = format!("https://explorer.solana.com/tx/{}", signature);
+    // Explorer links - Solscan and Orb
     let solscan_url = format!("https://solscan.io/tx/{}", signature);
-    let solana_fm_url = format!("https://solana.fm/tx/{}", signature);
+    let orb_url = format!("https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary", signature);
     
     rsx! {
         div {
@@ -371,13 +377,6 @@ pub fn SwapTransactionSuccessModal(
                             class: "explorer-buttons",
                             a {
                                 class: "button-standard ghost",
-                                href: "{solana_explorer_url}",
-                                target: "_blank",
-                                rel: "noopener noreferrer",
-                                "Solana Explorer"
-                            }
-                            a {
-                                class: "button-standard ghost",
                                 href: "{solscan_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
@@ -385,10 +384,10 @@ pub fn SwapTransactionSuccessModal(
                             }
                             a {
                                 class: "button-standard ghost",
-                                href: "{solana_fm_url}",
+                                href: "{orb_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
-                                "Solana FM"
+                                "Orb"
                             }
                         }
                     }
@@ -440,7 +439,7 @@ pub fn SwapModal(
         // Initialize Titan client with production global endpoint and JWT token
         let client = TitanClient::new(
             "partners.api.titan.exchange".to_string(),
-            ".fSI0QYG9jny2c6tWXEwl4JIFHYS1Twi2kiHjj-0e0tg".to_string(),
+            "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6ImI5MzJiMTkwLTkxZTMtNDhkZC04M2JhLWI1ODA0OWQ1NjIzOSJ9.eyJpYXQiOjE3NjA1NjY2MjYsImV4cCI6MTc5MjEwMjYyNiwiYXVkIjoiYXBpLnRpdGFuLmFnIiwiaXNzIjoidGl0YW5fcGFydG5lcnMiLCJzdWIiOiJhcGk6dW5ydWdnYWJsZSJ9.fSI0QYG9jny2c6tWXEwl4JIFHYS1Twi2kiHjj-0e0tg".to_string(),
         );
         Arc::new(tokio::sync::Mutex::new(client))
     });

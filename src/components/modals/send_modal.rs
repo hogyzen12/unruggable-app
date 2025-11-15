@@ -70,10 +70,9 @@ pub fn TransactionSuccessModal(
     was_hardware_wallet: bool,
     onclose: EventHandler<()>,
 ) -> Element {
-    // Explorer links for multiple explorers
-    let solana_explorer_url = format!("https://explorer.solana.com/tx/{}", signature);
+    // Explorer links - Solscan and Orb
     let solscan_url = format!("https://solscan.io/tx/{}", signature);
-    let solana_fm_url = format!("https://solana.fm/tx/{}", signature);
+    let orb_url = format!("https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary", signature);
     
     rsx! {
         div {
@@ -98,15 +97,7 @@ pub fn TransactionSuccessModal(
                     class: "success-message",
                     "Your transaction was submitted to the Solana network."
                 }
-                
-                // Add hardware wallet reconnection notice if this was a hardware wallet transaction
-                if was_hardware_wallet {
-                    div {
-                        class: "hardware-reconnect-notice",
-                        "Your hardware wallet has been disconnected after the transaction. You'll need to reconnect it for future transactions."
-                    }
-                }
-                
+
                 div {
                     class: "transaction-details",
                     div {
@@ -136,13 +127,6 @@ pub fn TransactionSuccessModal(
                             class: "explorer-buttons",
                             a {
                                 class: "explorer-button",
-                                href: "{solana_explorer_url}",
-                                target: "_blank",
-                                rel: "noopener noreferrer",
-                                "Solana Explorer"
-                            }
-                            a {
-                                class: "explorer-button",
                                 href: "{solscan_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
@@ -150,10 +134,10 @@ pub fn TransactionSuccessModal(
                             }
                             a {
                                 class: "explorer-button",
-                                href: "{solana_fm_url}",
+                                href: "{orb_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
-                                "Solana FM"
+                                "Orb"
                             }
                         }
                     }
@@ -458,20 +442,10 @@ pub fn SendModalWithHardware(
                                     match client.send_sol_with_signer(&hw_signer, &recipient_address, amount_value).await {
                                         Ok(signature) => {
                                             println!("Transaction sent with hardware wallet: {}", signature);
-                                            
+
                                             // Hide hardware approval overlay
                                             show_hardware_approval.set(false);
-                                            
-                                            // Disconnect the hardware wallet
-                                            // This ensures the UI state matches reality
-                                            hw.disconnect().await;
-                                            
-                                            // Notify the parent component about hardware wallet disconnection
-                                            onhardware_handler.call(HardwareWalletEvent {
-                                                connected: false,
-                                                pubkey: None,
-                                            });
-                                            
+
                                             // Set the transaction signature and show success modal
                                             transaction_signature.set(signature);
                                             sending.set(false);

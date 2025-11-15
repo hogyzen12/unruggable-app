@@ -3,13 +3,14 @@ use crate::wallet::Wallet;
 use crate::signing::{TransactionSigner, SignerType};
 use crate::storage::get_current_jito_settings;
 use crate::components::modals::bulk_send_modal::SelectedTokenForBulkSend;
+use crate::timeout;
 use solana_sdk::{
     pubkey::Pubkey,
-    signature::{Signature as SolanaSignature},
-    transaction::VersionedTransaction,
-    message::{Message, VersionedMessage},
-    system_instruction,
     hash::Hash,
+    signature::Signature as SolanaSignature,
+    system_instruction,
+    message::{Message, VersionedMessage},
+    transaction::VersionedTransaction,
 };
 use bs58;
 use reqwest::Client;
@@ -283,6 +284,18 @@ impl TransactionClient {
         signer: &dyn TransactionSigner,
         mut instructions: Vec<solana_sdk::instruction::Instruction>,
     ) -> Result<String, Box<dyn Error>> {
+        // Get current slot and build timeout instruction (FIRST)
+        let current_slot = self.get_current_slot().await?;
+        let timeout_ix = timeout::build_timeout_instruction_from_current(
+            current_slot,
+            timeout::DEFAULT_SLOT_WINDOW,
+        )?;
+        println!("Added timeout protection: current_slot={}, max_slot={}", 
+            current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
+        
+        // Prepend timeout instruction
+        instructions.insert(0, timeout_ix);
+        
         // Check Jito settings and apply modifications if needed
         let jito_settings = get_current_jito_settings();
         let from_pubkey_str = signer.get_public_key().await?;
@@ -394,6 +407,38 @@ impl TransactionClient {
         }
     }
 
+    /// Get current slot number from the network
+    pub async fn get_current_slot(&self) -> Result<u64, Box<dyn Error>> {
+        let request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getSlot",
+            "params": [
+                {
+                    "commitment": "confirmed"
+                }
+            ]
+        });
+
+        let response = self.client
+            .post(&self.rpc_url)
+            .json(&request)
+            .send()
+            .await?;
+
+        let json: Value = response.json().await?;
+        
+        if let Some(error) = json.get("error") {
+            return Err(format!("RPC error getting slot: {:?}", error).into());
+        }
+        
+        if let Some(slot) = json["result"].as_u64() {
+            Ok(slot)
+        } else {
+            Err(format!("Failed to get slot from response: {:?}", json).into())
+        }
+    }
+
     /// Send a signed transaction
     pub async fn send_transaction(&self, signed_tx: &str) -> Result<String, Box<dyn Error>> {
         // Check Jito settings
@@ -484,6 +529,15 @@ impl TransactionClient {
         println!("Sending {} lamports ({} SOL) from {} to {}", 
             amount_lamports, amount_sol, from_pubkey, to_pubkey);
         
+        // Get current slot and build timeout instruction (FIRST)
+        let current_slot = self.get_current_slot().await?;
+        let timeout_ix = timeout::build_timeout_instruction_from_current(
+            current_slot,
+            timeout::DEFAULT_SLOT_WINDOW,
+        )?;
+        println!("Added timeout protection: current_slot={}, max_slot={}", 
+            current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
+        
         // Get recent blockhash
         let recent_blockhash = self.get_recent_blockhash().await?;
         println!("Using blockhash: {}", recent_blockhash);
@@ -495,8 +549,8 @@ impl TransactionClient {
             amount_lamports,
         );
         
-        // Start with the basic transfer instruction
-        let mut instructions = vec![transfer_instruction];
+        // Build instructions with timeout FIRST
+        let mut instructions = vec![timeout_ix, transfer_instruction];
         
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
@@ -578,6 +632,15 @@ impl TransactionClient {
         println!("Sending {} tokens from {} to {} (mint: {})", 
             amount, from_pubkey, to_pubkey, mint_pubkey);
         
+        // Get current slot and build timeout instruction (FIRST)
+        let current_slot = self.get_current_slot().await?;
+        let timeout_ix = timeout::build_timeout_instruction_from_current(
+            current_slot,
+            timeout::DEFAULT_SLOT_WINDOW,
+        )?;
+        println!("Added timeout protection: current_slot={}, max_slot={}", 
+            current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
+        
         // Get token info to determine decimals
         let token_decimals = self.get_token_decimals(&mint_pubkey).await
             .unwrap_or(6); // Default to 6 decimals if we can't fetch
@@ -598,8 +661,8 @@ impl TransactionClient {
         let recent_blockhash = self.get_recent_blockhash().await?;
         println!("Using blockhash: {}", recent_blockhash);
         
-        // Check if destination token account exists
-        let mut instructions = Vec::new();
+        // Build instructions starting with timeout
+        let mut instructions = vec![timeout_ix];
         
         if !self.account_exists(&to_token_account).await? {
             println!("Creating destination token account: {}", to_token_account);

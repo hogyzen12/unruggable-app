@@ -16,6 +16,7 @@ use crate::storage::get_current_jito_settings;
 use crate::transaction::TransactionClient;
 use crate::rpc::{ get_balance, get_minimum_balance_for_rent_exemption };
 use crate::rpc::{get_stake_accounts_by_owner, get_epoch_info, StakeAccountRpcData, EpochInfo};
+use crate::timeout;
 use std::sync::Arc;
 use std::str::FromStr;
 use std::error::Error;
@@ -290,12 +291,26 @@ impl StakingClient {
         let stake_account_keypair = Keypair::new();
         let stake_account_pubkey = stake_account_keypair.pubkey(); // This should work now with Signer trait
 
+        // Get current slot and build timeout instruction (FIRST)
+        let current_slot = self.transaction_client.get_current_slot().await
+            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {}", e)))?;
+        let timeout_ix = timeout::build_timeout_instruction_from_current(
+            current_slot,
+            timeout::DEFAULT_SLOT_WINDOW,
+        )
+            .map_err(|e| StakingError::TransactionFailed(format!("Failed to build timeout instruction: {}", e)))?;
+        println!("Added timeout protection: current_slot={}, max_slot={}", 
+            current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
+
         // Get recent blockhash
         let recent_blockhash = self.transaction_client.get_recent_blockhash().await
             .map_err(|e| StakingError::RpcError(format!("Failed to get recent blockhash: {}", e)))?;
 
-        // Create the base staking instructions
+        // Create the staking instructions with timeout FIRST
         let mut instructions = vec![
+            // 0. Timeout protection (FIRST)
+            timeout_ix,
+            
             // 1. Create stake account
             system_instruction::create_account(
                 &authority_pubkey,
@@ -660,11 +675,25 @@ pub async fn merge_stake_accounts(
     // Build merge instructions
     let mut instructions = build_merge_transaction(merge_group, &authority_pubkey, rpc_url).await?;
 
-    // Apply Jito tips if enabled
+    // Get current slot and add timeout instruction (FIRST)
     let staking_client = StakingClient::new(rpc_url);
+    let current_slot = staking_client.transaction_client.get_current_slot().await
+        .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {}", e)))?;
+    let timeout_ix = timeout::build_timeout_instruction_from_current(
+        current_slot,
+        timeout::DEFAULT_SLOT_WINDOW,
+    )
+        .map_err(|e| StakingError::TransactionFailed(format!("Failed to build timeout instruction: {}", e)))?;
+    println!("Added timeout protection: current_slot={}, max_slot={}", 
+        current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
+    
+    // Prepend timeout instruction
+    instructions.insert(0, timeout_ix);
+
+    // Apply Jito tips if enabled
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        println!("🚀 Applying Jito modifications");
+        println!("Applying Jito modifications");
         staking_client.apply_jito_modifications(&authority_pubkey, &mut instructions)
             .map_err(|e| StakingError::TransactionFailed(format!("Jito error: {}", e)))?;
     }

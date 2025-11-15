@@ -380,16 +380,49 @@ pub fn LendModal(
         div {
             class: "modal-backdrop",
             onclick: move |_| onclose.call(()),
-            
+
             div {
-                class: "modal-content lend-modal",
+                class: "modal-content",
                 onclick: move |e| e.stop_propagation(),
-                
+                style: "
+                    background: #2C2C2C;
+                    border-radius: 20px;
+                    padding: 0;
+                    width: min(480px, calc(100vw - 32px));
+                    max-width: 480px;
+                    max-height: calc(100vh - 64px);
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    overflow: hidden;
+                    margin: 16px auto;
+                    display: flex;
+                    flex-direction: column;
+                ",
+
+                // Modal header
                 if selected_symbol().is_some() {
                     div {
-                        class: "modal-header",
+                        class: "lend-header",
+                        style: "
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            padding: 24px;
+                            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                            background: transparent;
+                        ",
                         button {
-                            class: "back-button",
+                            style: "
+                                background: #3a3a3a;
+                                border: 1px solid #5a5a5a;
+                                color: #ffffff;
+                                padding: 8px 16px;
+                                border-radius: 8px;
+                                cursor: pointer;
+                                font-size: 14px;
+                                font-weight: 500;
+                                transition: all 0.2s ease;
+                            ",
                             onclick: move |_| {
                                 selected_symbol.set(None);
                                 amount.set("".to_string());
@@ -397,36 +430,114 @@ pub fn LendModal(
                             },
                             "← Back"
                         }
-                        h2 { class: "modal-title", "{mode.read().to_uppercase()} {selected_symbol().unwrap_or_default()}" }
+                        h2 {
+                            style: "
+                                color: #f8fafc;
+                                font-size: 20px;
+                                font-weight: 700;
+                                margin: 0;
+                                letter-spacing: -0.025em;
+                            ",
+                            "{mode.read().to_uppercase()} {selected_symbol().unwrap_or_default()}"
+                        }
                         button {
-                            class: "modal-close",
+                            style: "
+                                background: none;
+                                border: none;
+                                color: white;
+                                font-size: 28px;
+                                cursor: pointer;
+                                padding: 0;
+                                min-width: 32px;
+                                min-height: 32px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ",
                             onclick: move |_| onclose.call(()),
-                            "✕"
+                            "×"
                         }
                     }
                 } else {
                     div {
-                        class: "modal-header",
-                        h2 { class: "modal-title", " Lend Tokens" }
+                        class: "lend-header",
+                        style: "
+                            display: flex;
+                            justify-content: space-between;
+                            align-items: center;
+                            padding: 24px;
+                            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+                            background: transparent;
+                        ",
+                        h2 {
+                            style: "
+                                color: #f8fafc;
+                                font-size: 22px;
+                                font-weight: 700;
+                                margin: 0;
+                                letter-spacing: -0.025em;
+                            ",
+                            "Lend Tokens"
+                        }
                         button {
-                            class: "modal-close",
+                            style: "
+                                background: none;
+                                border: none;
+                                color: white;
+                                font-size: 28px;
+                                cursor: pointer;
+                                padding: 0;
+                                min-width: 32px;
+                                min-height: 32px;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                            ",
                             onclick: move |_| onclose.call(()),
-                            "✕"
+                            "×"
                         }
                     }
                 }
-                
+
+                // Show error if any
+                if let Some(error) = error_message() {
+                    div {
+                        style: "
+                            padding: 12px 16px;
+                            background-color: rgba(220, 38, 38, 0.1);
+                            border: 1px solid #dc2626;
+                            color: #fca5a5;
+                            border-radius: 10px;
+                            margin: 16px 24px;
+                            font-size: 13px;
+                            text-align: center;
+                        ",
+                        "{error}"
+                    }
+                }
+
                 div {
-                    class: "modal-body",
-                    
+                    style: "
+                        padding: 20px 24px;
+                        overflow-y: auto;
+                        flex: 1;
+                    ",
+
                     if fetching_tokens() || fetching_positions() || fetching_earnings() {
                         div {
-                            class: "loading-section",
-                            div { class: "loading-spinner pulse", "Loading data..." }
+                            style: "
+                                display: flex;
+                                justify-content: center;
+                                align-items: center;
+                                padding: 40px;
+                                color: #94a3b8;
+                                font-size: 15px;
+                            ",
+                            "Loading data..."
                         }
                     } else if selected_symbol().is_none() {
                         div {
-                            class: "lend-list",
+                            style: "display: flex; flex-direction: column; gap: 12px;",
                             {
                                 available_lend_tokens().into_iter().map(move |lend_token| {
                                     let lend_token_clone_deposit = lend_token.clone();
@@ -446,7 +557,7 @@ pub fn LendModal(
                                     let wallet_balance = tokens.iter().find(|t| t.symbol == symbol).map(|t| t.balance).unwrap_or(0.0);
                                     let position_opt = positions().iter().find(|p| p.token.address == lend_token.address).cloned();
                                     let earning_opt = earnings().iter().find(|e| e.address == lend_token.address).cloned();
-                                    
+
                                     let position_balance = if let Some(pos) = &position_opt {
                                         format_balance(&pos.underlying_balance, lend_token.decimals)
                                     } else {
@@ -457,39 +568,116 @@ pub fn LendModal(
                                     } else {
                                         0.0
                                     };
-                                    
+
                                     rsx! {
                                         div {
-                                            class: "lend-card",
+                                            style: "
+                                                background: #1a1a1a;
+                                                border: 1.5px solid #4a4a4a;
+                                                border-radius: 12px;
+                                                padding: 16px;
+                                                transition: all 0.2s ease;
+                                            ",
                                             div {
-                                                class: "lend-card-header",
+                                                style: "
+                                                    display: flex;
+                                                    align-items: center;
+                                                    gap: 12px;
+                                                    margin-bottom: 12px;
+                                                ",
                                                 img {
                                                     src: "{final_logo}",
-                                                    class: "lend-token-icon",
-                                                    alt: "{symbol}"
+                                                    alt: "{symbol}",
+                                                    style: "width: 40px; height: 40px; border-radius: 50%;"
                                                 }
                                                 div {
-                                                    class: "lend-token-details",
-                                                    span { class: "lend-token-name", "{symbol}" }
-                                                    span { class: "lend-token-balance", "Wallet Balance: {wallet_balance:.2}" }
+                                                    style: "flex: 1;",
+                                                    div {
+                                                        style: "
+                                                            color: #f8fafc;
+                                                            font-size: 16px;
+                                                            font-weight: 700;
+                                                            margin-bottom: 4px;
+                                                        ",
+                                                        "{symbol}"
+                                                    }
+                                                    div {
+                                                        style: "
+                                                            color: #94a3b8;
+                                                            font-size: 13px;
+                                                        ",
+                                                        "Wallet Balance: {wallet_balance:.2}"
+                                                    }
                                                 }
                                             }
                                             div {
-                                                class: "lend-card-stats",
-                                                span { class: "lend-apy positive", "{apy} APY" }
-                                                span { class: "lend-tvl", "TVL: {tvl}" }
+                                                style: "
+                                                    display: flex;
+                                                    justify-content: space-between;
+                                                    margin-bottom: 12px;
+                                                    padding: 8px 0;
+                                                ",
+                                                span {
+                                                    style: "
+                                                        color: #10b981;
+                                                        font-size: 15px;
+                                                        font-weight: 600;
+                                                    ",
+                                                    "{apy} APY"
+                                                }
+                                                span {
+                                                    style: "
+                                                        color: #cbd5e1;
+                                                        font-size: 13px;
+                                                    ",
+                                                    "TVL: {tvl}"
+                                                }
                                             }
                                             if position_balance > 0.0 {
                                                 div {
-                                                    class: "position-details",
-                                                    span { "Your Position: {position_balance:.2} {symbol}" }
-                                                    span { "Earnings: {earnings_amount:.6} {symbol}" }
+                                                    style: "
+                                                        background: rgba(16, 185, 129, 0.1);
+                                                        border: 1px solid rgba(16, 185, 129, 0.2);
+                                                        border-radius: 8px;
+                                                        padding: 10px 12px;
+                                                        margin-bottom: 12px;
+                                                    ",
+                                                    div {
+                                                        style: "
+                                                            color: #cbd5e1;
+                                                            font-size: 13px;
+                                                            margin-bottom: 4px;
+                                                        ",
+                                                        "Your Position: {position_balance:.2} {symbol}"
+                                                    }
+                                                    div {
+                                                        style: "
+                                                            color: #10b981;
+                                                            font-size: 13px;
+                                                            font-weight: 600;
+                                                        ",
+                                                        "Earnings: {earnings_amount:.6} {symbol}"
+                                                    }
                                                 }
                                             }
                                             div {
-                                                class: "lend-card-actions",
+                                                style: "
+                                                    display: flex;
+                                                    gap: 8px;
+                                                ",
                                                 button {
-                                                    class: "deposit-button",
+                                                    style: "
+                                                        flex: 1;
+                                                        background: white;
+                                                        color: #1a1a1a;
+                                                        border: none;
+                                                        border-radius: 8px;
+                                                        padding: 10px 16px;
+                                                        font-size: 14px;
+                                                        font-weight: 700;
+                                                        cursor: pointer;
+                                                        transition: all 0.2s ease;
+                                                    ",
                                                     onclick: move |_| {
                                                         mode.set("deposit".to_string());
                                                         selected_symbol.set(Some(symbol_deposit.clone()));
@@ -499,7 +687,18 @@ pub fn LendModal(
                                                 }
                                                 if position_balance > 0.0 {
                                                     button {
-                                                        class: "withdraw-button",
+                                                        style: "
+                                                            flex: 1;
+                                                            background: #3a3a3a;
+                                                            color: #ffffff;
+                                                            border: 1px solid #5a5a5a;
+                                                            border-radius: 8px;
+                                                            padding: 10px 16px;
+                                                            font-size: 14px;
+                                                            font-weight: 700;
+                                                            cursor: pointer;
+                                                            transition: all 0.2s ease;
+                                                        ",
                                                         onclick: move |_| {
                                                             mode.set("withdraw".to_string());
                                                             selected_symbol.set(Some(symbol_withdraw.clone()));
@@ -510,7 +709,18 @@ pub fn LendModal(
                                                 }
                                                 if wallet_balance == 0.0 && position_balance == 0.0 {
                                                     button {
-                                                        class: "buy-button",
+                                                        style: "
+                                                            flex: 1;
+                                                            background: #3a3a3a;
+                                                            color: #ffffff;
+                                                            border: 1px solid #5a5a5a;
+                                                            border-radius: 8px;
+                                                            padding: 10px 16px;
+                                                            font-size: 14px;
+                                                            font-weight: 700;
+                                                            cursor: pointer;
+                                                            transition: all 0.2s ease;
+                                                        ",
                                                         onclick: move |_| {
                                                             println!("Buy {} clicked", symbol_buy);
                                                         },
@@ -523,41 +733,131 @@ pub fn LendModal(
                                 })
                             }
                             if available_lend_tokens().is_empty() {
-                                div { class: "no-options", "No lending options available" }
+                                div {
+                                    style: "
+                                        text-align: center;
+                                        padding: 40px;
+                                        color: #94a3b8;
+                                        font-size: 15px;
+                                    ",
+                                    "No lending options available"
+                                }
                             }
                         }
                     } else {
                         div {
-                            class: "lend-form",
-                            
+                            style: "display: flex; flex-direction: column; gap: 16px;",
+
                             if let Some(lend_token) = selected_lend_token() {
                                 div {
-                                    class: "lend-info-card",
+                                    style: "
+                                        background: #1a1a1a;
+                                        border: 1.5px solid #4a4a4a;
+                                        border-radius: 12px;
+                                        padding: 16px;
+                                    ",
                                     div {
-                                        class: "lend-details",
-                                        div { class: "detail-row", span { "Current APY:" } span { class: "apy-rate positive", "{format_apy(&lend_token.total_rate)}" } }
-                                        div { class: "detail-row", span { "Supply Rate:" } span { "{format_apy(&lend_token.supply_rate)}" } }
-                                        if !lend_token.rewards_rate.is_empty() && lend_token.rewards_rate != "0" {
-                                            div { class: "detail-row", span { "Rewards Rate:" } span { "{format_apy(&lend_token.rewards_rate)}" } }
+                                        style: "
+                                            display: flex;
+                                            justify-content: space-between;
+                                            margin-bottom: 10px;
+                                        ",
+                                        span {
+                                            style: "color: #94a3b8; font-size: 14px;",
+                                            "Current APY:"
+                                        }
+                                        span {
+                                            style: "color: #10b981; font-size: 14px; font-weight: 600;",
+                                            "{format_apy(&lend_token.total_rate)}"
+                                        }
+                                    }
+                                    div {
+                                        style: "
+                                            display: flex;
+                                            justify-content: space-between;
+                                            margin-bottom: 10px;
+                                        ",
+                                        span {
+                                            style: "color: #94a3b8; font-size: 14px;",
+                                            "Supply Rate:"
+                                        }
+                                        span {
+                                            style: "color: #cbd5e1; font-size: 14px;",
+                                            "{format_apy(&lend_token.supply_rate)}"
+                                        }
+                                    }
+                                    if !lend_token.rewards_rate.is_empty() && lend_token.rewards_rate != "0" {
+                                        div {
+                                            style: "
+                                                display: flex;
+                                                justify-content: space-between;
+                                            ",
+                                            span {
+                                                style: "color: #94a3b8; font-size: 14px;",
+                                                "Rewards Rate:"
+                                            }
+                                            span {
+                                                style: "color: #cbd5e1; font-size: 14px;",
+                                                "{format_apy(&lend_token.rewards_rate)}"
+                                            }
                                         }
                                     }
                                 }
                             }
-                            
+
+
                             div {
-                                class: "form-group",
-                                label { "Amount to {mode.read().to_uppercase()}" }
+                                style: "display: flex; flex-direction: column; gap: 8px;",
                                 div {
-                                    class: "amount-input-container",
+                                    style: "
+                                        display: flex;
+                                        justify-content: space-between;
+                                        align-items: center;
+                                        margin-bottom: 8px;
+                                    ",
+                                    label {
+                                        style: "color: #94a3b8; font-size: 15px; font-weight: 500;",
+                                        "Amount to {mode.read().to_uppercase()}"
+                                    }
+                                    div {
+                                        style: "color: #cbd5e1; font-size: 13px;",
+                                        if *mode.read() == "deposit" {
+                                            "Balance: {tokens.iter().find(|t| t.symbol == selected_symbol().unwrap_or_default()).map(|t| t.balance).unwrap_or(0.0):.6} {selected_symbol().unwrap_or_default()}"
+                                        } else {
+                                            if let Some(pos) = positions().iter().find(|p| p.token.asset.get("symbol").and_then(|v| v.as_str()) == Some(&selected_symbol().unwrap_or_default())) {
+                                                "Position: {format_balance(&pos.underlying_balance, pos.token.decimals):.6} {selected_symbol().unwrap_or_default()}"
+                                            } else {
+                                                "Position: 0.0 {selected_symbol().unwrap_or_default()}"
+                                            }
+                                        }
+                                    }
+                                }
+                                div {
+                                    style: "
+                                        display: flex;
+                                        align-items: center;
+                                        background: #1a1a1a;
+                                        border: 1.5px solid #4a4a4a;
+                                        border-radius: 12px;
+                                        padding: 16px;
+                                        gap: 12px;
+                                    ",
                                     input {
                                         r#type: "text",
-                                        class: "amount-input",
                                         placeholder: "0.0",
                                         value: amount(),
                                         oninput: move |evt| amount.set(evt.value()),
+                                        style: "
+                                            background: transparent;
+                                            border: none;
+                                            color: #ffffff;
+                                            font-size: 24px;
+                                            font-weight: 700;
+                                            width: 100%;
+                                            outline: none;
+                                        "
                                     }
                                     button {
-                                        class: "max-button",
                                         onclick: move |_| {
                                             let max = if *mode.read() == "deposit" {
                                                 let bal = tokens.iter().find(|t| t.symbol == selected_symbol().unwrap_or_default()).map(|t| t.balance).unwrap_or(0.0);
@@ -571,44 +871,49 @@ pub fn LendModal(
                                             };
                                             amount.set(format!("{:.6}", max).trim_end_matches('0').trim_end_matches('.').to_string());
                                         },
+                                        style: "
+                                            background: #3a3a3a;
+                                            border: 1px solid #5a5a5a;
+                                            color: #ffffff;
+                                            padding: 8px 16px;
+                                            border-radius: 8px;
+                                            cursor: pointer;
+                                            font-size: 13px;
+                                            font-weight: 700;
+                                            white-space: nowrap;
+                                        ",
                                         "MAX"
                                     }
                                 }
-                                div {
-                                    class: "balance-info",
-                                    if *mode.read() == "deposit" {
-                                        "Wallet Balance: {tokens.iter().find(|t| t.symbol == selected_symbol().unwrap_or_default()).map(|t| t.balance).unwrap_or(0.0):.6} {selected_symbol().unwrap_or_default()}"
-                                    } else {
-                                        if let Some(pos) = positions().iter().find(|p| p.token.asset.get("symbol").and_then(|v| v.as_str()) == Some(&selected_symbol().unwrap_or_default())) {
-                                            "Position Balance: {format_balance(&pos.underlying_balance, pos.token.decimals):.6} {selected_symbol().unwrap_or_default()}"
-                                        } else {
-                                            "Position Balance: 0.0 {selected_symbol().unwrap_or_default()}"
-                                        }
-                                    }
-                                }
                             }
-                            
-                            if let Some(error) = error_message() {
-                                div { class: "error-message fade-in", "{error}" }
-                            }
-                            
+
+
                             if let Some(lend_token) = selected_lend_token() {
                                 if let Some(earning) = earnings().iter().find(|e| e.address == lend_token.address) {
                                     div {
-                                        class: "earnings-info",
+                                        style: "
+                                            background: rgba(16, 185, 129, 0.1);
+                                            border: 1px solid rgba(16, 185, 129, 0.2);
+                                            border-radius: 10px;
+                                            padding: 12px 16px;
+                                            color: #10b981;
+                                            font-size: 14px;
+                                            font-weight: 600;
+                                            text-align: center;
+                                        ",
                                         "Total Earnings: {format_balance(&earning.earnings, lend_token.decimals):.6} {selected_symbol().unwrap_or_default()}"
                                     }
                                 }
                             }
-                            
+
                             // Summary
                             {
                                 let show_summary = !amount().is_empty() && amount().parse::<f64>().unwrap_or(0.0) > 0.0;
                                 let lend_token_opt = selected_lend_token();
-                                
+
                                 if show_summary && lend_token_opt.is_some() {
                                     let lend_token = lend_token_opt.unwrap();
-                                    
+
                                     let yearly = if *mode.read() == "deposit" {
                                         let amt = amount().parse::<f64>().unwrap_or(0.0);
                                         let rate = lend_token.total_rate.parse::<f64>().unwrap_or(0.0) / 10000.0;
@@ -616,15 +921,69 @@ pub fn LendModal(
                                     } else {
                                         0.0 // For withdraw, maybe show remaining earnings or something
                                     };
-                                    
+
                                     rsx! {
                                         div {
-                                            class: "lend-summary fade-in",
-                                            h4 { "{mode.read().to_uppercase()} Summary" }
-                                            div { class: "summary-row", span { "Amount:" } span { "{amount()} {selected_symbol().unwrap_or_default()}" } }
-                                            div { class: "summary-row", span { "APY:" } span { class: "positive", "{format_apy(&lend_token.total_rate)}" } }
+                                            style: "
+                                                background: #1a1a1a;
+                                                border: 1.5px solid #4a4a4a;
+                                                border-radius: 12px;
+                                                padding: 16px;
+                                            ",
+                                            h4 {
+                                                style: "
+                                                    color: #f8fafc;
+                                                    font-size: 16px;
+                                                    font-weight: 700;
+                                                    margin: 0 0 12px 0;
+                                                ",
+                                                "{mode.read().to_uppercase()} Summary"
+                                            }
+                                            div {
+                                                style: "
+                                                    display: flex;
+                                                    justify-content: space-between;
+                                                    margin-bottom: 8px;
+                                                ",
+                                                span {
+                                                    style: "color: #94a3b8; font-size: 14px;",
+                                                    "Amount:"
+                                                }
+                                                span {
+                                                    style: "color: #cbd5e1; font-size: 14px;",
+                                                    "{amount()} {selected_symbol().unwrap_or_default()}"
+                                                }
+                                            }
+                                            div {
+                                                style: "
+                                                    display: flex;
+                                                    justify-content: space-between;
+                                                    margin-bottom: 8px;
+                                                ",
+                                                span {
+                                                    style: "color: #94a3b8; font-size: 14px;",
+                                                    "APY:"
+                                                }
+                                                span {
+                                                    style: "color: #10b981; font-size: 14px; font-weight: 600;",
+                                                    "{format_apy(&lend_token.total_rate)}"
+                                                }
+                                            }
                                             if *mode.read() == "deposit" {
-                                                div { class: "summary-row", span { "Est. yearly earnings:" } span { class: "positive", "{yearly:.6} {selected_symbol().unwrap_or_default()}" } }
+                                                div {
+                                                    style: "
+                                                        display: flex;
+                                                        justify-content: space-between;
+                                                    ",
+                                                    span {
+                                                        style: "color: #94a3b8; font-size: 14px;",
+                                                        "Est. yearly earnings:"
+                                                    }
+                                                    span {
+                                                        style: "color: #10b981; font-size: 14px; font-weight: 600;",
+                                                        "{yearly:.6} {selected_symbol().unwrap_or_default()}"
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -635,12 +994,29 @@ pub fn LendModal(
                         }
                     }
                 }
-                
+
+
                 if selected_symbol().is_some() {
                     div {
-                        class: "modal-buttons",
+                        style: "
+                            display: flex;
+                            gap: 12px;
+                            padding: 20px 24px 24px;
+                            border-top: 1px solid rgba(255, 255, 255, 0.1);
+                        ",
                         button {
-                            class: "modal-button cancel",
+                            style: "
+                                flex: 1;
+                                background: #3a3a3a;
+                                color: #ffffff;
+                                border: 1px solid #5a5a5a;
+                                border-radius: 12px;
+                                padding: 14px 24px;
+                                font-size: 15px;
+                                font-weight: 700;
+                                cursor: pointer;
+                                transition: all 0.2s ease;
+                            ",
                             onclick: move |_| {
                                 selected_symbol.set(None);
                                 amount.set("".to_string());
@@ -649,11 +1025,25 @@ pub fn LendModal(
                             "Cancel"
                         }
                         button {
-                            class: "modal-button primary",
+                            style: "
+                                flex: 1;
+                                background: white;
+                                color: #1a1a1a;
+                                border: none;
+                                border-radius: 12px;
+                                padding: 14px 24px;
+                                font-size: 15px;
+                                font-weight: 700;
+                                cursor: pointer;
+                                transition: all 0.2s ease;
+                                text-transform: uppercase;
+                                letter-spacing: 0.5px;
+                                box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+                            ",
                             disabled: {
                                 let amt = amount().parse::<f64>().unwrap_or(0.0);
-                                processing() || amount().is_empty() || amt <= 0.0 || amt > if *mode.read() == "deposit" { current_balance() } else { 
-                                    positions().iter().find(|p| p.token.asset.get("symbol").and_then(|v| v.as_str()) == Some(&selected_symbol().unwrap_or_default())).map(|p| format_balance(&p.underlying_balance, p.token.decimals)).unwrap_or(0.0) 
+                                processing() || amount().is_empty() || amt <= 0.0 || amt > if *mode.read() == "deposit" { current_balance() } else {
+                                    positions().iter().find(|p| p.token.asset.get("symbol").and_then(|v| v.as_str()) == Some(&selected_symbol().unwrap_or_default())).map(|p| format_balance(&p.underlying_balance, p.token.decimals)).unwrap_or(0.0)
                                 } || selected_lend_token().is_none()
                             },
                             onclick: move |_| {
@@ -900,87 +1290,201 @@ pub fn LendTransactionSuccessModal(
     was_hardware_wallet: bool,
     onclose: EventHandler<()>,
 ) -> Element {
-    let solana_explorer_url = format!("https://explorer.solana.com/tx/{}", signature);
     let solscan_url = format!("https://solscan.io/tx/{}", signature);
-    let solana_fm_url = format!("https://solana.fm/tx/{}", signature);
+    let orb_url = format!("https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary", signature);
     rsx! {
         div {
             class: "modal-backdrop",
             onclick: move |_| onclose.call(()),
-            
+
             div {
-                class: "modal-content success-modal fade-in",
+                class: "modal-content",
                 onclick: move |e| e.stop_propagation(),
-                
+                style: "
+                    background: #2C2C2C;
+                    border-radius: 20px;
+                    padding: 0;
+                    width: min(420px, calc(100vw - 32px));
+                    max-width: 420px;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+                    border: 1px solid rgba(255, 255, 255, 0.1);
+                    overflow: hidden;
+                    margin: 16px auto;
+                ",
+
+                h2 {
+                    style: "
+                        color: #f8fafc;
+                        font-size: 22px;
+                        font-weight: 700;
+                        margin: 0;
+                        padding: 24px 24px 16px;
+                        text-align: center;
+                    ",
+                    "Transaction Completed Successfully! 🎉"
+                }
+
                 div {
-                    class: "success-header pulse",
-                    div { class: "success-icon", "" }
-                    h2 { "Transaction Successful!" }
+                    style: "
+                        padding: 0 24px 20px;
+                        text-align: center;
+                    ",
+                    div {
+                        style: "
+                            width: 80px;
+                            height: 80px;
+                            background: rgba(16, 185, 129, 0.1);
+                            border: 2px solid #10b981;
+                            border-radius: 50%;
+                            margin: 0 auto 16px;
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            font-size: 40px;
+                        ",
+                        "✓"
+                    }
                     p {
+                        style: "
+                            color: #cbd5e1;
+                            font-size: 15px;
+                            margin: 0 0 8px 0;
+                        ",
                         "Your {lending_amount} {lending_token} has been processed at {apy} APY."
                     }
                     if was_hardware_wallet {
                         p {
-                            class: "hardware-note",
-                            " Signed with hardware wallet."
+                            style: "
+                                color: #94a3b8;
+                                font-size: 13px;
+                                margin: 8px 0 0 0;
+                                padding: 8px 12px;
+                                background: rgba(255, 255, 255, 0.05);
+                                border-radius: 8px;
+                            ",
+                            "Signed with hardware wallet"
                         }
                     }
                 }
-                
+
+
                 div {
-                    class: "transaction-details",
+                    style: "padding: 0 24px 24px;",
                     div {
-                        class: "wallet-field",
-                        label { "Transaction Signature:" }
-                        div { 
-                            class: "address-display", 
+                        style: "margin-bottom: 20px;",
+                        label {
+                            style: "
+                                color: #94a3b8;
+                                font-size: 13px;
+                                display: block;
+                                margin-bottom: 8px;
+                            ",
+                            "Transaction Signature:"
+                        }
+                        div {
                             title: "Click to copy",
                             onclick: move |_| {
                                 log::info!("Signature copied to clipboard: {}", signature);
                             },
+                            style: "
+                                background: #1a1a1a;
+                                border: 1px solid #4a4a4a;
+                                border-radius: 8px;
+                                padding: 12px;
+                                color: #cbd5e1;
+                                font-size: 13px;
+                                word-break: break-all;
+                                cursor: pointer;
+                                transition: all 0.2s ease;
+                            ",
                             "{signature}"
                         }
-                        div { 
-                            class: "copy-hint",
+                        div {
+                            style: "
+                                color: #94a3b8;
+                                font-size: 12px;
+                                margin-top: 6px;
+                                text-align: center;
+                            ",
                             "Click to copy"
                         }
                     }
-                    
+
                     div {
-                        class: "explorer-links",
-                        p { "View transaction in explorer:" }
-                        
+                        style: "margin-bottom: 20px;",
+                        p {
+                            style: "
+                                color: #94a3b8;
+                                font-size: 13px;
+                                margin: 0 0 12px 0;
+                            ",
+                            "View transaction in explorer:"
+                        }
+
                         div {
-                            class: "explorer-buttons",
+                            style: "
+                                display: flex;
+                                flex-direction: column;
+                                gap: 8px;
+                            ",
                             a {
-                                class: "explorer-button",
-                                href: "{solana_explorer_url}",
-                                target: "_blank",
-                                rel: "noopener noreferrer",
-                                "Solana Explorer"
-                            }
-                            a {
-                                class: "explorer-button",
                                 href: "{solscan_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
+                                style: "
+                                    background: #3a3a3a;
+                                    color: #ffffff;
+                                    border: 1px solid #5a5a5a;
+                                    border-radius: 8px;
+                                    padding: 10px 16px;
+                                    text-align: center;
+                                    text-decoration: none;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    transition: all 0.2s ease;
+                                ",
                                 "Solscan"
                             }
                             a {
-                                class: "explorer-button",
-                                href: "{solana_fm_url}",
+                                href: "{orb_url}",
                                 target: "_blank",
                                 rel: "noopener noreferrer",
-                                "Solana FM"
+                                style: "
+                                    background: #3a3a3a;
+                                    color: #ffffff;
+                                    border: 1px solid #5a5a5a;
+                                    border-radius: 8px;
+                                    padding: 10px 16px;
+                                    text-align: center;
+                                    text-decoration: none;
+                                    font-size: 14px;
+                                    font-weight: 600;
+                                    transition: all 0.2s ease;
+                                ",
+                                "Orb"
                             }
                         }
                     }
                 }
-                
-                div { 
-                    class: "modal-buttons",
+
+                div {
+                    style: "
+                        padding: 0 24px 24px;
+                    ",
                     button {
-                        class: "modal-button primary",
+                        style: "
+                            width: 100%;
+                            background: white;
+                            color: #1a1a1a;
+                            border: none;
+                            border-radius: 12px;
+                            padding: 14px 24px;
+                            font-size: 15px;
+                            font-weight: 700;
+                            cursor: pointer;
+                            transition: all 0.2s ease;
+                            box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
+                        ",
                         onclick: move |_| onclose.call(()),
                         "Close"
                     }

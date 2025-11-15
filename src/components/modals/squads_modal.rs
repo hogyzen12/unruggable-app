@@ -75,8 +75,8 @@ fn ApprovalSuccessModal(
     approval_count: u16,
     onclose: EventHandler<()>,
 ) -> Element {
-    let solana_explorer_url = format!("https://explorer.solana.com/tx/{}", signature);
     let solscan_url = format!("https://solscan.io/tx/{}", signature);
+    let orb_url = format!("https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary", signature);
     
     rsx! {
         div {
@@ -153,15 +153,15 @@ fn ApprovalSuccessModal(
                             class: "explorer-buttons",
                             a {
                                 class: "button-standard ghost",
-                                href: "{solana_explorer_url}",
-                                target: "_blank",
-                                "Solana Explorer"
-                            }
-                            a {
-                                class: "button-standard ghost",
                                 href: "{solscan_url}",
                                 target: "_blank",
                                 "Solscan"
+                            }
+                            a {
+                                class: "button-standard ghost",
+                                href: "{orb_url}",
+                                target: "_blank",
+                                "Orb"
                             }
                         }
                     }

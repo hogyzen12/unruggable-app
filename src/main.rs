@@ -22,6 +22,7 @@ mod carrot;
 mod bonk_staking;
 mod titan;
 mod pin;
+mod timeout;
 
 use components::*;
 

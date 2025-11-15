@@ -47,8 +47,6 @@ squads-v4-client = "0.1.0"
 carrot-sdk = "0.1.0"
 bonk-staking-rewards = "0.1.0"
 borsh = "1.5.7"
-axum = "0.8.6"
-dioxus-liveview = { version = "0.6.2", features = ["axum"] }
 
 # Desktop/non-mobile specific dependencies
 [target.'cfg(not(any(target_os = "android")))'.dependencies]
