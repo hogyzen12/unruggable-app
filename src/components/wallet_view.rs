@@ -29,7 +29,7 @@ use crate::currency_utils::{
     format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal, CarrotModal, BonkStakingModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal, CarrotModal, BonkStakingModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -525,6 +525,10 @@ pub fn WalletView() -> Element {
     let mut bulk_send_mode = use_signal(|| false);
     let mut selected_tokens = use_signal(|| HashSet::<String>::new()); // Using mint addresses as keys
     let mut show_bulk_send_modal = use_signal(|| false);
+
+    // Eject mode state management (separate from bulk send)
+    let mut eject_mode = use_signal(|| false);
+    let mut show_eject_modal = use_signal(|| false);
 
     let mut multi_timeframe_data = use_signal(|| HashMap::<String, prices::MultiTimeframePriceData>::new());
     let mut expanded_tokens = use_signal(|| HashSet::<String>::new());
@@ -1792,7 +1796,46 @@ pub fn WalletView() -> Element {
                     }
                 }
             }
-            
+
+            if show_eject_modal() {
+                EjectModal {
+                    selected_token_mints: selected_tokens(),
+                    all_tokens: tokens(),
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    current_balance: balance(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| {
+                        show_eject_modal.set(false);
+                        eject_mode.set(false);
+                        selected_tokens.set(HashSet::new());
+                    },
+                    onsuccess: move |signature| {
+                        show_eject_modal.set(false);
+                        eject_mode.set(false);
+                        selected_tokens.set(HashSet::new());
+                        println!("EJECT transaction successful: {}", signature);
+
+                        // Refresh balances after successful transaction
+                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
+                            let address = wallet.address.clone();
+                            let rpc_url = custom_rpc();
+
+                            spawn(async move {
+                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
+                                    Ok(sol_balance) => {
+                                        balance.set(sol_balance);
+                                    }
+                                    Err(e) => {
+                                        println!("Failed to refresh balance after EJECT: {}", e);
+                                    }
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+
             if show_receive_modal() {
                 ReceiveModal {
                     wallet: current_wallet.clone(),
@@ -2058,6 +2101,7 @@ pub fn WalletView() -> Element {
                                 } else {
                                     // Enter bulk send mode
                                     bulk_send_mode.set(true);
+                                    eject_mode.set(false); // Ensure eject mode is off
                                     selected_tokens.set(HashSet::new()); // Clear previous selections
                                 }
                             },
@@ -2224,18 +2268,58 @@ pub fn WalletView() -> Element {
                                     println!("BONK Stake button clicked!");
                                     show_bonk_staking_modal.set(true);
                                 },
-                                
+
                                 div {
                                     class: "action-icon-segmented",
-                                    img { 
+                                    img {
                                         src: "{ICON_BONK_STAKE}",
                                         alt: "BONK Stake"
                                     }
                                 }
-                                
+
                                 div {
                                     class: "action-label-segmented",
                                     "BONK Stake"
+                                }
+                            }
+
+                            button {
+                                class: "action-button-segmented",
+                                onclick: move |_| {
+                                    if eject_mode() {
+                                        // Exit eject mode
+                                        eject_mode.set(false);
+                                        selected_tokens.set(HashSet::new());
+                                    } else {
+                                        // Enter eject mode
+                                        eject_mode.set(true);
+                                        bulk_send_mode.set(false); // Ensure bulk send is off
+                                        selected_tokens.set(HashSet::new()); // Clear previous selections
+                                    }
+                                },
+
+                                div {
+                                    class: "action-icon-segmented",
+                                    if eject_mode() {
+                                        div {
+                                            style: "font-size: 24px; color: white;",
+                                            "✕"
+                                        }
+                                    } else {
+                                        img {
+                                            src: "{ICON_EXPORT}",
+                                            alt: "EJECT"
+                                        }
+                                    }
+                                }
+
+                                div {
+                                    class: "action-label-segmented",
+                                    if eject_mode() {
+                                        "Cancel"
+                                    } else {
+                                        "EJECT"
+                                    }
                                 }
                             }
                         }
@@ -2254,7 +2338,7 @@ pub fn WalletView() -> Element {
                         button {
                             class: if active_tab() == "tokens" { "tab-button active" } else { "tab-button" },
                             onclick: move |_| active_tab.set("tokens".to_string()),
-                            if bulk_send_mode() && active_tab() == "tokens" {
+                            if (bulk_send_mode() || eject_mode()) && active_tab() == "tokens" {
                                 "Select Tokens"
                             } else {
                                 "Your Tokens"
@@ -2275,6 +2359,18 @@ pub fn WalletView() -> Element {
                                 show_bulk_send_modal.set(true);
                             },
                             "Send ({selected_tokens().len()})"
+                        }
+                    }
+
+                    // Show eject button only when on tokens tab and in eject mode with selections
+                    if active_tab() == "tokens" && eject_mode() && !selected_tokens().is_empty() {
+                        button {
+                            class: "bulk-send-confirm-button",
+                            style: "background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);",
+                            onclick: move |_| {
+                                show_eject_modal.set(true);
+                            },
+                            "EJECT ({selected_tokens().len()})"
                         }
                     }
                 }
@@ -2298,17 +2394,17 @@ pub fn WalletView() -> Element {
                                     rsx! {
                                         div {
                                             key: "{token_mint}",
-                                            class: if bulk_send_mode() && selected_tokens().contains(&token_mint) {
+                                            class: if (bulk_send_mode() || eject_mode()) && selected_tokens().contains(&token_mint) {
                                                 "token-item token-item-selected"
                                             } else {
                                                 "token-item"
                                             },
-                                            // Add click handler for bulk selection
+                                            // Add click handler for bulk selection or eject selection
                                             onclick: {
                                                 let mint_clone = token_mint.clone();
-                                                let is_bulk_mode = bulk_send_mode();
+                                                let is_selection_mode = bulk_send_mode() || eject_mode();
                                                 move |_| {
-                                                    if is_bulk_mode {
+                                                    if is_selection_mode {
                                                         let mut current_selected = selected_tokens();
                                                         if current_selected.contains(&mint_clone) {
                                                             current_selected.remove(&mint_clone);
@@ -2319,13 +2415,13 @@ pub fn WalletView() -> Element {
                                                     }
                                                 }
                                             },
-                                            
+
                                             // Main token row
                                             div {
                                                 class: "token-row-main",
-                                                
-                                                // Add selection checkbox when in bulk mode
-                                                if bulk_send_mode() {
+
+                                                // Add selection checkbox when in bulk send or eject mode
+                                                if bulk_send_mode() || eject_mode() {
                                                     div {
                                                         class: "token-selection-checkbox",
                                                         input {

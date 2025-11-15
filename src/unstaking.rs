@@ -435,3 +435,414 @@ pub fn can_normal_unstake(stake_account: &DetailedStakeAccount) -> bool {
     // Can only deactivate delegated (active) stake accounts
     stake_account.state == StakeAccountState::Delegated
 }
+
+/// Build a split stake instruction
+fn build_split_instruction(
+    stake_account: &Pubkey,
+    new_stake_account: &Pubkey,
+    stake_authority: &Pubkey,
+    lamports: u64,
+) -> Result<Instruction, StakingError> {
+    println!("Building split instruction:");
+    println!("  Source stake: {}", stake_account);
+    println!("  New stake: {}", new_stake_account);
+    println!("  Amount: {} lamports ({:.6} SOL)", lamports, lamports as f64 / 1_000_000_000.0);
+    
+    let stake_program_id = Pubkey::from_str("Stake11111111111111111111111111111111111111")
+        .map_err(|_| StakingError::RpcError("Invalid stake program ID".to_string()))?;
+    
+    // Split instruction accounts (from Solana SDK)
+    let accounts = vec![
+        AccountMeta::new(*stake_account, false),       // Source stake account (writable)
+        AccountMeta::new(*new_stake_account, false),   // New stake account (writable)
+        AccountMeta::new_readonly(*stake_authority, true), // Stake authority (signer)
+    ];
+    
+    // Split instruction discriminator (instruction index 3 for Split as LE u32)
+    let mut instruction_data = Vec::new();
+    instruction_data.extend_from_slice(&3u32.to_le_bytes()); // Split = 3
+    instruction_data.extend_from_slice(&lamports.to_le_bytes()); // Amount to split
+    
+    let instruction = Instruction {
+        program_id: stake_program_id,
+        accounts,
+        data: instruction_data,
+    };
+    
+    Ok(instruction)
+}
+
+/// Partial unstake - split stake account and unstake only a portion
+/// 
+/// This function:
+/// 1. Creates a new stake account
+/// 2. Splits the specified amount from the original stake to the new account
+/// 3. Deactivates the new stake account
+/// 
+/// The original stake remains active with the remaining balance
+pub async fn partial_unstake_stake_account(
+    stake_account: &DetailedStakeAccount,
+    amount_to_unstake_sol: f64,
+    wallet_info: Option<&WalletInfo>,
+    hardware_wallet: Option<Arc<HardwareWallet>>,
+    rpc_url: Option<&str>,
+) -> Result<String, StakingError> {
+    println!("PARTIAL UNSTAKE: Starting for stake account: {}", stake_account.pubkey);
+    println!("  Amount to unstake: {:.6} SOL", amount_to_unstake_sol);
+    
+    // Validate that this is an active stake account
+    if stake_account.state != StakeAccountState::Delegated {
+        return Err(StakingError::InvalidAmount("Can only partially unstake delegated stake accounts".to_string()));
+    }
+
+    // Convert amount to lamports
+    let amount_to_unstake_lamports = (amount_to_unstake_sol * 1_000_000_000.0) as u64;
+    
+    // Get current staked amount (excluding rent reserve)
+    let current_staked = stake_account.balance.saturating_sub(stake_account.rent_exempt_reserve);
+    
+    // Validate amount
+    if amount_to_unstake_lamports == 0 {
+        return Err(StakingError::InvalidAmount("Amount must be greater than 0".to_string()));
+    }
+    
+    if amount_to_unstake_lamports > current_staked {
+        return Err(StakingError::InvalidAmount(
+            format!("Cannot unstake {} SOL - only {} SOL available (excluding rent)", 
+                amount_to_unstake_sol,
+                current_staked as f64 / 1_000_000_000.0
+            )
+        ));
+    }
+    
+    // Require minimum balance remaining (0.01 SOL)
+    let remaining_balance = current_staked.saturating_sub(amount_to_unstake_lamports);
+    if remaining_balance > 0 && remaining_balance < 10_000_000 {
+        return Err(StakingError::InvalidAmount(
+            "Remaining stake must be at least 0.01 SOL or 0 (full unstake)".to_string()
+        ));
+    }
+    
+    println!("  Current staked: {:.6} SOL", current_staked as f64 / 1_000_000_000.0);
+    println!("  Will remain: {:.6} SOL", remaining_balance as f64 / 1_000_000_000.0);
+    
+    // Create transaction client
+    let transaction_client = TransactionClient::new(rpc_url);
+    
+    // Create signer
+    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
+        Box::new(HardwareSigner::from_wallet(hw))
+    } else if let Some(w) = wallet_info {
+        let wallet = Wallet::from_wallet_info(w)
+            .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
+        Box::new(SoftwareSigner::new(wallet))
+    } else {
+        return Err(StakingError::WalletError("No wallet provided".to_string()));
+    };
+
+    // Get user pubkey (stake authority)
+    let user_pubkey_str = signer.get_public_key().await
+        .map_err(|e| StakingError::WalletError(format!("Failed to get public key: {}", e)))?;
+    let user_pubkey = Pubkey::from_str(&user_pubkey_str)
+        .map_err(|_| StakingError::WalletError("Invalid wallet address".to_string()))?;
+
+    // Generate new stake account keypair for the split portion
+    use solana_sdk::signature::{Keypair, Signer as SdkSigner};
+    let new_stake_keypair = Keypair::new();
+    let new_stake_pubkey = new_stake_keypair.pubkey();
+    
+    println!("  New stake account: {}", new_stake_pubkey);
+    
+    // Get rent exemption for stake account (200 bytes)
+    let rent_exemption = crate::rpc::get_minimum_balance_for_rent_exemption(200, rpc_url)
+        .await
+        .map_err(|e| StakingError::RpcError(format!("Failed to get rent exemption: {}", e)))?;
+    
+    // Build instructions
+    let mut instructions = Vec::new();
+    
+    // Add compute budget
+    instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(300_000));
+    instructions.push(ComputeBudgetInstruction::set_compute_unit_price(50_000));
+    
+    // 1. Create the new stake account
+    let create_account_ix = system_instruction::create_account(
+        &user_pubkey,
+        &new_stake_pubkey,
+        rent_exemption,
+        200, // stake account size
+        &Pubkey::from_str("Stake11111111111111111111111111111111111111").unwrap(),
+    );
+    instructions.push(create_account_ix);
+    
+    // 2. Split stake from original to new account
+    let split_ix = build_split_instruction(
+        &stake_account.pubkey,
+        &new_stake_pubkey,
+        &user_pubkey,
+        amount_to_unstake_lamports,
+    )?;
+    instructions.push(split_ix);
+    
+    // 3. Deactivate the new stake account
+    let deactivate_ix = build_deactivate_stake_instruction(&new_stake_pubkey, &user_pubkey)?;
+    instructions.push(deactivate_ix);
+
+    // Add Jito tips if enabled
+    let jito_settings = get_current_jito_settings();
+    if jito_settings.jito_tx {
+        println!("Adding Jito tips");
+        if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
+            println!("Jito tips failed: {}, continuing", e);
+        }
+    }
+
+    // Get recent blockhash
+    let recent_blockhash = transaction_client.get_recent_blockhash().await
+        .map_err(|e| StakingError::RpcError(format!("Failed to get blockhash: {}", e)))?;
+
+    // Create transaction message
+    let mut message = Message::new(&instructions, Some(&user_pubkey));
+    message.recent_blockhash = recent_blockhash;
+    
+    let mut transaction = VersionedTransaction {
+        signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+        message: VersionedMessage::Legacy(message),
+    };
+    
+    // Sign with wallet
+    let message_bytes = transaction.message.serialize();
+    let signature_bytes = signer.sign_message(&message_bytes).await
+        .map_err(|e| StakingError::WalletError(format!("Failed to sign: {}", e)))?;
+
+    let signature = SolanaSignature::from(
+        <[u8; 64]>::try_from(signature_bytes.as_slice())
+            .map_err(|_| StakingError::WalletError("Invalid signature length".to_string()))?
+    );
+
+    transaction.signatures[0] = signature;
+    
+    // Also sign with the new stake account keypair
+    let legacy_message = match &transaction.message {
+        VersionedMessage::Legacy(msg) => msg.clone(),
+        _ => return Err(StakingError::TransactionFailed("Expected legacy message".to_string())),
+    };
+    
+    let mut legacy_transaction = solana_sdk::transaction::Transaction {
+        signatures: vec![SolanaSignature::default(); legacy_message.header.num_required_signatures as usize],
+        message: legacy_message,
+    };
+    
+    // Sign with the new stake keypair
+    legacy_transaction.partial_sign(&[&new_stake_keypair], recent_blockhash);
+    
+    // Add wallet signature
+    legacy_transaction.signatures[0] = signature;
+
+    // Serialize and send
+    let serialized = bincode::serialize(&legacy_transaction)
+        .map_err(|e| StakingError::TransactionFailed(format!("Serialization failed: {}", e)))?;
+    let encoded = bs58::encode(serialized).into_string();
+
+    println!("Sending partial unstake transaction ({} bytes)", encoded.len());
+
+    // Send transaction
+    match transaction_client.send_transaction(&encoded).await {
+        Ok(sig) => {
+            println!("Partial unstake successful!");
+            println!("Transaction: {}", sig);
+            println!("Explorer: https://explorer.solana.com/tx/{}?cluster=mainnet", sig);
+            Ok(sig)
+        }
+        Err(e) => {
+            println!("Transaction failed: {}", e);
+            Err(StakingError::TransactionFailed(format!("Transaction failed: {}", e)))
+        }
+    }
+}
+
+/// Check if a stake account can be partially unstaked
+pub fn can_partial_unstake(stake_account: &DetailedStakeAccount) -> bool {
+    // Can only partially unstake delegated (active) stake accounts
+    // And must have more than minimum (0.01 SOL) to make splitting worthwhile
+    let available = stake_account.balance.saturating_sub(stake_account.rent_exempt_reserve);
+    stake_account.state == StakeAccountState::Delegated && available > 20_000_000 // > 0.02 SOL
+}
+
+/// Build a withdraw stake instruction
+fn build_withdraw_instruction(
+    stake_account: &Pubkey,
+    destination: &Pubkey,
+    withdraw_authority: &Pubkey,
+    lamports: u64,
+) -> Result<Instruction, StakingError> {
+    println!("Building withdraw instruction:");
+    println!("  Stake account: {}", stake_account);
+    println!("  Destination: {}", destination);
+    println!("  Amount: {} lamports ({:.6} SOL)", lamports, lamports as f64 / 1_000_000_000.0);
+    
+    let stake_program_id = Pubkey::from_str("Stake11111111111111111111111111111111111111")
+        .map_err(|_| StakingError::RpcError("Invalid stake program ID".to_string()))?;
+    
+    // Clock sysvar
+    let clock_sysvar = Pubkey::from_str("SysvarC1ock11111111111111111111111111111111")
+        .map_err(|_| StakingError::RpcError("Invalid clock sysvar".to_string()))?;
+    
+    // Stake history sysvar
+    let stake_history_sysvar = Pubkey::from_str("SysvarStakeHistory1111111111111111111111111")
+        .map_err(|_| StakingError::RpcError("Invalid stake history sysvar".to_string()))?;
+    
+    // Build account metas for withdraw instruction
+    let accounts = vec![
+        AccountMeta::new(*stake_account, false),           // Stake account (writable)
+        AccountMeta::new(*destination, false),             // Destination account (writable)
+        AccountMeta::new_readonly(clock_sysvar, false),    // Clock sysvar (readonly)
+        AccountMeta::new_readonly(stake_history_sysvar, false), // Stake history sysvar (readonly)
+        AccountMeta::new_readonly(*withdraw_authority, true),   // Withdraw authority (signer)
+    ];
+    
+    // Withdraw instruction discriminator (instruction index 4 for Withdraw as LE u32)
+    let mut instruction_data = Vec::new();
+    instruction_data.extend_from_slice(&4u32.to_le_bytes()); // Withdraw = 4
+    instruction_data.extend_from_slice(&lamports.to_le_bytes()); // Amount to withdraw
+    
+    let instruction = Instruction {
+        program_id: stake_program_id,
+        accounts,
+        data: instruction_data,
+    };
+    
+    Ok(instruction)
+}
+
+/// Withdraw SOL from an inactive stake account back to the user's wallet
+/// 
+/// This function:
+/// 1. Withdraws all SOL (including rent reserve) from an inactive stake account
+/// 2. Transfers the SOL to the user's wallet
+/// 3. Destroys the stake account (balance becomes 0)
+pub async fn withdraw_stake_account(
+    stake_account: &DetailedStakeAccount,
+    wallet_info: Option<&WalletInfo>,
+    hardware_wallet: Option<Arc<HardwareWallet>>,
+    rpc_url: Option<&str>,
+) -> Result<String, StakingError> {
+    println!("WITHDRAW: Starting for stake account: {}", stake_account.pubkey);
+    
+    // Validate that this is an inactive stake account
+    if stake_account.state != StakeAccountState::Uninitialized {
+        return Err(StakingError::InvalidAmount(
+            "Can only withdraw from inactive stake accounts. Account must be fully deactivated first.".to_string()
+        ));
+    }
+
+    // Calculate total withdrawable amount (full balance including rent reserve)
+    let withdraw_amount = stake_account.balance;
+    let withdraw_amount_sol = withdraw_amount as f64 / 1_000_000_000.0;
+    
+    println!("Total withdrawable: {:.6} SOL (includes rent reserve)", withdraw_amount_sol);
+    
+    if withdraw_amount == 0 {
+        return Err(StakingError::InvalidAmount("Stake account has zero balance".to_string()));
+    }
+    
+    // Create transaction client
+    let transaction_client = TransactionClient::new(rpc_url);
+    
+    // Create signer
+    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
+        Box::new(HardwareSigner::from_wallet(hw))
+    } else if let Some(w) = wallet_info {
+        let wallet = Wallet::from_wallet_info(w)
+            .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
+        Box::new(SoftwareSigner::new(wallet))
+    } else {
+        return Err(StakingError::WalletError("No wallet provided".to_string()));
+    };
+
+    // Get user pubkey (this will be both the destination and withdraw authority)
+    let user_pubkey_str = signer.get_public_key().await
+        .map_err(|e| StakingError::WalletError(format!("Failed to get public key: {}", e)))?;
+    let user_pubkey = Pubkey::from_str(&user_pubkey_str)
+        .map_err(|_| StakingError::WalletError("Invalid wallet address".to_string()))?;
+
+    // Build withdraw instruction
+    let withdraw_ix = build_withdraw_instruction(
+        &stake_account.pubkey,
+        &user_pubkey,  // Destination = user's wallet
+        &user_pubkey,  // Withdraw authority = user
+        withdraw_amount, // Withdraw full balance
+    )?;
+
+    // Build transaction with compute budget and withdraw instruction
+    let mut instructions = Vec::new();
+    
+    // Add compute budget instructions
+    instructions.push(ComputeBudgetInstruction::set_compute_unit_price(50_000));
+    instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(200_000));
+    
+    // Add the main withdraw instruction
+    instructions.push(withdraw_ix);
+
+    // Add Jito tips if enabled
+    let jito_settings = get_current_jito_settings();
+    if jito_settings.jito_tx {
+        println!("Adding Jito tips");
+        if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
+            println!("Jito tips failed: {}, continuing", e);
+        }
+    }
+
+    // Get recent blockhash
+    let recent_blockhash = transaction_client.get_recent_blockhash().await
+        .map_err(|e| StakingError::RpcError(format!("Failed to get blockhash: {}", e)))?;
+
+    // Create transaction message
+    let mut message = Message::new(&instructions, Some(&user_pubkey));
+    message.recent_blockhash = recent_blockhash;
+    
+    let transaction = VersionedTransaction {
+        signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+        message: VersionedMessage::Legacy(message),
+    };
+    
+    // Sign transaction
+    let message_bytes = transaction.message.serialize();
+    let signature_bytes = signer.sign_message(&message_bytes).await
+        .map_err(|e| StakingError::WalletError(format!("Failed to sign: {}", e)))?;
+
+    let signature = SolanaSignature::from(
+        <[u8; 64]>::try_from(signature_bytes.as_slice())
+            .map_err(|_| StakingError::WalletError("Invalid signature length".to_string()))?
+    );
+
+    let mut signed_transaction = transaction;
+    signed_transaction.signatures[0] = signature;
+
+    // Serialize transaction to string
+    let serialized = bincode::serialize(&signed_transaction)
+        .map_err(|e| StakingError::TransactionFailed(format!("Serialization failed: {}", e)))?;
+    let encoded = bs58::encode(serialized).into_string();
+
+    println!("Sending withdraw transaction ({} bytes)", encoded.len());
+
+    // Send transaction
+    match transaction_client.send_transaction(&encoded).await {
+        Ok(sig) => {
+            println!("Withdraw successful!");
+            println!("Transaction: {}", sig);
+            println!("Explorer: https://explorer.solana.com/tx/{}?cluster=mainnet", sig);
+            Ok(sig)
+        }
+        Err(e) => {
+            println!("Transaction failed: {}", e);
+            Err(StakingError::TransactionFailed(format!("Transaction failed: {}", e)))
+        }
+    }
+}
+
+/// Check if a stake account can be withdrawn
+pub fn can_withdraw(stake_account: &DetailedStakeAccount) -> bool {
+    // Can only withdraw from inactive (uninitialized) stake accounts with a balance
+    stake_account.state == StakeAccountState::Uninitialized && stake_account.balance > 0
+}
