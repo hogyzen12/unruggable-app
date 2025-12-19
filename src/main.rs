@@ -15,11 +15,14 @@ mod unstaking;
 mod currency;
 mod currency_utils;
 mod sns;
+mod ans_resolver;
+mod domain_resolver;
 mod config;
 mod token_utils;
 mod squads;
 mod carrot;
 mod bonk_staking;
+mod quantum_vault;
 mod titan;
 mod pin;
 mod timeout;
@@ -37,12 +40,12 @@ enum Route {
 // Android does. For apple builds use hosted resources.
 
 // For iOS/macOS builds, uncomment the remote URLs and comment out the asset! macros
-//const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
-//const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
+const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
+const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
 
 // For local/Android builds, use the asset! macro
-const MAIN_CSS: Asset = asset!("/assets/main.css");
-const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
+//const MAIN_CSS: Asset = asset!("/assets/main.css");
+//const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
 
 // ── DESKTOP (macOS/Windows/Linux) ─────────────────────────────────────────────
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
@@ -73,29 +76,35 @@ fn main() {
 #[component]
 fn App() -> Element {
     // Check if onboarding has been completed
-    let mut show_onboarding = use_signal(|| true);
-    //let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
+    //let mut show_onboarding = use_signal(|| true);
+    let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
     
     // Check if PIN is set and locked
     let mut is_locked = use_signal(|| storage::has_pin());
     
-    // Initialize SNS resolver with your RPC endpoint
-    let sns_resolver = Arc::new(sns::SnsResolver::new(
-        "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string() // Use your preferred RPC endpoint
+    // Initialize unified domain resolver (supports SNS .sol + ANS .abc, .bonk, etc.)
+    let domain_resolver = Arc::new(domain_resolver::DomainResolver::new(
+        "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string()
     ));
 
-    // Provide SNS resolver to the entire app
+    // Provide domain resolver to the entire app
+    use_context_provider(|| domain_resolver);
+    
+    // Keep SNS resolver for backward compatibility (optional - can remove if not needed elsewhere)
+    let sns_resolver = Arc::new(sns::SnsResolver::new(
+        "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string()
+    ));
     use_context_provider(|| sns_resolver);
 
     rsx! {
         // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
-        //document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        //document::Link { rel: "stylesheet", href: PIN_CSS_URL }
+        document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
+        document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
+        document::Link { rel: "stylesheet", href: PIN_CSS_URL }
         
         // For local/Android builds, use these lines (comment out for iOS/macOS)
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: PIN_CSS }
+        //document::Link { rel: "stylesheet", href: MAIN_CSS }
+        //document::Link { rel: "stylesheet", href: PIN_CSS }
         
         // Show PIN unlock if PIN is set and app is locked
         if is_locked() {

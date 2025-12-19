@@ -47,6 +47,8 @@ squads-v4-client = "0.1.0"
 carrot-sdk = "0.1.0"
 bonk-staking-rewards = "0.1.0"
 borsh = "1.5.7"
+solana-winternitz = "0.1.0"
+web-sys = { version = "0.3", features = ["Window", "Storage", "Performance"] }
 
 # Desktop/non-mobile specific dependencies
 [target.'cfg(not(any(target_os = "android")))'.dependencies]

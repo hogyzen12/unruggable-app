@@ -1,7 +1,7 @@
 // src/components/address_input.rs
 use dioxus::prelude::*;
 use solana_sdk::pubkey::Pubkey;
-use crate::sns::SnsResolver;
+use crate::domain_resolver::DomainResolver;
 use std::sync::Arc;
 
 #[derive(Props, Clone, PartialEq)]
@@ -27,7 +27,7 @@ pub enum ValidationState {
 #[component]
 pub fn AddressInput(props: AddressInputProps) -> Element {
     let mut validation_state = use_signal(|| ValidationState::Empty);
-    let sns_resolver = use_context::<Arc<SnsResolver>>();
+    let domain_resolver = use_context::<Arc<DomainResolver>>();
     
     let show_validation = props.show_validation.unwrap_or(true);
     let auto_resolve = props.auto_resolve.unwrap_or(false);
@@ -40,7 +40,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
 
     let resolve_address_handler = {
         let mut validation_state = validation_state.clone();
-        let sns_resolver = sns_resolver.clone();
+        let domain_resolver = domain_resolver.clone();
         let on_resolved = props_on_resolved.clone();
         
         move |input: String| {
@@ -52,8 +52,8 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
 
             validation_state.set(ValidationState::Resolving);
             
-            // Use the detailed resolver for better UX
-            match sns_resolver.resolve_address_with_details(&input) {
+            // Use the detailed resolver for better UX (now supports SNS + ANS)
+            match domain_resolver.resolve_address_with_details(&input) {
                 Ok((pubkey, description)) => {
                     validation_state.set(ValidationState::Success(pubkey, description));
                     on_resolved.call(Some(pubkey));
@@ -174,7 +174,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
             // Helper text
             if matches!(&*validation_state.read(), ValidationState::Empty) {
                 div { class: "address-input-helper",
-                    "You can enter a Solana address or domain like 'username.sol'"
+                    "You can enter a Solana address or domain (.sol, .abc, .bonk, etc.)"
                 }
             }
         }

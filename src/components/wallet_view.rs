@@ -29,7 +29,7 @@ use crate::currency_utils::{
     format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal, CarrotModal, BonkStakingModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, SquadsModal, CarrotModal, BonkStakingModal, QuantumVaultModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -90,6 +90,7 @@ const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_SQUADS: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/squadsLogo.svg";
 const ICON_CARROT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/CARROT.svg";
 const ICON_BONK_STAKE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/BONK.svg";
+const ICON_QUANTUM: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/32x32.png";
 const ICON_WALLET: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/WALLETS.svg";
 const ICON_CREATE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ADD_wallet.svg";
 const ICON_IMPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/IMPORT_wallet.svg";
@@ -456,6 +457,7 @@ pub fn WalletView() -> Element {
     let mut show_squads_modal = use_signal(|| false);
     let mut show_carrot_modal = use_signal(|| false);
     let mut show_bonk_staking_modal = use_signal(|| false);
+    let mut show_quantum_vault_modal = use_signal(|| false);
     
     // Integrations collapse/expand state
     let mut show_integrations = use_signal(|| false);
@@ -1945,15 +1947,23 @@ pub fn WalletView() -> Element {
             if show_bonk_staking_modal() {
                 BonkStakingModal {
                     tokens: tokens(),
-                    wallet: current_wallet.clone(),
+                    wallet: wallets().get(current_wallet_index()).cloned(),
                     hardware_wallet: hardware_wallet(),
                     custom_rpc: custom_rpc(),
                     onclose: move |_| show_bonk_staking_modal.set(false),
                     onsuccess: move |sig| {
                         println!("BONK stake successful: {}", sig);
-                        // Trigger wallet refresh
                         refresh_trigger.set(refresh_trigger() + 1);
                     },
+                }
+            }
+
+            if show_quantum_vault_modal() {
+                QuantumVaultModal {
+                    wallet: wallets().get(current_wallet_index()).cloned(),
+                    hardware_wallet: hardware_wallet(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| show_quantum_vault_modal.set(false),
                 }
             }
             
@@ -2280,6 +2290,27 @@ pub fn WalletView() -> Element {
                                 div {
                                     class: "action-label-segmented",
                                     "BONK Stake"
+                                }
+                            }
+
+                            button {
+                                class: "action-button-segmented",
+                                onclick: move |_| {
+                                    println!("Quantum Vault button clicked!");
+                                    show_quantum_vault_modal.set(true);
+                                },
+
+                                div {
+                                    class: "action-icon-segmented",
+                                    img {
+                                        src: "{ICON_QUANTUM}",
+                                        alt: "Quantum Vault"
+                                    }
+                                }
+
+                                div {
+                                    class: "action-label-segmented",
+                                    "Quantum"
                                 }
                             }
 
