@@ -3,11 +3,12 @@ use crate::wallet::Wallet;
 use crate::signing::{TransactionSigner, SignerType};
 use crate::storage::get_current_jito_settings;
 use crate::components::modals::bulk_send_modal::SelectedTokenForBulkSend;
+use crate::config::TpuConfig;
 use crate::timeout;
 use solana_sdk::{
     pubkey::Pubkey,
     hash::Hash,
-    signature::Signature as SolanaSignature,
+    signature::{Signature as SolanaSignature, Keypair},
     system_instruction,
     message::{Message, VersionedMessage},
     transaction::VersionedTransaction,
@@ -16,6 +17,7 @@ use bs58;
 use reqwest::Client;
 use std::error::Error;
 use std::str::FromStr;
+use std::sync::Arc;
 use serde_json::{Value, json};
 use spl_token::instruction as token_instruction;
 use spl_associated_token_account::{
@@ -23,6 +25,8 @@ use spl_associated_token_account::{
     instruction::create_associated_token_account,
 };
 use std::collections::HashMap;
+use yellowstone_jet_tpu_client::yellowstone_grpc::sender::YellowstoneTpuSender;
+use tokio::sync::Mutex;
 
 // Token program IDs
 const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -37,6 +41,10 @@ const HEADER_OVERHEAD: usize = 200; // Transaction header and signature overhead
 pub struct TransactionClient {
     client: Client,
     rpc_url: String,
+    /// Optional TPU sender for parallel transaction delivery
+    tpu_sender: Option<Arc<Mutex<YellowstoneTpuSender>>>,
+    /// TPU configuration
+    tpu_config: TpuConfig,
 }
 
 /// Bulk transaction builder for atomic multi-token sends
@@ -216,10 +224,69 @@ impl TransactionClient {
     /// Create a new transaction client
     pub fn new(rpc_url: Option<&str>) -> Self {
         let url = rpc_url.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com").to_string();
+        let tpu_config = TpuConfig::from_env();
+        
+        // Initialize TPU sender if enabled and configured
+        let tpu_sender = if tpu_config.is_valid() {
+            match Self::initialize_tpu_sender(&url, &tpu_config) {
+                Ok(sender) => {
+                    println!("[TPU] Initialized TPU sender with fanout={}", tpu_config.fanout_count);
+                    Some(Arc::new(Mutex::new(sender)))
+                }
+                Err(e) => {
+                    println!("[TPU] Failed to initialize TPU sender: {}. Continuing with RPC only.", e);
+                    None
+                }
+            }
+        } else {
+            if tpu_config.enabled {
+                println!("[TPU] TPU enabled but not properly configured. Continuing with RPC only.");
+            }
+            None
+        };
+        
         Self {
             client: Client::new(),
             rpc_url: url,
+            tpu_sender,
+            tpu_config,
         }
+    }
+    
+    /// Initialize TPU sender with yellowstone configuration
+    fn initialize_tpu_sender(
+        rpc_url: &str,
+        tpu_config: &TpuConfig,
+    ) -> Result<YellowstoneTpuSender, Box<dyn Error>> {
+        use yellowstone_jet_tpu_client::yellowstone_grpc::sender::{
+            create_yellowstone_tpu_sender, Endpoints,
+        };
+        
+        // Generate ephemeral identity keypair for this TPU sender instance
+        let tpu_identity = Keypair::new();
+        
+        println!("[TPU] Creating TPU sender with:");
+        println!("[TPU]   RPC: {}", rpc_url);
+        println!("[TPU]   gRPC: {}", tpu_config.grpc_endpoint);
+        println!("[TPU]   Token: {}", if tpu_config.grpc_token.is_some() { "***" } else { "none" });
+        
+        let endpoints = Endpoints {
+            rpc: rpc_url.to_string(),
+            grpc: tpu_config.grpc_endpoint.clone(),
+            grpc_x_token: tpu_config.grpc_token.clone(),
+        };
+        
+        // Create the TPU sender (this is async but we'll block on it)
+        let runtime = tokio::runtime::Runtime::new()?;
+        let result = runtime.block_on(async {
+            create_yellowstone_tpu_sender(
+                Default::default(),
+                tpu_identity,
+                endpoints,
+            ).await
+        })?;
+        
+        Ok(result.sender)
     }
 
     /// Send bulk transaction with multiple tokens/SOL
@@ -439,9 +506,35 @@ impl TransactionClient {
         }
     }
 
-    /// Send a signed transaction
+    /// Send a signed transaction with parallel RPC + TPU delivery
     pub async fn send_transaction(&self, signed_tx: &str) -> Result<String, Box<dyn Error>> {
-        // Check Jito settings
+        // Decode the transaction to get signature and serialized bytes
+        let tx_bytes = bs58::decode(signed_tx).into_vec()?;
+        let transaction: VersionedTransaction = bincode::deserialize(&tx_bytes)?;
+        let signature = transaction.signatures[0];
+        
+        // Parallel TPU send (fire-and-forget if TPU is enabled)
+        if let Some(tpu_sender) = &self.tpu_sender {
+            let tpu_sender_clone = Arc::clone(tpu_sender);
+            let tx_bytes_clone = tx_bytes.clone();
+            let sig_clone = signature;
+            let fanout = self.tpu_config.fanout_count;
+            
+            tokio::spawn(async move {
+                let mut sender = tpu_sender_clone.lock().await;
+                match sender.send_txn_fanout(sig_clone, tx_bytes_clone, fanout).await {
+                    Ok(_) => {
+                        println!("[TPU] Transaction {} sent via TPU (fanout={})", sig_clone, fanout);
+                    }
+                    Err(e) => {
+                        println!("[TPU] Failed to send transaction via TPU: {:?}", e);
+                        // Don't fail the whole transaction - RPC might still work
+                    }
+                }
+            });
+        }
+        
+        // RPC send (unchanged - this is the source of truth)
         let jito_settings = get_current_jito_settings();
         
         // Prepare the request, potentially with Jito-specific parameters
