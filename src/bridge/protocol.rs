@@ -28,6 +28,9 @@ pub enum BridgeRequest {
 
     /// Health check / ping
     Ping,
+
+    /// Get wallet public key (for status checks)
+    GetPublicKey,
 }
 
 /// Messages sent from desktop app to browser extension
@@ -62,6 +65,11 @@ pub enum BridgeResponse {
 
     /// Pong response to ping
     Pong,
+
+    /// Public key response
+    PublicKey {
+        public_key: String
+    },
 }
 
 /// Internal state for tracking pending requests

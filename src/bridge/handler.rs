@@ -254,6 +254,28 @@ impl BridgeHandler {
                     message: "OK".to_string()
                 }
             },
+
+            BridgeRequest::GetPublicKey => {
+                println!("🔑 Bridge: Get public key request");
+
+                let wallet = self.current_wallet.lock().unwrap();
+
+                match wallet.as_ref() {
+                    Some(w) => {
+                        let pubkey = w.get_public_key();
+                        println!("✅ Bridge: Returning public key: {}", pubkey);
+                        BridgeResponse::PublicKey {
+                            public_key: pubkey
+                        }
+                    },
+                    None => {
+                        println!("⚠️  Bridge: Wallet not unlocked");
+                        BridgeResponse::Error {
+                            message: "Wallet is locked. Please unlock your Unruggable desktop app.".to_string()
+                        }
+                    }
+                }
+            },
         }
     }
 }
