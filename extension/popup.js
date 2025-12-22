@@ -40,18 +40,13 @@
   // Check if desktop app is running and unlocked
   async function checkDesktopStatus() {
     try {
-      // Try to get the current tab
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-
-      if (!tab) {
-        showNotConnected();
-        return;
-      }
-
-      // Send message to content script to check desktop status
-      const response = await chrome.tabs.sendMessage(tab.id, {
+      // Send message directly to background script (not through content script)
+      const response = await chrome.runtime.sendMessage({
         type: 'CHECK_DESKTOP_STATUS'
-      }).catch(() => null);
+      }).catch(error => {
+        console.error('❌ Failed to communicate with background script:', error);
+        return null;
+      });
 
       if (!response) {
         showNotConnected();
@@ -231,12 +226,9 @@
   // Lock wallet
   async function lockWallet() {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab) {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: 'LOCK_WALLET'
-        });
-      }
+      await chrome.runtime.sendMessage({
+        type: 'LOCK_WALLET'
+      });
       checkDesktopStatus();
     } catch (error) {
       console.error('❌ Error locking wallet:', error);
@@ -246,13 +238,10 @@
   // Disconnect site
   async function disconnectSite(url) {
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (tab) {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: 'DISCONNECT_SITE',
-          url: url
-        });
-      }
+      await chrome.runtime.sendMessage({
+        type: 'DISCONNECT_SITE',
+        url: url
+      });
       // Refresh connected sites
       setTimeout(checkDesktopStatus, 500);
     } catch (error) {

@@ -105,7 +105,7 @@ function handleDesktopResponse(response) {
   }
 }
 
-// Listen for messages from content scripts
+// Listen for messages from content scripts and popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'BRIDGE_REQUEST') {
     // Forward to desktop app
@@ -121,6 +121,56 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
 
     // Return true to indicate async response
+    return true;
+  }
+
+  if (message.type === 'CHECK_DESKTOP_STATUS') {
+    // Check connection and get wallet status
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      sendResponse({
+        connected: false,
+        locked: true
+      });
+      return true;
+    }
+
+    // Send GetPublicKey request to check status
+    sendToDesktop({ method: 'GetPublicKey' })
+      .then(response => {
+        if (response.type === 'PublicKey') {
+          sendResponse({
+            connected: true,
+            locked: false,
+            publicKey: response.public_key,
+            balance: 0, // TODO: Fetch actual balance
+            connectedDapps: [] // TODO: Track connected dApps
+          });
+        } else {
+          sendResponse({
+            connected: true,
+            locked: true
+          });
+        }
+      })
+      .catch(error => {
+        sendResponse({
+          connected: false,
+          locked: true
+        });
+      });
+
+    return true; // Keep channel open for async response
+  }
+
+  if (message.type === 'LOCK_WALLET') {
+    // TODO: Implement lock functionality
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.type === 'DISCONNECT_SITE') {
+    // TODO: Implement disconnect functionality
+    sendResponse({ success: true });
     return true;
   }
 });
