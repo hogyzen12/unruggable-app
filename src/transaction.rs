@@ -9,10 +9,10 @@ use solana_sdk::{
     pubkey::Pubkey,
     hash::Hash,
     signature::{Signature as SolanaSignature, Keypair},
-    system_instruction,
     message::{Message, VersionedMessage},
     transaction::VersionedTransaction,
 };
+use solana_system_interface::instruction as system_instruction;
 use bs58;
 use reqwest::Client;
 use std::error::Error;
@@ -20,13 +20,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use serde_json::{Value, json};
 use spl_token::instruction as token_instruction;
-use spl_associated_token_account::{
-    get_associated_token_address,
-    instruction::create_associated_token_account,
-};
+use spl_associated_token_account::get_associated_token_address_with_program_id;
+use spl_associated_token_account::instruction::create_associated_token_account;
 use std::collections::HashMap;
 use yellowstone_jet_tpu_client::yellowstone_grpc::sender::YellowstoneTpuSender;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OnceCell};
 
 // Token program IDs
 const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -41,8 +39,8 @@ const HEADER_OVERHEAD: usize = 200; // Transaction header and signature overhead
 pub struct TransactionClient {
     client: Client,
     rpc_url: String,
-    /// Optional TPU sender for parallel transaction delivery
-    tpu_sender: Option<Arc<Mutex<YellowstoneTpuSender>>>,
+    /// Lazy-initialized TPU sender for parallel transaction delivery
+    tpu_sender: Arc<OnceCell<Arc<Mutex<YellowstoneTpuSender>>>>,
     /// TPU configuration
     tpu_config: TpuConfig,
 }
@@ -118,15 +116,20 @@ impl BulkTransactionBuilder {
         // First, check which ATA accounts need to be created
         for (mint_str, _, _) in &self.spl_transfers {
             let mint_pubkey = Pubkey::from_str(mint_str)?;
-            let to_token_account = get_associated_token_address(&self.to_pubkey, &mint_pubkey);
+            
+            // Detect which token program this mint uses
+            let token_program_id = client.get_mint_program_id(&mint_pubkey).await
+                .unwrap_or_else(|_| spl_token::id()); // Fallback to standard Token program
+            
+            let to_token_account = get_associated_token_address_with_program_id(
+                &self.to_pubkey,
+                &mint_pubkey,
+                &token_program_id,
+            );
             
             if !client.account_exists(&to_token_account).await? {
                 println!("Will create ATA for mint {} -> {}", mint_str, to_token_account);
                 self.required_ata_creations.push(mint_pubkey);
-                
-                // Detect which token program this mint uses
-                let token_program_id = client.get_mint_program_id(&mint_pubkey).await
-                    .unwrap_or_else(|_| spl_token::id()); // Fallback to standard Token program
                 
                 let create_ata_instruction = create_associated_token_account(
                     &self.from_pubkey, // Payer
@@ -157,8 +160,20 @@ impl BulkTransactionBuilder {
             let decimals = client.get_token_decimals(&mint_pubkey).await.unwrap_or(6);
             let amount_units = (*amount * 10_f64.powi(decimals as i32)) as u64;
             
-            let from_token_account = get_associated_token_address(&self.from_pubkey, &mint_pubkey);
-            let to_token_account = get_associated_token_address(&self.to_pubkey, &mint_pubkey);
+            // Detect token program for this mint
+            let token_program_id = client.get_mint_program_id(&mint_pubkey).await
+                .unwrap_or_else(|_| spl_token::id());
+            
+            let from_token_account = get_associated_token_address_with_program_id(
+                &self.from_pubkey,
+                &mint_pubkey,
+                &token_program_id,
+            );
+            let to_token_account = get_associated_token_address_with_program_id(
+                &self.to_pubkey,
+                &mint_pubkey,
+                &token_program_id,
+            );
             
             let transfer_instruction = token_instruction::transfer(
                 &spl_token::id(),
@@ -226,67 +241,61 @@ impl TransactionClient {
         let url = rpc_url.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com").to_string();
         let tpu_config = TpuConfig::from_env();
         
-        // Initialize TPU sender if enabled and configured
-        let tpu_sender = if tpu_config.is_valid() {
-            match Self::initialize_tpu_sender(&url, &tpu_config) {
-                Ok(sender) => {
-                    println!("[TPU] Initialized TPU sender with fanout={}", tpu_config.fanout_count);
-                    Some(Arc::new(Mutex::new(sender)))
-                }
-                Err(e) => {
-                    println!("[TPU] Failed to initialize TPU sender: {}. Continuing with RPC only.", e);
-                    None
-                }
-            }
-        } else {
-            if tpu_config.enabled {
-                println!("[TPU] TPU enabled but not properly configured. Continuing with RPC only.");
-            }
-            None
-        };
-        
+        // TPU sender will be initialized lazily on first transaction send
         Self {
             client: Client::new(),
             rpc_url: url,
-            tpu_sender,
+            tpu_sender: Arc::new(OnceCell::new()),
             tpu_config,
         }
     }
     
-    /// Initialize TPU sender with yellowstone configuration
-    fn initialize_tpu_sender(
-        rpc_url: &str,
-        tpu_config: &TpuConfig,
-    ) -> Result<YellowstoneTpuSender, Box<dyn Error>> {
-        use yellowstone_jet_tpu_client::yellowstone_grpc::sender::{
-            create_yellowstone_tpu_sender, Endpoints,
-        };
+    /// Get or initialize TPU sender (lazy async initialization)
+    async fn get_tpu_sender(&self) -> Option<Arc<Mutex<YellowstoneTpuSender>>> {
+        // Return None if TPU is not configured
+        if !self.tpu_config.is_valid() {
+            return None;
+        }
         
-        // Generate ephemeral identity keypair for this TPU sender instance
-        let tpu_identity = Keypair::new();
-        
-        println!("[TPU] Creating TPU sender with:");
-        println!("[TPU]   RPC: {}", rpc_url);
-        println!("[TPU]   gRPC: {}", tpu_config.grpc_endpoint);
-        println!("[TPU]   Token: {}", if tpu_config.grpc_token.is_some() { "***" } else { "none" });
-        
-        let endpoints = Endpoints {
-            rpc: rpc_url.to_string(),
-            grpc: tpu_config.grpc_endpoint.clone(),
-            grpc_x_token: tpu_config.grpc_token.clone(),
-        };
-        
-        // Create the TPU sender (this is async but we'll block on it)
-        let runtime = tokio::runtime::Runtime::new()?;
-        let result = runtime.block_on(async {
-            create_yellowstone_tpu_sender(
+        let sender = self.tpu_sender.get_or_init(|| async {
+            use yellowstone_jet_tpu_client::yellowstone_grpc::sender::{
+                create_yellowstone_tpu_sender, Endpoints,
+            };
+            
+            // Generate ephemeral identity keypair for this TPU sender instance
+            let tpu_identity = Keypair::new();
+            
+            println!("[TPU] Creating TPU sender with:");
+            println!("[TPU]   RPC: {}", self.rpc_url);
+            println!("[TPU]   gRPC: {}", self.tpu_config.grpc_endpoint);
+            println!("[TPU]   Token: {}", if self.tpu_config.grpc_token.is_some() { "***" } else { "none" });
+            
+            let endpoints = Endpoints {
+                rpc: self.rpc_url.clone(),
+                grpc: self.tpu_config.grpc_endpoint.clone(),
+                grpc_x_token: self.tpu_config.grpc_token.clone(),
+            };
+            
+            // Create the TPU sender asynchronously
+            match create_yellowstone_tpu_sender(
                 Default::default(),
                 tpu_identity,
                 endpoints,
-            ).await
-        })?;
+            ).await {
+                Ok(result) => {
+                    println!("[TPU] Initialized TPU sender with fanout={}", self.tpu_config.fanout_count);
+                    Arc::new(Mutex::new(result.sender))
+                }
+                Err(e) => {
+                    println!("[TPU] Failed to initialize TPU sender: {}. Continuing with RPC only.", e);
+                    // Return a dummy mutex that will never be used
+                    // This is a workaround since OnceCell requires a value
+                    panic!("TPU initialization failed: {}", e);
+                }
+            }
+        }).await;
         
-        Ok(result.sender)
+        Some(Arc::clone(sender))
     }
 
     /// Send bulk transaction with multiple tokens/SOL
@@ -514,8 +523,8 @@ impl TransactionClient {
         let signature = transaction.signatures[0];
         
         // Parallel TPU send (fire-and-forget if TPU is enabled)
-        if let Some(tpu_sender) = &self.tpu_sender {
-            let tpu_sender_clone = Arc::clone(tpu_sender);
+        if let Some(tpu_sender) = self.get_tpu_sender().await {
+            let tpu_sender_clone = Arc::clone(&tpu_sender);
             let tx_bytes_clone = tx_bytes.clone();
             let sig_clone = signature;
             let fanout = self.tpu_config.fanout_count;
@@ -743,9 +752,21 @@ impl TransactionClient {
         
         println!("Token amount in units: {} (decimals: {})", amount_units, token_decimals);
         
+        // Detect which token program this mint uses
+        let token_program_id = self.get_mint_program_id(&mint_pubkey).await
+            .unwrap_or_else(|_| spl_token::id()); // Fallback to standard Token program
+        
         // Get associated token accounts
-        let from_token_account = get_associated_token_address(&from_pubkey, &mint_pubkey);
-        let to_token_account = get_associated_token_address(&to_pubkey, &mint_pubkey);
+        let from_token_account = get_associated_token_address_with_program_id(
+            &from_pubkey,
+            &mint_pubkey,
+            &token_program_id,
+        );
+        let to_token_account = get_associated_token_address_with_program_id(
+            &to_pubkey,
+            &mint_pubkey,
+            &token_program_id,
+        );
         
         println!("From token account: {}", from_token_account);
         println!("To token account: {}", to_token_account);

@@ -74,6 +74,14 @@ impl LedgerConnection {
 
     /// Connect to the first available Ledger device - exactly like main.rs connect logic
     pub async fn find_and_connect(&mut self) -> Result<(), LedgerError> {
+        // NOTE: Ledger support temporarily disabled on Solana 3.x test branch
+        // solana-remote-wallet 2.3.7 uses Solana 2.x types that are incompatible with Solana 3.x
+        // This functionality will be re-enabled when solana-remote-wallet is updated for Solana 3.x
+        Err(LedgerError(
+            "Ledger support temporarily disabled on Solana 3.x test branch. Switch to main branch for ledger functionality.".to_string()
+        ))
+        
+        /* Original implementation commented out for Solana 3.x compatibility:
         log::info!("🔄 Attempting to connect to Ledger device...");
 
         // 1) Fresh HID context — mirrors the CLI behavior (exactly like main.rs)
@@ -125,6 +133,7 @@ impl LedgerConnection {
         log::info!("📋 Public key: {}", pubkey);
 
         Ok(())
+        */
     }
 
     /// Connect to a specific Ledger device - just calls find_and_connect for now

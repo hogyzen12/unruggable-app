@@ -12,11 +12,12 @@ use solana_sdk::{
     pubkey::Pubkey,
     transaction::{Transaction, VersionedTransaction},
     message::{Message, VersionedMessage},
-    system_instruction,
     signature::Signature,
 };
+use solana_system_interface::instruction as system_instruction;
 use spl_token::instruction as token_instruction;
-use spl_associated_token_account;
+use spl_associated_token_account::get_associated_token_address_with_program_id;
+use spl_associated_token_account::instruction::create_associated_token_account;
 use serde::Deserialize;
 use reqwest;
 use std::sync::Arc;
@@ -380,9 +381,11 @@ async fn close_token_account(
         .map_err(|e| format!("Invalid mint: {}", e))?;
     
     // Derive the Associated Token Account address
-    let token_account = spl_associated_token_account::get_associated_token_address(
+    // Use spl_token::id() as default token program (standard Token program)
+    let token_account = get_associated_token_address_with_program_id(
         owner,
-        &token_mint
+        &token_mint,
+        &spl_token::id(),
     );
     
     println!("📍 Token account to close: {}", token_account);

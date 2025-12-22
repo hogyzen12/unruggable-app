@@ -1,14 +1,13 @@
 // src/staking.rs
 use solana_sdk::{
     pubkey::Pubkey,
-    system_instruction,
     transaction::VersionedTransaction,
     message::{Message, VersionedMessage},
     signature::{Signature as SolanaSignature, Keypair, Signer}, // Add Signer trait
     hash::Hash,
-    commitment_config::CommitmentConfig,
 };
-use solana_sdk::stake::instruction::merge;
+use solana_system_interface::instruction as system_instruction;
+use solana_stake_interface::instruction::merge;
 use crate::wallet::{Wallet, WalletInfo};
 use crate::hardware::HardwareWallet;
 use crate::signing::{TransactionSigner, software::SoftwareSigner, hardware::HardwareSigner};
@@ -27,7 +26,7 @@ use reqwest::Client;
 use serde_json::{Value, json};
 
 // Use the correct staking interface
-use solana_sdk::stake::{
+use solana_stake_interface::{
     instruction::{initialize, delegate_stake},
     state::{Authorized, Lockup},
 };
@@ -317,7 +316,7 @@ impl StakingClient {
                 &stake_account_pubkey,
                 rent_exemption + stake_amount_lamports,
                 200, // stake account size
-                &solana_sdk::stake::program::id(),
+                &Pubkey::from_str("Stake11111111111111111111111111111111111111").unwrap(),
             ),
             
             // 2. Initialize stake account

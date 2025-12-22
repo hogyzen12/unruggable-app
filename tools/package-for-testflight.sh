@@ -10,13 +10,13 @@ IFS=$'\n\t'
 APP_NAME="unruggable"
 BUNDLE_ID="com.unruggable.app"
 MARKETING_VERSION="${MARKETING_VERSION:-1.0.0}"
-BUILD_NUMBER="${BUILD_NUMBER:-}"          # auto-increment if empty
+BUILD_NUMBER="${BUILD_NUMBER:-3}"          # auto-increment if empty
 MIN_IOS="${MIN_IOS:-12.0}"
 
 # ---- HARD-CODED SIGNING ASSETS (YOUR REAL ONES) ----
 PROFILE_PATH="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles/f505bb28-7305-4b0b-98f6-f0cd402b599f.mobileprovision"
 P12_PATH="/Users/hogyzen12/Apple_Distribution_unruggable.p12"   # << set this
-P12_PASSWORD="${P12_PASSWORD:-YOURPASSWORD HERE}"
+P12_PASSWORD="${P12_PASSWORD:-YOURPASSWORD}"
 
 # The exact Apple Distribution certificate SHA-1 you showed:
 EXPECTED_CERT_SHA1="091FDBB65071C0DA236CF44B2229330B95AD814F"
@@ -52,7 +52,7 @@ cleanup() {
 trap cleanup EXIT
 
 # ---- Tooling sanity ----
-for c in cargo security /usr/libexec/PlistBuddy plutil openssl xcodebuild xcrun ditto sips magick; do need_cmd "$c"; done  # Added 'convert' check for ImageMagick
+for c in cargo security /usr/libexec/PlistBuddy plutil openssl xcodebuild xcrun ditto sips magick curl jq; do need_cmd "$c"; done  # Added 'convert' check for ImageMagick
 
 
 # Must be a release/RC Xcode (not Beta path)
@@ -115,12 +115,41 @@ info "Team: $TEAM_ID  BundleID: $BUNDLE_ID"
 
 # ---- Build (aarch64-apple-ios) ----
 info "Building release app…"
+
+# Ensure Rust + all native deps (clang-built) agree on the same minimum iOS version.
+# NOTE: MIN_IOS defaults to 12.0 near the top of this script — that’s fine even if you’re on iOS 18.x.
+export SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+export IPHONEOS_DEPLOYMENT_TARGET="$MIN_IOS"
+
+# Force C/C++ build scripts (zstd-sys, ring, blake3, etc.) to use the same deployment target.
+export CC="$(xcrun --sdk iphoneos -f clang)"
+export CXX="$(xcrun --sdk iphoneos -f clang++)"
+export AR="$(xcrun --sdk iphoneos -f ar)"
+export RANLIB="$(xcrun --sdk iphoneos -f ranlib)"
+export CFLAGS="-miphoneos-version-min=${MIN_IOS}"
+export CPPFLAGS="-miphoneos-version-min=${MIN_IOS}"
+export LDFLAGS="-miphoneos-version-min=${MIN_IOS}"
+
+# Extra safety: make rustc pass the same min-version to the linker too.
+if [[ -n "${RUSTFLAGS:-}" ]]; then
+  export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-miphoneos-version-min=${MIN_IOS}"
+else
+  export RUSTFLAGS="-C link-arg=-miphoneos-version-min=${MIN_IOS}"
+fi
+
+# Clean once to purge any stale objects compiled with a different iOS min version.
+cargo clean
+
 cargo bundle --target aarch64-apple-ios --release
 [[ -d "$APP_PATH" ]] || die "Expected app not found at $APP_PATH"
 ok "Built: $APP_PATH"
 
 # ---- Stamp versions ----
 APP_INFO_PLIST="${APP_PATH}/Info.plist"
+# Ensure the bundle advertises the same minimum iOS version we built for
+/usr/libexec/PlistBuddy -c "Set :MinimumOSVersion ${MIN_IOS}" "$APP_INFO_PLIST" \
+  || /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string ${MIN_IOS}" "$APP_INFO_PLIST"
+
 [[ -n "${MARKETING_VERSION}" ]] || die "MARKETING_VERSION empty"
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${MARKETING_VERSION}" "$APP_INFO_PLIST" \

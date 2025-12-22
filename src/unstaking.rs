@@ -7,10 +7,25 @@ use solana_sdk::{
     message::{Message, VersionedMessage},
     signature::{Signature as SolanaSignature},
     instruction::{AccountMeta, Instruction},
-    compute_budget::ComputeBudgetInstruction,
-    system_instruction,
+    sysvar,
 };
-use solana_sdk::sysvar;
+use solana_system_interface::instruction as system_instruction;
+use solana_compute_budget_interface::ComputeBudgetInstruction as ComputeBudgetInstructionInterface;
+
+// Helper to convert ComputeBudgetInstruction from interface to SDK Instruction
+// ComputeBudgetInstructionInterface returns solana_instruction::Instruction which uses different types
+// System instruction interface already returns solana_sdk::Instruction, no conversion needed
+fn convert_compute_budget_instruction(interface_ix: solana_instruction::Instruction) -> Instruction {
+    Instruction {
+        program_id: Pubkey::new_from_array(interface_ix.program_id.to_bytes()),
+        accounts: interface_ix.accounts.iter().map(|meta| AccountMeta {
+            pubkey: Pubkey::new_from_array(meta.pubkey.to_bytes()),
+            is_signer: meta.is_signer,
+            is_writable: meta.is_writable,
+        }).collect(),
+        data: interface_ix.data,
+    }
+}
 use crate::wallet::{Wallet, WalletInfo};
 use crate::hardware::HardwareWallet;
 use crate::signing::{TransactionSigner, software::SoftwareSigner, hardware::HardwareSigner};
@@ -169,11 +184,9 @@ fn add_jito_tips(
     let jito_address1 = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
     let jito_address2 = Pubkey::from_str("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL")?;
 
-    let tip1 = system_instruction::transfer(from_pubkey, &jito_address1, 100_000);
-    let tip2 = system_instruction::transfer(from_pubkey, &jito_address2, 100_000);
-
-    instructions.push(tip1);
-    instructions.push(tip2);
+    // system_instruction already returns solana_sdk::Instruction, use directly
+    instructions.push(system_instruction::transfer(from_pubkey, &jito_address1, 100_000));
+    instructions.push(system_instruction::transfer(from_pubkey, &jito_address2, 100_000));
 
     println!("Added Jito tip instructions");
     Ok(())
@@ -221,8 +234,14 @@ pub async fn instant_unstake_stake_account(
 
     // Build transaction
     let mut instructions = Vec::new();
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(200_000));
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_price(20_000));
+    
+    // Convert compute budget instructions from interface to SDK type
+    instructions.push(convert_compute_budget_instruction(
+        ComputeBudgetInstructionInterface::set_compute_unit_limit(200_000)
+    ));
+    instructions.push(convert_compute_budget_instruction(
+        ComputeBudgetInstructionInterface::set_compute_unit_price(20_000)
+    ));
     instructions.push(instant_unstake_ix);
 
     // Add Jito tips (enabled by default)
@@ -367,8 +386,12 @@ pub async fn normal_unstake_stake_account(
     let mut instructions = Vec::new();
     
     // Add compute budget instructions (matching the transaction you provided)
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_price(375_000)); // 0.375 lamports per compute unit
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(200_000));
+    instructions.push(convert_compute_budget_instruction(
+        ComputeBudgetInstructionInterface::set_compute_unit_price(375_000)
+    ));
+    instructions.push(convert_compute_budget_instruction(
+        ComputeBudgetInstructionInterface::set_compute_unit_limit(200_000)
+    ));
     
     // Add the main deactivate instruction
     instructions.push(deactivate_ix);
@@ -562,18 +585,21 @@ pub async fn partial_unstake_stake_account(
     let mut instructions = Vec::new();
     
     // Add compute budget
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(300_000));
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_price(50_000));
+    instructions.push(convert_compute_budget_instruction(
+        ComputeBudgetInstructionInterface::set_compute_unit_limit(300_000)
+    ));
+    instructions.push(convert_compute_budget_instruction(
+        ComputeBudgetInstructionInterface::set_compute_unit_price(50_000)
+    ));
     
-    // 1. Create the new stake account
-    let create_account_ix = system_instruction::create_account(
+    // 1. Create the new stake account (system_instruction already returns solana_sdk::Instruction)
+    instructions.push(system_instruction::create_account(
         &user_pubkey,
         &new_stake_pubkey,
         rent_exemption,
         200, // stake account size
         &Pubkey::from_str("Stake11111111111111111111111111111111111111").unwrap(),
-    );
-    instructions.push(create_account_ix);
+    ));
     
     // 2. Split stake from original to new account
     let split_ix = build_split_instruction(
@@ -778,8 +804,12 @@ pub async fn withdraw_stake_account(
     let mut instructions = Vec::new();
     
     // Add compute budget instructions
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_price(50_000));
-    instructions.push(ComputeBudgetInstruction::set_compute_unit_limit(200_000));
+    instructions.push(convert_compute_budget_instruction(
+        ComputeBudgetInstructionInterface::set_compute_unit_price(50_000)
+    ));
+    instructions.push(convert_compute_budget_instruction(
+        ComputeBudgetInstructionInterface::set_compute_unit_limit(200_000)
+    ));
     
     // Add the main withdraw instruction
     instructions.push(withdraw_ix);

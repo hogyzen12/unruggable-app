@@ -18,28 +18,33 @@ pub struct TpuConfig {
 impl Default for TpuConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
-            grpc_endpoint: String::new(),
-            grpc_token: None,
+            // TPU enabled by default with hardcoded Triton configuration
+            enabled: true,
+            grpc_endpoint: "https://triton.mainnet.rpcpool.com".to_string(),
+            grpc_token: Some("xxd99".to_string()),
             fanout_count: 3,
         }
     }
 }
 
 impl TpuConfig {
-    /// Load TPU configuration from environment variables
+    /// Load TPU configuration - now uses hardcoded defaults, env vars can override
     pub fn from_env() -> Self {
+        let default_config = Self::default();
+        
         Self {
             enabled: std::env::var("TPU_ENABLED")
                 .map(|v| v.to_lowercase() == "true")
-                .unwrap_or(false),
+                .unwrap_or(default_config.enabled),
             grpc_endpoint: std::env::var("TPU_GRPC_ENDPOINT")
-                .unwrap_or_default(),
-            grpc_token: std::env::var("TPU_GRPC_TOKEN").ok(),
+                .unwrap_or(default_config.grpc_endpoint),
+            grpc_token: std::env::var("TPU_GRPC_TOKEN")
+                .ok()
+                .or(default_config.grpc_token),
             fanout_count: std::env::var("TPU_FANOUT_COUNT")
                 .ok()
                 .and_then(|v| v.parse().ok())
-                .unwrap_or(3),
+                .unwrap_or(default_config.fanout_count),
         }
     }
     

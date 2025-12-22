@@ -5,13 +5,12 @@ use solana_sdk::{
     instruction::Instruction as SolanaInstruction,
     instruction::AccountMeta as SolanaAccountMeta,
     pubkey::Pubkey as SolanaPubkey,
-    message::{v0, VersionedMessage},
+    message::{v0, VersionedMessage, AddressLookupTableAccount},
     transaction::VersionedTransaction,
     signature::Signature as SolanaSignature,
     hash::Hash,
-    address_lookup_table::AddressLookupTableAccount,
-    system_instruction,
 };
+use solana_system_interface::instruction as system_instruction;
 use serde_json::{json, Value};
 use reqwest::Client;
 use std::str::FromStr;
