@@ -1320,24 +1320,30 @@ pub fn WalletView() -> Element {
                         
                         div { class: "dropdown-divider" }
                         
-                        for (index, wallet) in wallets.read().iter().enumerate() {
+                        for (index, wallet_item) in wallets.read().iter().enumerate() {
                             button {
-                                class: if index == current_wallet_index() { 
-                                    "dropdown-item wallet-list-item active" 
-                                } else { 
-                                    "dropdown-item wallet-list-item" 
+                                class: if index == current_wallet_index() {
+                                    "dropdown-item wallet-list-item active"
+                                } else {
+                                    "dropdown-item wallet-list-item"
                                 },
-                                onclick: move |_| {
-                                    current_wallet_index.set(index);
-                                    show_dropdown.set(false);
-                                    hardware_connected.set(false);
-                                    hardware_pubkey.set(None);
-
-                                    // Update bridge handler with new wallet (desktop only)
+                                onclick: {
+                                    let wallet_info_clone = wallet_item.clone();
                                     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                                    {
-                                        if let Ok(wallet) = Wallet::from_wallet_info(wallet) {
-                                            bridge_handler.update_wallet(wallet);
+                                    let handler = bridge_handler.clone();
+
+                                    move |_| {
+                                        current_wallet_index.set(index);
+                                        show_dropdown.set(false);
+                                        hardware_connected.set(false);
+                                        hardware_pubkey.set(None);
+
+                                        // Update bridge handler with new wallet (desktop only)
+                                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                                        {
+                                            if let Ok(wallet) = Wallet::from_wallet_info(&wallet_info_clone) {
+                                                handler.update_wallet(wallet);
+                                            }
                                         }
                                     }
                                 },
@@ -1351,11 +1357,11 @@ pub fn WalletView() -> Element {
                                 }
                                 div {
                                     class: "wallet-info",
-                                    div { class: "wallet-name", "{wallet.name}" }
-                                    div { 
+                                    div { class: "wallet-name", "{wallet_item.name}" }
+                                    div {
                                         class: "wallet-address",
                                         {
-                                            let addr = &wallet.address;
+                                            let addr = &wallet_item.address;
                                             if addr.len() >= 8 {
                                                 format!("{}...{}", &addr[..4], &addr[addr.len()-4..])
                                             } else {
@@ -1535,20 +1541,25 @@ pub fn WalletView() -> Element {
                 WalletModal {
                     mode: modal_mode(),
                     onclose: move |_| show_wallet_modal.set(false),
-                    onsave: move |wallet_info| {
-                        save_wallet_to_storage(&wallet_info);
-
-                        // Update bridge handler with new wallet (desktop only)
+                    onsave: {
                         #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                        {
-                            if let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) {
-                                bridge_handler.update_wallet(wallet);
-                            }
-                        }
+                        let handler_for_save = bridge_handler.clone();
 
-                        wallets.write().push(wallet_info);
-                        current_wallet_index.set(wallets.read().len() - 1);
-                        show_wallet_modal.set(false);
+                        move |wallet_info| {
+                            save_wallet_to_storage(&wallet_info);
+
+                            // Update bridge handler with new wallet (desktop only)
+                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                            {
+                                if let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) {
+                                    handler_for_save.update_wallet(wallet);
+                                }
+                            }
+
+                            wallets.write().push(wallet_info);
+                            current_wallet_index.set(wallets.read().len() - 1);
+                            show_wallet_modal.set(false);
+                        }
                     }
                 }
             }
@@ -1561,11 +1572,15 @@ pub fn WalletView() -> Element {
                 }
             }
 
-            // Delete Wallet Confirmation Modal  
+            // Delete Wallet Confirmation Modal
             if show_delete_confirmation() {
                 DeleteWalletModal {
                     wallet: wallets.read().get(current_wallet_index()).cloned(),
-                    onconfirm: move |_| {
+                    onconfirm: {
+                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                        let handler_for_delete = bridge_handler.clone();
+
+                        move |_| {
                         // Get the current wallet info for deletion - separate the read operation
                         let current_index = current_wallet_index();
                         let wallet_address_to_delete = {
@@ -1594,7 +1609,7 @@ pub fn WalletView() -> Element {
                                 let new_index = current_wallet_index();
                                 if let Some(wallet_info) = wallets.read().get(new_index) {
                                     if let Ok(wallet) = Wallet::from_wallet_info(wallet_info) {
-                                        bridge_handler.update_wallet(wallet);
+                                        handler_for_delete.update_wallet(wallet);
                                     }
                                 }
                             }
@@ -1603,6 +1618,7 @@ pub fn WalletView() -> Element {
                             balance.set(0.0);
                         }
                         show_delete_confirmation.set(false);
+                        }
                     },
                     onclose: move |_| show_delete_confirmation.set(false)
                 }
