@@ -109,32 +109,19 @@ fn main() {
 #[component]
 fn App() -> Element {
     // Check if onboarding has been completed
-<<<<<<< Updated upstream
-    //let mut show_onboarding = use_signal(|| true);
     let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
-    
+
     // Check if PIN is set and locked
     let mut is_locked = use_signal(|| storage::has_pin());
-    
+
     // Initialize unified domain resolver (supports SNS .sol + ANS .abc, .bonk, etc.)
     let domain_resolver = Arc::new(domain_resolver::DomainResolver::new(
         "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string()
-=======
-    let mut show_onboarding = use_signal(|| true);
-    //let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
-
-    // Check if PIN is set and locked
-    let mut is_locked = use_signal(|| storage::has_pin());
-
-    // Initialize SNS resolver with your RPC endpoint
-    let sns_resolver = Arc::new(sns::SnsResolver::new(
-        "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string() // Use your preferred RPC endpoint
->>>>>>> Stashed changes
     ));
 
     // Provide domain resolver to the entire app
     use_context_provider(|| domain_resolver);
-    
+
     // Keep SNS resolver for backward compatibility (optional - can remove if not needed elsewhere)
     let sns_resolver = Arc::new(sns::SnsResolver::new(
         "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string()
@@ -149,26 +136,16 @@ fn App() -> Element {
     };
 
     rsx! {
-        // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
-<<<<<<< Updated upstream
+        // For iOS/macOS builds, use the remote CDN URLs
         document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
         document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
         document::Link { rel: "stylesheet", href: PIN_CSS_URL }
-        
+
         // For local/Android builds, use these lines (comment out for iOS/macOS)
         //document::Link { rel: "stylesheet", href: MAIN_CSS }
         //document::Link { rel: "stylesheet", href: PIN_CSS }
-        
-=======
-        //document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        //document::Link { rel: "stylesheet", href: PIN_CSS_URL }
 
-        // For local/Android builds, use these lines (comment out for iOS/macOS)
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: PIN_CSS }
 
->>>>>>> Stashed changes
         // Show PIN unlock if PIN is set and app is locked
         if is_locked() {
             PinUnlock {
