@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Unruggable Wallet",
+  "version": "1.0.0",
+  "description": "Connect your Unruggable desktop wallet to Solana dApps in your browser",
+  "permissions": [
+    "activeTab"
+  ],
+  "host_permissions": [
+    "http://localhost:7777/*"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Unruggable Wallet"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js", "wallet-standard-impl.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

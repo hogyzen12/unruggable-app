@@ -93,9 +93,39 @@ impl Wallet {
     }
 
     /// Sign a transaction message (serialized transaction)
-    pub fn sign_transaction(&self, message: &[u8]) -> String {
+    pub fn sign_transaction(&self, tx_bytes: &[u8]) -> String {
+        // Solana transaction format:
+        // [1 byte: num_signatures] [64 bytes × num_signatures] [message bytes...]
+        // We need to extract and sign only the message portion
+
+        if tx_bytes.is_empty() {
+            println!("❌ Empty transaction bytes");
+            return String::new();
+        }
+
+        let num_signatures = tx_bytes[0] as usize;
+        println!("🔢 Transaction has {} signature slots", num_signatures);
+
+        // Calculate where the message starts
+        let signature_bytes = num_signatures * 64;
+        let message_start = 1 + signature_bytes;
+
+        if tx_bytes.len() < message_start {
+            println!("❌ Transaction too short: {} bytes, expected at least {}", tx_bytes.len(), message_start);
+            return String::new();
+        }
+
+        // Extract the message portion (everything after the signatures)
+        let message = &tx_bytes[message_start..];
+        println!("📝 Extracted message: {} bytes (from {} onwards)", message.len(), message_start);
+        println!("📝 First 10 bytes of message: {:?}", &message[..message.len().min(10)]);
+
+        // Sign the message
         let signature = self.signing_key.sign(message);
-        bs58::encode(signature.to_bytes()).into_string()
+        let sig_base58 = bs58::encode(signature.to_bytes()).into_string();
+
+        println!("✅ Signed transaction message, signature: {}...", &sig_base58[..20]);
+        sig_base58
     }
 
     /// Sign a message with ed25519

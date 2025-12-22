@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wallet Detection Test</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #0a0a0a;
+            color: #fff;
+        }
+        h1 { color: #00ff88; }
+        .test {
+            background: #1a1a1a;
+            border-left: 4px solid #00ff88;
+            padding: 16px;
+            margin: 16px 0;
+            border-radius: 8px;
+        }
+        .test.fail {
+            border-left-color: #ff4444;
+        }
+        .test h3 {
+            margin-top: 0;
+            color: #00ff88;
+        }
+        .test.fail h3 {
+            color: #ff4444;
+        }
+        .code {
+            background: #0a0a0a;
+            padding: 12px;
+            border-radius: 4px;
+            overflow-x: auto;
+            font-family: monospace;
+            font-size: 13px;
+        }
+        button {
+            background: #00ff88;
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 8px 4px;
+        }
+        button:hover {
+            background: #00dd77;
+        }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Unruggable Wallet Detection Test</h1>
+
+    <div id="results"></div>
+
+    <h2>Manual Tests</h2>
+    <button onclick="testConnect()">Test Connect</button>
+    <button onclick="testSignMessage()">Test Sign Message</button>
+
+    <div id="manualResults"></div>
+
+    <script>
+        const results = document.getElementById('results');
+        const manualResults = document.getElementById('manualResults');
+
+        function addTest(name, pass, details) {
+            const div = document.createElement('div');
+            div.className = pass ? 'test' : 'test fail';
+            div.innerHTML = `
+                <h3>${pass ? '✅' : '❌'} ${name}</h3>
+                <div class="code">${details}</div>
+            `;
+            results.appendChild(div);
+        }
+
+        // Run detection tests
+        function runTests() {
+            results.innerHTML = '<h2>Detection Tests</h2>';
+
+            // Test 1: Check if window.solana exists
+            const hasSolana = !!window.solana;
+            addTest(
+                'window.solana exists',
+                hasSolana,
+                hasSolana ? `window.solana found` : 'window.solana is undefined'
+            );
+
+            // Test 2: Check if window.unruggable exists
+            const hasUnruggable = !!window.unruggable;
+            addTest(
+                'window.unruggable exists',
+                hasUnruggable,
+                hasUnruggable ? 'window.unruggable found' : 'window.unruggable is undefined'
+            );
+
+            if (!hasSolana && !hasUnruggable) {
+                addTest('Extension Status', false, 'No wallet detected. Is the extension enabled?');
+                return;
+            }
+
+            const wallet = window.unruggable || window.solana;
+
+            // Test 3: Check wallet name
+            const hasName = !!wallet.name;
+            addTest(
+                'Wallet has name property',
+                hasName,
+                hasName ? `Name: "${wallet.name}"` : 'No name property'
+            );
+
+            // Test 4: Check isUnruggable
+            const isUnruggable = wallet.isUnruggable === true;
+            addTest(
+                'isUnruggable flag',
+                isUnruggable,
+                isUnruggable ? 'isUnruggable: true' : 'Not marked as Unruggable'
+            );
+
+            // Test 5: Check required methods
+            const methods = ['connect', 'disconnect', 'signTransaction', 'signMessage'];
+            const hasMethods = methods.every(m => typeof wallet[m] === 'function');
+            addTest(
+                'Required methods exist',
+                hasMethods,
+                hasMethods ?
+                    'All methods present: ' + methods.join(', ') :
+                    'Missing methods: ' + methods.filter(m => typeof wallet[m] !== 'function').join(', ')
+            );
+
+            // Test 6: Check event listeners
+            const hasEvents = typeof wallet.on === 'function';
+            addTest(
+                'Event listener support',
+                hasEvents,
+                hasEvents ? 'on() method exists' : 'No event listener support'
+            );
+
+            // Test 7: Check icon
+            const hasIcon = !!wallet.icon && wallet.icon.startsWith('data:image');
+            addTest(
+                'Wallet icon',
+                hasIcon,
+                hasIcon ? 'Icon data URI present' : 'No icon'
+            );
+
+            // Test 8: Check connection status
+            const connectionStatus = wallet.isConnected;
+            addTest(
+                'Connection status',
+                connectionStatus !== undefined,
+                `isConnected: ${connectionStatus}`
+            );
+
+            // Summary
+            const div = document.createElement('div');
+            div.className = 'test';
+            div.innerHTML = `
+                <h3>Summary</h3>
+                <div class="code">
+                    <strong>Wallet:</strong> ${wallet.name || 'Unknown'}<br>
+                    <strong>At:</strong> window.${window.unruggable ? 'unruggable' : 'solana'}<br>
+                    <strong>Connected:</strong> ${wallet.isConnected}<br>
+                    <strong>Desktop App:</strong> ${wallet.isConnected ? 'Running' : 'Check if running'}
+                </div>
+            `;
+            results.appendChild(div);
+        }
+
+        async function testConnect() {
+            const wallet = window.unruggable || window.solana;
+            if (!wallet) {
+                manualResults.innerHTML = '<div class="test fail"><h3>❌ No wallet found</h3></div>';
+                return;
+            }
+
+            try {
+                manualResults.innerHTML = '<div class="test"><h3>⏳ Connecting...</h3></div>';
+                const result = await wallet.connect();
+                manualResults.innerHTML = `
+                    <div class="test">
+                        <h3>✅ Connected Successfully!</h3>
+                        <div class="code">
+                            Public Key: ${result.publicKey.toString()}<br>
+                            Wallet: ${wallet.name}
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                manualResults.innerHTML = `
+                    <div class="test fail">
+                        <h3>❌ Connection Failed</h3>
+                        <div class="code">${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        async function testSignMessage() {
+            const wallet = window.unruggable || window.solana;
+            if (!wallet) {
+                manualResults.innerHTML = '<div class="test fail"><h3>❌ No wallet found</h3></div>';
+                return;
+            }
+
+            if (!wallet.isConnected) {
+                manualResults.innerHTML = '<div class="test fail"><h3>❌ Connect wallet first</h3></div>';
+                return;
+            }
+
+            try {
+                manualResults.innerHTML = '<div class="test"><h3>⏳ Signing message...</h3></div>';
+                const message = new TextEncoder().encode('Test message from wallet detection page');
+                const result = await wallet.signMessage(message);
+                manualResults.innerHTML = `
+                    <div class="test">
+                        <h3>✅ Message Signed!</h3>
+                        <div class="code">
+                            Signature length: ${result.signature.length} bytes<br>
+                            Signature: ${Array.from(result.signature).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 40)}...
+                        </div>
+                    </div>
+                `;
+            } catch (error) {
+                manualResults.innerHTML = `
+                    <div class="test fail">
+                        <h3>❌ Signing Failed</h3>
+                        <div class="code">${error.message}</div>
+                    </div>
+                `;
+            }
+        }
+
+        // Run tests on load
+        window.addEventListener('load', () => {
+            setTimeout(runTests, 500);
+        });
+    </script>
+</body>
+</html>
