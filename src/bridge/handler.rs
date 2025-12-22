@@ -56,6 +56,20 @@ impl BridgeHandler {
         wallet.is_some()
     }
 
+    /// Update the current wallet (for wallet switching)
+    pub fn update_wallet(&self, wallet: Wallet) {
+        println!("🔄 BridgeHandler: Updating wallet to {}", wallet.name);
+        let mut current = self.current_wallet.lock().unwrap();
+        *current = Some(wallet);
+        println!("✅ BridgeHandler: Wallet updated successfully");
+    }
+
+    /// Get current wallet public key (for checking if wallet changed)
+    pub fn get_current_pubkey(&self) -> Option<String> {
+        let wallet = self.current_wallet.lock().unwrap();
+        wallet.as_ref().map(|w| w.get_public_key())
+    }
+
     /// Load wallet without PIN (for non-PIN protected wallets)
     pub fn load_wallet_no_pin(&self) -> Result<(), Box<dyn std::error::Error>> {
         let wallets = storage::load_wallets_from_storage();

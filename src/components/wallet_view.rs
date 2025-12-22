@@ -49,6 +49,9 @@ use arboard::Clipboard as SystemClipboard;
 use std::collections::HashSet;
 use rand::{thread_rng, Rng};
 
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+use crate::bridge::BridgeHandler;
+
 // Define the assets for icons
 //const ICON_32: Asset = asset!("/assets/icons/32x32.png");
 //const ICON_SOL: Asset = asset!("/assets/icons/solanaLogo.png");
@@ -468,6 +471,10 @@ pub fn WalletView() -> Element {
     let mut hardware_device_present = use_signal(|| false);
     let mut hardware_connected = use_signal(|| false);
     let mut hardware_pubkey = use_signal(|| None as Option<String>);
+
+    // Bridge handler (desktop only)
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    let bridge_handler = use_context::<Arc<BridgeHandler>>();
 
     // RPC management
     let mut custom_rpc = use_signal(|| load_rpc_from_storage());
@@ -1325,6 +1332,14 @@ pub fn WalletView() -> Element {
                                     show_dropdown.set(false);
                                     hardware_connected.set(false);
                                     hardware_pubkey.set(None);
+
+                                    // Update bridge handler with new wallet (desktop only)
+                                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                                    {
+                                        if let Ok(wallet) = Wallet::from_wallet_info(wallet) {
+                                            bridge_handler.update_wallet(wallet);
+                                        }
+                                    }
                                 },
                                 div {
                                     class: "dropdown-icon",
@@ -1522,6 +1537,15 @@ pub fn WalletView() -> Element {
                     onclose: move |_| show_wallet_modal.set(false),
                     onsave: move |wallet_info| {
                         save_wallet_to_storage(&wallet_info);
+
+                        // Update bridge handler with new wallet (desktop only)
+                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                        {
+                            if let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) {
+                                bridge_handler.update_wallet(wallet);
+                            }
+                        }
+
                         wallets.write().push(wallet_info);
                         current_wallet_index.set(wallets.read().len() - 1);
                         show_wallet_modal.set(false);
@@ -1562,6 +1586,17 @@ pub fn WalletView() -> Element {
                                 current_wallet_index.set(0);
                             } else if current_index >= wallet_count {
                                 current_wallet_index.set(wallet_count - 1);
+                            }
+
+                            // Update bridge handler with new current wallet (desktop only)
+                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                            {
+                                let new_index = current_wallet_index();
+                                if let Some(wallet_info) = wallets.read().get(new_index) {
+                                    if let Ok(wallet) = Wallet::from_wallet_info(wallet_info) {
+                                        bridge_handler.update_wallet(wallet);
+                                    }
+                                }
                             }
                             
                             // Reset balance
