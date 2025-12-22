@@ -8,6 +8,7 @@
   const notConnectedView = document.getElementById('not-connected-view');
   const lockedView = document.getElementById('locked-view');
   const connectedView = document.getElementById('connected-view');
+  const walletName = document.getElementById('wallet-name');
   const walletAddress = document.getElementById('wallet-address');
   const solBalance = document.getElementById('sol-balance');
   const usdBalance = document.getElementById('usd-balance');
@@ -19,6 +20,7 @@
     connected: false,
     locked: true,
     address: null,
+    walletName: null,
     balance: 0,
     connectedDapps: []
   };
@@ -33,8 +35,8 @@
     // Set up event listeners
     setupEventListeners();
 
-    // Update UI periodically
-    setInterval(checkDesktopStatus, 5000);
+    // Update UI frequently to detect wallet changes (every 1.5 seconds)
+    setInterval(checkDesktopStatus, 1500);
   }
 
   // Check if desktop app is running and unlocked
@@ -54,11 +56,19 @@
       }
 
       if (response.connected && !response.locked) {
+        // Check if wallet changed
+        const walletChanged = currentState.address && currentState.address !== response.publicKey;
+        if (walletChanged) {
+          console.log('🔄 Wallet changed!', currentState.address, '->', response.publicKey);
+          showToast(`Switched to ${response.walletName || 'new wallet'}`);
+        }
+
         // Desktop is running and unlocked
         currentState = {
           connected: true,
           locked: false,
           address: response.publicKey,
+          walletName: response.walletName,
           balance: response.balance || 0,
           connectedDapps: response.connectedDapps || []
         };
@@ -105,6 +115,11 @@
   }
 
   function updateWalletInfo() {
+    // Update wallet name
+    if (currentState.walletName) {
+      walletName.textContent = currentState.walletName;
+    }
+
     if (currentState.address) {
       // Show shortened address
       const addr = currentState.address;

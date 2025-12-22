@@ -68,7 +68,8 @@ pub enum BridgeResponse {
 
     /// Public key response
     PublicKey {
-        public_key: String
+        public_key: String,
+        wallet_name: String,
     },
 }
 

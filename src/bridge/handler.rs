@@ -263,9 +263,11 @@ impl BridgeHandler {
                 match wallet.as_ref() {
                     Some(w) => {
                         let pubkey = w.get_public_key();
-                        println!("✅ Bridge: Returning public key: {}", pubkey);
+                        let wallet_name = w.name.clone();
+                        println!("✅ Bridge: Returning public key: {} ({})", pubkey, wallet_name);
                         BridgeResponse::PublicKey {
-                            public_key: pubkey
+                            public_key: pubkey,
+                            wallet_name,
                         }
                     },
                     None => {

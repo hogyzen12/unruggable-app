@@ -142,6 +142,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             connected: true,
             locked: false,
             publicKey: response.public_key,
+            walletName: response.wallet_name,
             balance: 0, // TODO: Fetch actual balance
             connectedDapps: [] // TODO: Track connected dApps
           });
