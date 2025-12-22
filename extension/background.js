@@ -136,14 +136,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // Send GetPublicKey request to check status
     sendToDesktop({ method: 'GetPublicKey' })
-      .then(response => {
+      .then(async response => {
         if (response.type === 'PublicKey') {
+          // Fetch balance
+          let balance = 0;
+          try {
+            const balanceResponse = await sendToDesktop({ method: 'GetBalance' });
+            if (balanceResponse.type === 'Balance') {
+              balance = balanceResponse.balance;
+            }
+          } catch (e) {
+            console.error('Failed to fetch balance:', e);
+          }
+
           sendResponse({
             connected: true,
             locked: false,
             publicKey: response.public_key,
             walletName: response.wallet_name,
-            balance: 0, // TODO: Fetch actual balance
+            balance: balance,
             connectedDapps: [] // TODO: Track connected dApps
           });
         } else {

@@ -35,8 +35,8 @@
     // Set up event listeners
     setupEventListeners();
 
-    // Update UI frequently to detect wallet changes (every 1.5 seconds)
-    setInterval(checkDesktopStatus, 1500);
+    // Update UI very frequently to detect wallet changes instantly (every 100ms)
+    setInterval(checkDesktopStatus, 100);
   }
 
   // Check if desktop app is running and unlocked

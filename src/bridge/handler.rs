@@ -3,7 +3,6 @@ use crate::bridge::protocol::{BridgeRequest, BridgeResponse};
 use crate::wallet::Wallet;
 use crate::storage;
 use solana_client::rpc_client::RpcClient;
-use solana_sdk::signature::Signature;
 use std::str::FromStr;
 
 /// Shared state for the bridge handler
@@ -268,6 +267,55 @@ impl BridgeHandler {
                         BridgeResponse::PublicKey {
                             public_key: pubkey,
                             wallet_name,
+                        }
+                    },
+                    None => {
+                        println!("⚠️  Bridge: Wallet not unlocked");
+                        BridgeResponse::Error {
+                            message: "Wallet is locked. Please unlock your Unruggable desktop app.".to_string()
+                        }
+                    }
+                }
+            },
+
+            BridgeRequest::GetBalance => {
+                println!("💰 Bridge: Get balance request");
+
+                let wallet = self.current_wallet.lock().unwrap();
+
+                match wallet.as_ref() {
+                    Some(w) => {
+                        let pubkey = w.get_public_key();
+                        drop(wallet); // Release lock before RPC call
+
+                        // Get RPC URL from storage or use default
+                        let rpc_url = storage::load_rpc_from_storage()
+                            .unwrap_or_else(|| "https://api.mainnet-beta.solana.com".to_string());
+
+                        // Create RPC client and fetch balance
+                        let client = RpcClient::new(rpc_url);
+
+                        match solana_sdk::pubkey::Pubkey::from_str(&pubkey) {
+                            Ok(pubkey_parsed) => {
+                                match client.get_balance(&pubkey_parsed) {
+                                    Ok(lamports) => {
+                                        let balance = lamports as f64 / 1_000_000_000.0; // Convert lamports to SOL
+                                        println!("✅ Bridge: Balance: {} SOL", balance);
+                                        BridgeResponse::Balance { balance }
+                                    },
+                                    Err(e) => {
+                                        println!("❌ Bridge: Failed to fetch balance: {}", e);
+                                        BridgeResponse::Error {
+                                            message: format!("Failed to fetch balance: {}", e)
+                                        }
+                                    }
+                                }
+                            },
+                            Err(e) => {
+                                BridgeResponse::Error {
+                                    message: format!("Invalid public key: {}", e)
+                                }
+                            }
                         }
                     },
                     None => {

@@ -31,6 +31,9 @@ pub enum BridgeRequest {
 
     /// Get wallet public key (for status checks)
     GetPublicKey,
+
+    /// Get wallet balance
+    GetBalance,
 }
 
 /// Messages sent from desktop app to browser extension
@@ -70,6 +73,11 @@ pub enum BridgeResponse {
     PublicKey {
         public_key: String,
         wallet_name: String,
+    },
+
+    /// Balance response
+    Balance {
+        balance: f64, // SOL balance
     },
 }
 
