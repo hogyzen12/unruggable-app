@@ -93,7 +93,13 @@ impl QuantumVaultClient {
         pubkey_hash: &[u8; 32],
         bump: u8,
     ) -> Result<String, String> {
+        log::info!("🔐 Creating quantum vault...");
+        log::info!("  Payer: {}", payer.pubkey());
+        log::info!("  Pubkey hash: {}", hex::encode(pubkey_hash));
+        log::info!("  Bump: {}", bump);
+        
         let (vault_pda, _) = self.derive_vault_address(pubkey_hash);
+        log::info!("  Vault PDA: {}", vault_pda);
 
         let instruction_data = [
             &[0u8].as_ref(), // OpenVault discriminator
@@ -127,8 +133,13 @@ impl QuantumVaultClient {
         let signature = self
             .rpc_client
             .send_and_confirm_transaction(&transaction)
-            .map_err(|e| format!("Failed to create vault: {}", e))?;
+            .map_err(|e| {
+                log::error!("❌ Failed to create vault: {}", e);
+                format!("Failed to create vault: {}", e)
+            })?;
 
+        log::info!("✅ Vault created successfully!");
+        log::info!("  Signature: {}", signature);
         Ok(signature.to_string())
     }
 
@@ -139,6 +150,11 @@ impl QuantumVaultClient {
         vault_address: &Pubkey,
         amount: u64,
     ) -> Result<String, String> {
+        log::info!("💰 Depositing to quantum vault...");
+        log::info!("  Vault: {}", vault_address);
+        log::info!("  Amount: {} lamports ({} SOL)", amount, amount as f64 / LAMPORTS_PER_SOL as f64);
+        log::info!("  From: {}", payer.pubkey());
+        
         let instruction = system_instruction::transfer(&payer.pubkey(), vault_address, amount);
 
         let recent_blockhash = self
@@ -156,8 +172,13 @@ impl QuantumVaultClient {
         let signature = self
             .rpc_client
             .send_and_confirm_transaction(&transaction)
-            .map_err(|e| format!("Failed to deposit: {}", e))?;
+            .map_err(|e| {
+                log::error!("❌ Failed to deposit: {}", e);
+                format!("Failed to deposit: {}", e)
+            })?;
 
+        log::info!("✅ Deposit successful!");
+        log::info!("  Signature: {}", signature);
         Ok(signature.to_string())
     }
 
@@ -172,7 +193,15 @@ impl QuantumVaultClient {
         split_amount: u64,
         bump: u8,
     ) -> Result<SplitResult, String> {
+        log::info!("✂️ Splitting quantum vault...");
+        log::info!("  Source vault: {}", vault_address);
+        log::info!("  Split amount: {} lamports ({} SOL)", split_amount, split_amount as f64 / LAMPORTS_PER_SOL as f64);
+        log::info!("  Split destination: {}", split_vault_address);
+        log::info!("  Refund destination: {}", refund_vault_address);
+        log::info!("  Payer: {}", payer.pubkey());
+        
         // Create Winternitz signature
+        log::info!("🔏 Creating Winternitz quantum-resistant signature...");
         let mut message = [0u8; 72];
         message[0..8].clone_from_slice(&split_amount.to_le_bytes());
         message[8..40].clone_from_slice(&split_vault_address.to_bytes());
@@ -180,6 +209,7 @@ impl QuantumVaultClient {
 
         let signature = vault_privkey.sign(&message.as_ref());
         let sig_bytes: [u8; 896] = signature.into();
+        log::info!("✅ Winternitz signature created (896 bytes)");
 
         let compute_budget = ComputeBudgetInstruction::set_compute_unit_limit(1_000_000);
 
@@ -213,14 +243,25 @@ impl QuantumVaultClient {
             recent_blockhash,
         );
 
+        log::info!("📤 Sending split transaction...");
         let tx_signature = self
             .rpc_client
             .send_and_confirm_transaction(&transaction)
-            .map_err(|e| format!("Failed to split vault: {}", e))?;
+            .map_err(|e| {
+                log::error!("❌ Failed to split vault: {}", e);
+                format!("Failed to split vault: {}", e)
+            })?;
 
+        log::info!("✅ Vault split successful!");
+        log::info!("  Transaction: {}", tx_signature);
+        
         // Get final balances
+        log::info!("📊 Fetching final balances...");
         let split_balance = self.get_vault_balance(split_vault_address)?;
         let refund_balance = self.get_vault_balance(refund_vault_address)?;
+        
+        log::info!("  Split vault balance: {} lamports ({} SOL)", split_balance, split_balance as f64 / LAMPORTS_PER_SOL as f64);
+        log::info!("  Refund vault balance: {} lamports ({} SOL)", refund_balance, refund_balance as f64 / LAMPORTS_PER_SOL as f64);
 
         Ok(SplitResult {
             transaction_signature: tx_signature.to_string(),

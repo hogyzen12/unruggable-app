@@ -115,12 +115,41 @@ info "Team: $TEAM_ID  BundleID: $BUNDLE_ID"
 
 # ---- Build (aarch64-apple-ios) ----
 info "Building release app…"
+
+# Ensure Rust + all native deps (clang-built) agree on the same minimum iOS version.
+# NOTE: MIN_IOS defaults to 12.0 near the top of this script — that’s fine even if you’re on iOS 18.x.
+export SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+export IPHONEOS_DEPLOYMENT_TARGET="$MIN_IOS"
+
+# Force C/C++ build scripts (zstd-sys, ring, blake3, etc.) to use the same deployment target.
+export CC="$(xcrun --sdk iphoneos -f clang)"
+export CXX="$(xcrun --sdk iphoneos -f clang++)"
+export AR="$(xcrun --sdk iphoneos -f ar)"
+export RANLIB="$(xcrun --sdk iphoneos -f ranlib)"
+export CFLAGS="-miphoneos-version-min=${MIN_IOS}"
+export CPPFLAGS="-miphoneos-version-min=${MIN_IOS}"
+export LDFLAGS="-miphoneos-version-min=${MIN_IOS}"
+
+# Extra safety: make rustc pass the same min-version to the linker too.
+if [[ -n "${RUSTFLAGS:-}" ]]; then
+  export RUSTFLAGS="${RUSTFLAGS} -C link-arg=-miphoneos-version-min=${MIN_IOS}"
+else
+  export RUSTFLAGS="-C link-arg=-miphoneos-version-min=${MIN_IOS}"
+fi
+
+# Clean once to purge any stale objects compiled with a different iOS min version.
+cargo clean
+
 cargo bundle --target aarch64-apple-ios --release
 [[ -d "$APP_PATH" ]] || die "Expected app not found at $APP_PATH"
 ok "Built: $APP_PATH"
 
 # ---- Stamp versions ----
 APP_INFO_PLIST="${APP_PATH}/Info.plist"
+# Ensure the bundle advertises the same minimum iOS version we built for
+/usr/libexec/PlistBuddy -c "Set :MinimumOSVersion ${MIN_IOS}" "$APP_INFO_PLIST" \
+  || /usr/libexec/PlistBuddy -c "Add :MinimumOSVersion string ${MIN_IOS}" "$APP_INFO_PLIST"
+
 [[ -n "${MARKETING_VERSION}" ]] || die "MARKETING_VERSION empty"
 
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${MARKETING_VERSION}" "$APP_INFO_PLIST" \

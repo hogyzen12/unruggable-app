@@ -7,11 +7,9 @@ edition = "2021"
 [dependencies]
 # Core dependencies for all platforms
 #EDGE
-dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "a8230d8", features = ["fullstack", "mobile", "router"] }
+#dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "a8230d8", features = ["fullstack", "mobile", "router"] }
 #ALPHA - passing all builds & bundles + device deployment
-#dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011",  features = ["fullstack", "mobile", "router"] }
-#STABLE - fails android
-#dioxus = { version = "0.6.3", features = ["fullstack","router"] }
+dioxus = { git = "https://github.com/DioxusLabs/dioxus", rev = "da72b63",  features = ["fullstack", "mobile", "router"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 bs58 = "0.5.1"
@@ -48,7 +46,6 @@ carrot-sdk = "0.1.0"
 bonk-staking-rewards = "0.1.0"
 borsh = "1.5.7"
 solana-winternitz = "0.1.0"
-web-sys = { version = "0.3", features = ["Window", "Storage", "Performance"] }
 
 # Desktop/non-mobile specific dependencies
 [target.'cfg(not(any(target_os = "android")))'.dependencies]
@@ -64,7 +61,7 @@ solana-derivation-path = "2.2.1"
 hidapi = "2.6.3"
 parking_lot = "0.12"
 #dioxus-desktop = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011", default-features = false}
-dioxus-desktop = { git = "https://github.com/DioxusLabs/dioxus", rev = "a8230d8", default-features = false}
+dioxus-desktop = { git = "https://github.com/DioxusLabs/dioxus", rev = "da72b63", default-features = false}
 
 
 # Android-specific dependencies

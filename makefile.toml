@@ -18,10 +18,40 @@ dependencies = ["build_ios_sim", "install_ios_sim"]
 
 [tasks.serve-sim]
 dependencies = ["build_ios_sim", "install_ios_sim", "run_ios_sim"]
-
 [tasks.build_ios_device]
-command = "cargo"
-args = ["bundle", "--target", "aarch64-apple-ios"]
+script_runner = "bash"
+script = '''
+set -euo pipefail
+
+: "${MIN_IOS:=12.0}"
+
+# OK to export this globally — it influences Rust’s iOS link target
+export IPHONEOS_DEPLOYMENT_TARGET="$MIN_IOS"
+
+IOS_SDKROOT="$(xcrun --sdk iphoneos --show-sdk-path)"
+IOS_CLANG="$(xcrun --sdk iphoneos -f clang)"
+IOS_CLANGXX="$(xcrun --sdk iphoneos -f clang++)"
+IOS_AR="$(xcrun --sdk iphoneos -f ar)"
+IOS_RANLIB="$(xcrun --sdk iphoneos -f ranlib)"
+
+# IMPORTANT: target-scoped env vars (do NOT override host CC/CFLAGS)
+export "SDKROOT_aarch64_apple_ios=${IOS_SDKROOT}"
+export "CC_aarch64_apple_ios=${IOS_CLANG}"
+export "CXX_aarch64_apple_ios=${IOS_CLANGXX}"
+export "AR_aarch64_apple_ios=${IOS_AR}"
+export "RANLIB_aarch64_apple_ios=${IOS_RANLIB}"
+export "CFLAGS_aarch64_apple_ios=-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${MIN_IOS}"
+export "CPPFLAGS_aarch64_apple_ios=-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${MIN_IOS}"
+export "LDFLAGS_aarch64_apple_ios=-isysroot ${IOS_SDKROOT} -miphoneos-version-min=${MIN_IOS}"
+
+# Ensure final link uses the same min iOS
+export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-miphoneos-version-min=${MIN_IOS}"
+
+# Clean once to purge stale objects
+cargo clean
+
+cargo bundle --target aarch64-apple-ios
+'''
 
 [tasks.code-sign-ios-device]
 command = "./tools/make-entitlements.sh"
