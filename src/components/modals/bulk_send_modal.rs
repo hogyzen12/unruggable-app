@@ -198,6 +198,9 @@ pub fn BulkSendModal(
     // Hardware approval overlay state
     let mut show_hardware_approval = use_signal(|| false);
     
+    // Get the global TransactionClient from context (pre-initialized with TPU)
+    let transaction_client = use_context::<Arc<TransactionClient>>();
+    
     // Filter tokens to only selected ones using use_memo for reactivity
     let selected_tokens = use_memo(move || {
         all_tokens.iter()
@@ -566,6 +569,9 @@ pub fn BulkSendModal(
                                     })
                                     .collect();
                                 
+                                // Clone the transaction client Arc before moving into async
+                                let client = transaction_client.clone();
+                                
                                 spawn(async move {
                                     // ← NO NEED TO VALIDATE recipient_address anymore since it's already a valid pubkey!
                                 
@@ -574,7 +580,7 @@ pub fn BulkSendModal(
                                         println!("  {} {} ({})", item.amount, item.token.symbol, item.token.mint);
                                     }
                                     
-                                    let client = TransactionClient::new(rpc_url.as_deref());
+                                    // Use the global pre-initialized TransactionClient (already cloned above)
                                 
                                     // Determine signer type based on available wallet
                                     let result = if let Some(ref hw) = hardware_wallet_clone {

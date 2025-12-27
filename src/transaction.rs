@@ -25,6 +25,7 @@ use spl_associated_token_account::instruction::create_associated_token_account;
 use std::collections::HashMap;
 use yellowstone_jet_tpu_client::yellowstone_grpc::sender::YellowstoneTpuSender;
 use tokio::sync::{Mutex, OnceCell};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Token program IDs
 const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -43,6 +44,8 @@ pub struct TransactionClient {
     tpu_sender: Arc<OnceCell<Arc<Mutex<YellowstoneTpuSender>>>>,
     /// TPU configuration
     tpu_config: TpuConfig,
+    /// Flag to track if TPU initialization has been attempted and failed
+    tpu_init_failed: AtomicBool,
 }
 
 /// Bulk transaction builder for atomic multi-token sends
@@ -247,7 +250,24 @@ impl TransactionClient {
             rpc_url: url,
             tpu_sender: Arc::new(OnceCell::new()),
             tpu_config,
+            tpu_init_failed: AtomicBool::new(false),
         }
+    }
+    
+    /// Initialize TPU in the background (non-blocking)
+    /// Call this at app startup to avoid lag on first transaction
+    pub fn init_tpu_background(self: &Arc<Self>) {
+        if !self.tpu_config.is_valid() {
+            println!("[TPU] TPU not configured, skipping background initialization");
+            return;
+        }
+        
+        let client = Arc::clone(self);
+        tokio::spawn(async move {
+            println!("[TPU] Starting background TPU initialization...");
+            let _ = client.get_tpu_sender().await;
+            println!("[TPU] Background TPU initialization complete");
+        });
     }
     
     /// Get or initialize TPU sender (lazy async initialization)
@@ -257,45 +277,55 @@ impl TransactionClient {
             return None;
         }
         
-        let sender = self.tpu_sender.get_or_init(|| async {
-            use yellowstone_jet_tpu_client::yellowstone_grpc::sender::{
-                create_yellowstone_tpu_sender, Endpoints,
-            };
-            
-            // Generate ephemeral identity keypair for this TPU sender instance
-            let tpu_identity = Keypair::new();
-            
-            println!("[TPU] Creating TPU sender with:");
-            println!("[TPU]   RPC: {}", self.rpc_url);
-            println!("[TPU]   gRPC: {}", self.tpu_config.grpc_endpoint);
-            println!("[TPU]   Token: {}", if self.tpu_config.grpc_token.is_some() { "***" } else { "none" });
-            
-            let endpoints = Endpoints {
-                rpc: self.rpc_url.clone(),
-                grpc: self.tpu_config.grpc_endpoint.clone(),
-                grpc_x_token: self.tpu_config.grpc_token.clone(),
-            };
-            
-            // Create the TPU sender asynchronously
-            match create_yellowstone_tpu_sender(
-                Default::default(),
-                tpu_identity,
-                endpoints,
-            ).await {
-                Ok(result) => {
-                    println!("[TPU] Initialized TPU sender with fanout={}", self.tpu_config.fanout_count);
-                    Arc::new(Mutex::new(result.sender))
-                }
-                Err(e) => {
-                    println!("[TPU] Failed to initialize TPU sender: {}. Continuing with RPC only.", e);
-                    // Return a dummy mutex that will never be used
-                    // This is a workaround since OnceCell requires a value
-                    panic!("TPU initialization failed: {}", e);
-                }
-            }
-        }).await;
+        // Check if TPU initialization previously failed - skip retry
+        if self.tpu_init_failed.load(Ordering::Relaxed) {
+            return None;
+        }
         
-        Some(Arc::clone(sender))
+        // Check if already initialized successfully
+        if let Some(sender) = self.tpu_sender.get() {
+            return Some(Arc::clone(sender));
+        }
+        
+        // Try to initialize TPU sender
+        use yellowstone_jet_tpu_client::yellowstone_grpc::sender::{
+            create_yellowstone_tpu_sender, Endpoints,
+        };
+        
+        // Generate ephemeral identity keypair for this TPU sender instance
+        let tpu_identity = Keypair::new();
+        
+        println!("[TPU] Creating TPU sender with:");
+        println!("[TPU]   RPC: {}", self.rpc_url);
+        println!("[TPU]   gRPC: {}", self.tpu_config.grpc_endpoint);
+        println!("[TPU]   Token: {}", if self.tpu_config.grpc_token.is_some() { "***" } else { "none" });
+        
+        let endpoints = Endpoints {
+            rpc: self.rpc_url.clone(),
+            grpc: self.tpu_config.grpc_endpoint.clone(),
+            grpc_x_token: self.tpu_config.grpc_token.clone(),
+        };
+        
+        // Create the TPU sender asynchronously
+        match create_yellowstone_tpu_sender(
+            Default::default(),
+            tpu_identity,
+            endpoints,
+        ).await {
+            Ok(result) => {
+                println!("[TPU] Initialized TPU sender successfully");
+                let sender = Arc::new(Mutex::new(result.sender));
+                let _ = self.tpu_sender.set(Arc::clone(&sender));
+                Some(sender)
+            }
+            Err(e) => {
+                println!("[TPU] Failed to initialize TPU sender: {}. Continuing with RPC only.", e);
+                // Mark TPU as failed so we don't retry on subsequent transactions
+                self.tpu_init_failed.store(true, Ordering::Relaxed);
+                println!("[TPU] TPU initialization disabled for this session");
+                None
+            }
+        }
     }
 
     /// Send bulk transaction with multiple tokens/SOL
@@ -531,9 +561,9 @@ impl TransactionClient {
             
             tokio::spawn(async move {
                 let mut sender = tpu_sender_clone.lock().await;
-                match sender.send_txn_fanout(sig_clone, tx_bytes_clone, fanout).await {
+                match sender.send_txn(sig_clone, tx_bytes_clone).await {
                     Ok(_) => {
-                        println!("[TPU] Transaction {} sent via TPU (fanout={})", sig_clone, fanout);
+                        println!("[TPU] Transaction {} sent via TPU", sig_clone);
                     }
                     Err(e) => {
                         println!("[TPU] Failed to send transaction via TPU: {:?}", e);

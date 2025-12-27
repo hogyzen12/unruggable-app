@@ -87,6 +87,13 @@ fn App() -> Element {
 
     // Provide SNS resolver to the entire app
     use_context_provider(|| sns_resolver);
+    
+    // Initialize global TransactionClient and start background TPU initialization
+    let transaction_client = Arc::new(transaction::TransactionClient::new(None));
+    transaction_client.init_tpu_background();
+    
+    // Provide TransactionClient to the entire app
+    use_context_provider(|| transaction_client);
 
     rsx! {
         // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
