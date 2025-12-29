@@ -1,13 +1,13 @@
 use dioxus::prelude::*;
-use std::sync::Arc;
 use crate::wallet::WalletInfo;
 use crate::hardware::HardwareWallet;
-use crate::transaction::TransactionClient;
 use crate::components::common::Token;
+use crate::transaction::TransactionClient;
 use crate::signing::hardware::HardwareSigner;
 use crate::signing::software::SoftwareSigner;
 use crate::signing::TransactionSigner;
 use crate::wallet::Wallet;
+use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     transaction::VersionedTransaction,
@@ -15,9 +15,10 @@ use solana_sdk::{
     hash::Hash as SolanaHash,
     instruction::Instruction as SolanaInstruction,
     instruction::AccountMeta as SolanaAccountMeta,
-    message::{v0, VersionedMessage, AddressLookupTableAccount},
+    message::{v0, VersionedMessage},
+    system_instruction,
+    address_lookup_table::AddressLookupTableAccount,
 };
-use solana_system_interface::instruction as system_instruction;
 use crate::titan::{TitanClient, build_transaction_from_route};
 use crate::titan::SwapRoute as TitanSwapRoute;
 use crate::timeout;
@@ -27,7 +28,7 @@ const ICON_SWITCH: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 
 // Jules tip address for monetization (0.0001 SOL per swap)
 const JULES_TIP_ADDRESS: &str = "juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp";
-const JULES_TIP_LAMPORTS: u64 = 100_000; //  0.0001 SOL
+const JULES_TIP_LAMPORTS: u64 = 100_000; // 0.0001 SOL
 
 /// Convert SwapInstruction to Solana Instruction
 fn swap_instruction_to_solana(swap_ix: &SwapInstruction) -> Result<SolanaInstruction, String> {
@@ -132,7 +133,7 @@ async fn fetch_lookup_tables(
     Ok(lookup_tables)
 }
 
-/// Build transaction from swap instructions and add Jules tip
+/// Build transaction from swap instructions and add jules tip
 async fn build_transaction_from_instructions(
     compute_budget_ixs: Vec<SwapInstruction>,
     setup_ixs: Vec<SwapInstruction>,
@@ -184,13 +185,13 @@ async fn build_transaction_from_instructions(
         all_instructions.push(swap_instruction_to_solana(&ix)?);
     }
     
-    // Add Jules tip instruction (LAST)
+    // Add jules tip instruction
     let jules_tip_address = SolanaPubkey::from_str(JULES_TIP_ADDRESS)
-        .map_err(|e| format!("Invalid Jules tip address: {}", e))?;
+        .map_err(|e| format!("Invalid jules tip address: {}", e))?;
     let tip_ix = system_instruction::transfer(&payer, &jules_tip_address, JULES_TIP_LAMPORTS);
     all_instructions.push(tip_ix);
     
-    println!("   Added Jules tip (0.0001 SOL) to swap transaction");
+    println!("   Added jules tip (0.0001 SOL) to swap transaction");
     println!("   Total instructions: {}", all_instructions.len());
     
     // Fetch lookup tables if any
@@ -223,7 +224,7 @@ async fn build_transaction_from_instructions(
     Ok(serialized)
 }
 
-/// Sign a transaction using the provided signer (works for Jupiter, Dflow, and any instruction-based swap)
+/// Sign a Jupiter Ultra transaction using the provided signer
 async fn sign_jupiter_transaction(
     signer: &dyn TransactionSigner,
     unsigned_transaction_b64: &str,
@@ -263,21 +264,21 @@ async fn sign_jupiter_transaction(
     println!("🔍 Message bytes (first 32): {:02x?}", &message_bytes[..message_bytes.len().min(32)]);
     
     // Sign the message
-    println!("⏳ Waiting for wallet signature...");
+    println!("⏳ Waiting for hardware wallet signature...");
     let signature_bytes = match signer.sign_message(&message_bytes).await {
         Ok(sig) => {
-            println!("✅ Wallet returned signature: {} bytes", sig.len());
+            println!("✅ Hardware wallet returned signature: {} bytes", sig.len());
             sig
         }
         Err(e) => {
-            println!("❌ Wallet signing failed: {}", e);
+            println!("❌ Hardware wallet signing failed: {}", e);
             return Err(format!("Failed to sign message: {}", e));
         }
     };
     
     // Ensure we have exactly 64 bytes for the signature
     if signature_bytes.len() != 64 {
-        println!("❌ Invalid signature length from wallet");
+        println!("❌ Invalid signature length from hardware wallet");
         return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()));
     }
     
@@ -310,9 +311,9 @@ async fn sign_jupiter_transaction(
     Ok(signed_transaction_b64)
 }
 
-// Jupiter Ultra API Types (simple order + execute flow)
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JupiterUltraOrderResponse {
+// Jupiter Ultra API Types
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct UltraOrderResponse {
     pub mode: String,
     #[serde(rename = "inputMint")]
     pub input_mint: String,
@@ -346,23 +347,8 @@ pub struct JupiterUltraOrderResponse {
     pub error_message: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JupiterUltraExecuteRequest {
-    #[serde(rename = "signedTransaction")]
-    pub signed_transaction: String,
-    #[serde(rename = "requestId")]
-    pub request_id: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct JupiterUltraExecuteResponse {
-    pub status: String, // "Success" or "Failed"
-    pub signature: Option<String>,
-    pub error: Option<String>,
-}
-
-// Instruction-based API Types (for Dflow only now)
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// Instruction-based API Types (shared between Jupiter and Dflow)
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct InstructionAccount {
     pub pubkey: String,
     #[serde(rename = "isSigner")]
@@ -371,16 +357,77 @@ pub struct InstructionAccount {
     pub is_writable: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SwapInstruction {
     #[serde(rename = "programId")]
     pub program_id: String,
     pub accounts: Vec<InstructionAccount>,
-    pub data: String, // base58 or base64 encoded instruction data
+    pub data: String, // base58 encoded instruction data
+}
+
+// Jupiter Legacy API Types
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct JupiterQuoteResponse {
+    #[serde(rename = "inputMint")]
+    pub input_mint: String,
+    #[serde(rename = "inAmount")]
+    pub in_amount: String,
+    #[serde(rename = "outputMint")]
+    pub output_mint: String,
+    #[serde(rename = "outAmount")]
+    pub out_amount: String,
+    #[serde(rename = "otherAmountThreshold")]
+    pub other_amount_threshold: String,
+    #[serde(rename = "swapMode")]
+    pub swap_mode: String,
+    #[serde(rename = "slippageBps")]
+    pub slippage_bps: u16,
+    #[serde(rename = "platformFee")]
+    pub platform_fee: Option<serde_json::Value>,
+    #[serde(rename = "priceImpactPct")]
+    pub price_impact_pct: String,
+    #[serde(rename = "routePlan")]
+    pub route_plan: Vec<serde_json::Value>,
+    #[serde(rename = "contextSlot")]
+    pub context_slot: Option<u64>,
+    #[serde(rename = "timeTaken")]
+    pub time_taken: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JupiterSwapInstructionsRequest {
+    #[serde(rename = "userPublicKey")]
+    pub user_public_key: String,
+    #[serde(rename = "wrapAndUnwrapSol")]
+    pub wrap_and_unwrap_sol: bool,
+    #[serde(rename = "useSharedAccounts")]
+    pub use_shared_accounts: bool,
+    #[serde(rename = "dynamicComputeUnitLimit")]
+    pub dynamic_compute_unit_limit: bool,
+    #[serde(rename = "prioritizationFeeLamports")]
+    pub prioritization_fee_lamports: serde_json::Value, // Can be "auto" or integer
+    #[serde(rename = "quoteResponse")]
+    pub quote_response: JupiterQuoteResponse,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct JupiterSwapInstructionsResponse {
+    #[serde(rename = "computeBudgetInstructions")]
+    pub compute_budget_instructions: Vec<SwapInstruction>,
+    #[serde(rename = "setupInstructions")]
+    pub setup_instructions: Vec<SwapInstruction>,
+    #[serde(rename = "swapInstruction")]
+    pub swap_instruction: SwapInstruction,
+    #[serde(rename = "cleanupInstruction")]
+    pub cleanup_instruction: Option<SwapInstruction>,
+    #[serde(rename = "otherInstructions")]
+    pub other_instructions: Vec<SwapInstruction>,
+    #[serde(rename = "addressLookupTableAddresses")]
+    pub address_lookup_table_addresses: Vec<String>,
 }
 
 // Dflow API Types
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DflowQuoteResponse {
     #[serde(rename = "inputMint")]
     pub input_mint: String,
@@ -412,7 +459,7 @@ pub struct DflowQuoteResponse {
     pub request_id: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DflowSwapInstructionsRequest {
     #[serde(rename = "userPublicKey")]
     pub user_public_key: String,
@@ -421,12 +468,12 @@ pub struct DflowSwapInstructionsRequest {
     #[serde(rename = "dynamicComputeUnitLimit")]
     pub dynamic_compute_unit_limit: bool,
     #[serde(rename = "prioritizationFeeLamports")]
-    pub prioritization_fee_lamports: serde_json::Value,
+    pub prioritization_fee_lamports: serde_json::Value, // Can be "auto" or object
     #[serde(rename = "quoteResponse")]
     pub quote_response: DflowQuoteResponse,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct DflowSwapInstructionsResponse {
     #[serde(rename = "computeBudgetInstructions")]
     pub compute_budget_instructions: Vec<SwapInstruction>,
@@ -444,6 +491,44 @@ pub struct DflowSwapInstructionsResponse {
     pub compute_unit_limit: u64,
     #[serde(rename = "prioritizationFeeLamports")]
     pub prioritization_fee_lamports: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UltraExecuteRequest {
+    #[serde(rename = "signedTransaction")]
+    pub signed_transaction: String,
+    #[serde(rename = "requestId")]
+    pub request_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UltraExecuteResponse {
+    pub status: String, // "Success" or "Failed"
+    pub signature: Option<String>,
+    pub error: Option<String>,
+}
+
+// Keep original Jupiter v1 types for fallback
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct QuoteResponse {
+    #[serde(rename = "inputMint")]
+    pub input_mint: String,
+    #[serde(rename = "inAmount")]
+    pub in_amount: String,
+    #[serde(rename = "outputMint")]
+    pub output_mint: String,
+    #[serde(rename = "outAmount")]
+    pub out_amount: String,
+    #[serde(rename = "otherAmountThreshold")]
+    pub other_amount_threshold: String,
+    #[serde(rename = "swapMode")]
+    pub swap_mode: String,
+    #[serde(rename = "slippageBps")]
+    pub slippage_bps: u16,
+    #[serde(rename = "priceImpactPct")]
+    pub price_impact_pct: String,
+    #[serde(rename = "routePlan")]
+    pub route_plan: Vec<serde_json::Value>,
 }
 
 // Get token mint address from actual token data
@@ -569,6 +654,15 @@ pub fn SwapTransactionSuccessModal(
     let orb_url = format!("https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary", signature);
     
     rsx! {
+        style { 
+            "
+            @keyframes pulse {{
+                0%, 100% {{ opacity: 0.3; }}
+                50% {{ opacity: 1; }}
+            }}
+            "
+        }
+        
         div {
             class: "modal-backdrop",
             onclick: move |_| onclose.call(()),
@@ -682,9 +776,6 @@ pub fn SwapModal(
 ) -> Element {
     println!("🔄 SwapModal component rendered with Jupiter Ultra API!");
     
-    // Get the global pre-initialized TransactionClient from context
-    let global_tx_client = use_context::<Arc<TransactionClient>>();
-    
     // State management
     let mut selling_token = use_signal(|| "SOL".to_string());
     let mut buying_token = use_signal(|| "USDC".to_string());
@@ -699,13 +790,12 @@ pub fn SwapModal(
     let mut was_hardware_transaction = use_signal(|| false);
     let mut show_hardware_approval = use_signal(|| false);
 
-    // Jupiter Ultra API state (simple order + execute)
-    let mut jupiter_order = use_signal(||None as Option<JupiterUltraOrderResponse>);
+    // Jupiter Legacy API state (instruction-based)
+    let mut jupiter_quote = use_signal(|| None as Option<JupiterQuoteResponse>);
     let mut fetching_jupiter = use_signal(|| false);
-    
-    // Dflow instruction-based API state
+
+    // Dflow API state (instruction-based)
     let mut dflow_quote = use_signal(|| None as Option<DflowQuoteResponse>);
-    let mut dflow_instructions = use_signal(|| None as Option<DflowSwapInstructionsResponse>);
     let mut fetching_dflow = use_signal(|| false);
 
     // Titan Exchange state
@@ -719,7 +809,8 @@ pub fn SwapModal(
     });
     let mut titan_quote = use_signal(|| None as Option<(String, TitanSwapRoute)>); // (provider_name, route)
     let mut fetching_titan = use_signal(|| false);
-    let mut selected_provider = use_signal(|| None as Option<String>); // "Jupiter" or "Titan"
+    let mut selected_provider = use_signal(|| None as Option<String>); // "Jupiter", "Dflow", or "Titan"
+    let mut manual_provider_override = use_signal(|| None as Option<String>); // Manual provider selection
     
     // Store hardware wallet address (fetched async)
     let mut hw_address = use_signal(|| None as Option<String>);
@@ -729,14 +820,8 @@ pub fn SwapModal(
     let tokens_clone2 = tokens.clone();
     let tokens_clone3 = tokens.clone();
     let tokens_clone4 = tokens.clone(); // For handle_amount_change
-    let tokens_clone5 = tokens.clone(); // For quote comparison
+    let tokens_clone5 = tokens.clone(); // For quote comparison use_effect
     let tokens_clone6 = tokens.clone(); // For UI rendering
-    let tokens_clone_price = tokens.clone(); // For price calculations in provider comparison
-    let tokens_clone_swap = tokens.clone(); // For handle_token_swap
-    let tokens_clone_price = tokens.clone(); // For provider comparison
-    let tokens_clone_exchange_rate = tokens.clone(); // For exchange_rate calculation
-    let tokens_clone_selling_usd = tokens.clone(); // For selling_usd_value
-    let tokens_clone_buying_usd = tokens.clone(); // For buying_usd_value
 
     // Show transaction success modal if swap completed
     if show_success_modal() {
@@ -774,8 +859,6 @@ pub fn SwapModal(
     let hardware_wallet_clone = hardware_wallet.clone();
     let wallet_clone = wallet.clone();
     let wallet_clone_for_titan = wallet.clone(); // Separate clone for Titan swap
-    let wallet_clone_for_buying = wallet.clone(); // For handle_token_swap
-    let wallet_clone_for_buying_dropdown = wallet.clone(); // For buying token dropdown handler
     let hardware_wallet_clone2 = hardware_wallet.clone(); 
     let wallet_clone2 = wallet.clone();
     let custom_rpc_clone = custom_rpc.clone();
@@ -892,121 +975,86 @@ pub fn SwapModal(
         });
     };
 
-    // Dflow: Fetch quote
-    let fetch_dflow_quote = move |input_mint: String, output_mint: String, amount_lamports: u64, slippage_bps: u16| {
+    // Jupiter Legacy API: Fetch quote for instruction-based swaps
+    let fetch_jupiter_quote = move |input_mint: String, output_mint: String, amount_lamports: u64| {
         spawn(async move {
-            if fetching_dflow() {
-                return;
-            }
-            
-            fetching_dflow.set(true);
-            
-            let client = reqwest::Client::new();
-            // Step 1: Get quote from Dflow
-            let quote_url = format!(
-                "https://quote-api.dflow.net/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",
-                input_mint, output_mint, amount_lamports, slippage_bps
-            );
-            
-            println!("💜 Fetching Dflow quote: {}", quote_url);
-            
-            match client
-                .get(&quote_url)
-                .header("x-api-key", "HboXeWH6dkjayWfKnkmh")
-                .send()
-                .await
-            {
-                Ok(response) => {
-                    if response.status().is_success() {
-                        match response.json::<DflowQuoteResponse>().await {
-                            Ok(quote) => {
-                                println!("✅ Dflow quote received: {} -> {}", quote.in_amount, quote.out_amount);
-                                
-                                // Store quote for comparison
-                                dflow_quote.set(Some(quote.clone()));
-                                
-                                // Step 2: Instructions will be fetched in CHUNK 5 during swap execution
-                                println!("✅ Dflow quote stored (instruction fetch pending until swap)");
-                            }
-                            Err(e) => {
-                                println!("❌ Failed to parse Dflow quote: {}", e);
-                            }
-                        }
-                    } else {
-                        println!("❌ Dflow quote API error: {}", response.status());
-                    }
-                }
-                Err(e) => {
-                    println!("❌ Dflow quote request failed: {}", e);
-                }
-            }
-            
-            fetching_dflow.set(false);
-        });
-    };
-    
-    // Jupiter Ultra API: Fetch order (quote + unsigned transaction)
-    let fetch_jupiter_order = move |input_mint: String, output_mint: String, amount_lamports: u64, user_pubkey: Option<String>| {
-        spawn(async move {
+            // Prevent multiple simultaneous requests
             if fetching_jupiter() {
                 return;
             }
             
             fetching_jupiter.set(true);
-            error_message.set(None);
             
-            let client = reqwest::Client::new();
+            // Configure reqwest client for iOS compatibility
+            let client = match reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build() 
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    println!("❌ Failed to create HTTP client: {}", e);
+                    fetching_jupiter.set(false);
+                    return;
+                }
+            };
             
-            // Build Jupiter Ultra order URL
-            let mut url = format!(
-                "https://api.jup.ag/ultra/v1/order?inputMint={}&outputMint={}&amount={}",
+            // Build query parameters for Jupiter v1 /quote endpoint with required parameters
+            let url = format!(
+                "https://api.jup.ag/swap/v1/quote?inputMint={}&outputMint={}&amount={}&slippageBps=50&swapMode=ExactIn&restrictIntermediateTokens=true&maxAccounts=64&instructionVersion=V1",
                 input_mint, output_mint, amount_lamports
             );
             
-            // Add taker (user pubkey) if available for unsigned transaction
-            if let Some(pubkey) = user_pubkey {
-                url.push_str(&format!("&taker={}", pubkey));
-            }
+            println!("🚀 Fetching Jupiter quote: {}", url);
             
-            println!("🪐 Fetching Jupiter Ultra order: {}", url);
-            
-            match client
-                .get(&url)
+            match client.get(&url)
                 .header("x-api-key", "ddbf7533-efd7-41a4-b794-59325ccbc383")
-                .send()
-                .await {
+                .send().await {
                 Ok(response) => {
-                    if response.status().is_success() {
-                        match response.json::<JupiterUltraOrderResponse>().await {
-                            Ok(order) => {
-                                println!("✅ Jupiter Ultra order received: {} -> {}", order.in_amount, order.out_amount);
+                    let status = response.status();
+                    println!("📡 Jupiter API response status: {}", status);
+                    
+                    if status.is_success() {
+                        // Get raw response text first for debugging
+                        match response.text().await {
+                            Ok(response_text) => {
+                                println!("📄 Jupiter raw response (first 500 chars): {}", &response_text[..response_text.len().min(500)]);
                                 
-                                // Check for API-level errors first
-                                if let Some(error_msg) = &order.error_message {
-                                    println!("❌ Jupiter Ultra API Error: {}", error_msg);
-                                    error_message.set(Some(match error_msg.as_str() {
-                                        "Taker has insufficient input" => "Insufficient balance for this swap".to_string(),
-                                        msg if msg.contains("insufficient") => "Insufficient balance".to_string(),
-                                        _ => format!("Swap error: {}", error_msg),
-                                    }));
-                                } else {
-                                    // Store order for comparison and swap execution
-                                    jupiter_order.set(Some(order));
+                                // Try to parse as JupiterQuoteResponse
+                                match serde_json::from_str::<JupiterQuoteResponse>(&response_text) {
+                                    Ok(quote) => {
+                                        println!("✅ Jupiter quote received: {} -> {}", quote.in_amount, quote.out_amount);
+                                        println!("📊 Slippage: {} bps", quote.slippage_bps);
+                                        println!("📊 Price Impact: {}%", quote.price_impact_pct);
+                                        jupiter_quote.set(Some(quote));
+                                    }
+                                    Err(e) => {
+                                        println!("❌ Failed to parse Jupiter response as JupiterQuoteResponse: {}", e);
+                                        println!("📄 Full response: {}", response_text);
+                                        jupiter_quote.set(None);
+                                    }
                                 }
                             }
                             Err(e) => {
-                                println!("❌ Failed to parse Jupiter Ultra response: {}", e);
-                                error_message.set(Some("Failed to get swap quote".to_string()));
+                                println!("❌ Failed to read Jupiter response text: {}", e);
+                                jupiter_quote.set(None);
                             }
                         }
                     } else {
-                        println!("❌ Jupiter Ultra API returned error status: {}", response.status());
-                        error_message.set(Some(format!("API error: {}", response.status())));
+                        println!("❌ Jupiter API returned error status: {}", status);
+                        match response.text().await {
+                            Ok(error_text) => {
+                                println!("📄 Error response: {}", error_text);
+                            }
+                            Err(e) => {
+                                println!("❌ Failed to read error response: {}", e);
+                            }
+                        }
+                        jupiter_quote.set(None);
                     }
                 }
                 Err(e) => {
-                    println!("❌ Jupiter Ultra request failed: {}", e);
-                    error_message.set(Some("Network error - please try again".to_string()));
+                    println!("❌ Jupiter request failed: {}", e);
+                    jupiter_quote.set(None);
                 }
             }
             
@@ -1014,21 +1062,234 @@ pub fn SwapModal(
         });
     };
 
+    // Dflow API: Fetch quote with API key authentication
+    let fetch_dflow_quote = move |input_mint: String, output_mint: String, amount_lamports: u64| {
+        spawn(async move {
+            // Prevent multiple simultaneous requests
+            if fetching_dflow() {
+                return;
+            }
+            
+            fetching_dflow.set(true);
+            
+            let client = reqwest::Client::new();
+            
+            // Build query parameters
+            let url = format!(
+                "https://quote-api.dflow.net/quote?inputMint={}&outputMint={}&amount={}&slippageBps=50",
+                input_mint, output_mint, amount_lamports
+            );
+            
+            println!("🌊 Fetching Dflow quote: {}", url);
+            
+            match client
+                .get(&url)
+                .header("x-api-key", "HboXeWH6dkjayWfKnkmh")
+                .send()
+                .await 
+            {
+                Ok(response) => {
+                    if response.status().is_success() {
+                        match response.json::<DflowQuoteResponse>().await {
+                            Ok(quote) => {
+                                println!("✅ Dflow quote received: {} -> {}", quote.in_amount, quote.out_amount);
+                                println!("📊 Slippage: {} bps", quote.slippage_bps);
+                                println!("📊 Price Impact: {}%", quote.price_impact_pct);
+                                dflow_quote.set(Some(quote));
+                            }
+                            Err(e) => {
+                                println!("❌ Failed to parse Dflow response: {}", e);
+                                dflow_quote.set(None);
+                            }
+                        }
+                    } else {
+                        println!("❌ Dflow API returned error status: {}", response.status());
+                        dflow_quote.set(None);
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Dflow request failed: {}", e);
+                    dflow_quote.set(None);
+                }
+            }
+            
+            fetching_dflow.set(false);
+        });
+    };
 
+    // Titan Exchange: Execute transaction via direct Solana RPC submission
+    let execute_titan_swap = move |signed_transaction_b64: String, custom_rpc: Option<String>| {
+        spawn(async move {
+            println!("🔷 Executing Titan swap via Solana RPC...");
+            
+            // Convert base64 signed transaction to bytes
+            let signed_tx_bytes = match base64::decode(&signed_transaction_b64) {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    println!("❌ Failed to decode base64 transaction: {}", e);
+                    swapping.set(false);
+                    error_message.set(Some(format!("Transaction decode error: {}", e)));
+                    return;
+                }
+            };
+            
+            println!("📄 Decoded transaction: {} bytes", signed_tx_bytes.len());
+            
+            // Encode to base58 for Solana RPC submission
+            let signed_tx_b58 = bs58::encode(&signed_tx_bytes).into_string();
+            
+            println!("📝 Encoded to base58: {} chars", signed_tx_b58.len());
+            
+            // Create transaction client with custom RPC if provided
+            let rpc_url = custom_rpc.as_deref();
+            let transaction_client = TransactionClient::new(rpc_url);
+            
+            // Submit directly to Solana RPC
+            match transaction_client.send_transaction(&signed_tx_b58).await {
+                Ok(signature) => {
+                    println!("✅ Titan swap executed successfully! Signature: {}", signature);
+                    transaction_signature.set(signature);
+                    swapping.set(false);
+                    show_success_modal.set(true);
+                }
+                Err(e) => {
+                    println!("❌ Titan swap failed: {}", e);
+                    swapping.set(false);
+                    error_message.set(Some(format!("Swap failed: {}", e)));
+                }
+            }
+        });
+    };
 
+    // Jupiter Ultra API: Execute transaction - REAL IMPLEMENTATION
+    let execute_jupiter_ultra_swap = move |order: UltraOrderResponse, signed_transaction: String| {
+        spawn(async move {
+            let client = reqwest::Client::new();
+            
+            let execute_request = UltraExecuteRequest {
+                signed_transaction,
+                request_id: order.request_id.clone(),
+            };
+            
+            println!("🚀 Executing Jupiter Ultra swap with requestId: {}", order.request_id);
+            println!("🔄 Signed transaction length: {} chars", execute_request.signed_transaction.len());
+            
+            match client
+                .post("https://lite-api.jup.ag/ultra/v1/execute")
+                .json(&execute_request)
+                .send()
+                .await 
+            {
+                Ok(response) => {
+                    let status_code = response.status();
+                    println!("📡 Jupiter Ultra execute response status: {}", status_code);
+                    
+                    // Get response text first to debug
+                    match response.text().await {
+                        Ok(response_text) => {
+                            println!("📄 Raw execute response: {}", response_text);
+                            
+                            if status_code.is_success() {
+                                // Try to parse as the expected UltraExecuteResponse format
+                                match serde_json::from_str::<UltraExecuteResponse>(&response_text) {
+                                    Ok(execute_response) => {
+                                        match execute_response.status.as_str() {
+                                            "Success" => {
+                                                if let Some(signature) = execute_response.signature {
+                                                    println!("✅ Jupiter Ultra swap executed successfully! Signature: {}", signature);
+                                                    transaction_signature.set(signature);
+                                                    swapping.set(false);
+                                                    show_success_modal.set(true);
+                                                } else {
+                                                    println!("⚠️ Swap completed but no signature returned");
+                                                    swapping.set(false);
+                                                    error_message.set(Some("Swap completed but no transaction signature received".to_string()));
+                                                }
+                                            }
+                                            "Failed" => {
+                                                let error_msg = execute_response.error.unwrap_or("Unknown error".to_string());
+                                                println!("❌ Jupiter Ultra swap failed: {}", error_msg);
+                                                swapping.set(false);
+                                                error_message.set(Some(format!("Swap failed: {}", error_msg)));
+                                            }
+                                            _ => {
+                                                println!("⚠️ Unknown swap status: {}", execute_response.status);
+                                                swapping.set(false);
+                                                error_message.set(Some(format!("Unknown swap status: {}", execute_response.status)));
+                                            }
+                                        }
+                                    }
+                                    Err(_) => {
+                                        // If parsing as UltraExecuteResponse fails, try to parse as a generic response
+                                        // Sometimes Jupiter might return just a transaction signature directly
+                                        if response_text.len() == 64 || response_text.len() == 88 {
+                                            // Looks like a transaction signature
+                                            println!("✅ Received transaction signature: {}", response_text);
+                                            transaction_signature.set(response_text);
+                                            swapping.set(false);
+                                            show_success_modal.set(true);
+                                        } else {
+                                            println!("❌ Failed to parse execute response format");
+                                            println!("📄 Response was: {}", response_text);
+                                            swapping.set(false);
+                                            error_message.set(Some("Unexpected response format from Jupiter".to_string()));
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Handle error responses
+                                println!("❌ Jupiter Ultra execute failed with status: {}", status_code);
+                                
+                                // Try to parse error details
+                                if let Ok(error_json) = serde_json::from_str::<serde_json::Value>(&response_text) {
+                                    if let Some(error_msg) = error_json.get("error").and_then(|e| e.as_str()) {
+                                        println!("❌ Error details: {}", error_msg);
+                                        swapping.set(false);
+                                        error_message.set(Some(format!("Swap failed: {}", error_msg)));
+                                    } else {
+                                        swapping.set(false);
+                                        error_message.set(Some(format!("Swap failed with status: {}", status_code)));
+                                    }
+                                } else {
+                                    swapping.set(false);
+                                    error_message.set(Some(format!("Swap failed with status: {}", status_code)));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            println!("❌ Failed to read response text: {}", e);
+                            swapping.set(false);
+                            error_message.set(Some("Network error during swap execution".to_string()));
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Jupiter Ultra execute request failed: {}", e);
+                    swapping.set(false);
+                    error_message.set(Some("Network error during swap execution".to_string()));
+                }
+            }
+        });
+    };
 
+    // Token price lookup for USD calculations
+    let get_token_price_usd = move |symbol: &str| -> f64 {
+        match symbol {
+            "SOL" => 184.83,
+            "USDC" => 1.0,
+            "USDT" => 1.0,
+            "JUP" => 0.85,
+            "BONK" => 0.000025,
+            "JTO" => 2.45,
+            "JLP" => 3.12,
+            _ => 1.0,
+        }
+    };
 
-    // Calculate exchange rate for fallback display using live prices
+    // Calculate exchange rate for fallback display
     let exchange_rate = use_memo(move || {
-        let selling_price = tokens_clone_exchange_rate.iter()
-            .find(|t| t.symbol == selling_token())
-            .map(|t| t.price)
-            .unwrap_or(1.0);
-        
-        let buying_price = tokens_clone_exchange_rate.iter()
-            .find(|t| t.symbol == buying_token())
-            .map(|t| t.price)
-            .unwrap_or(1.0);
+        let selling_price = get_token_price_usd(&selling_token());
+        let buying_price = get_token_price_usd(&buying_token());
         
         if buying_price > 0.0 {
             selling_price / buying_price
@@ -1041,9 +1302,11 @@ pub fn SwapModal(
     let mut handle_amount_change = move |value: String| {
         selling_amount.set(value.clone());
         error_message.set(None);
-        jupiter_order.set(None); // Clear previous Jupiter order
+        jupiter_quote.set(None); // Clear previous Jupiter quote
+        dflow_quote.set(None); // Clear previous Dflow quote
         titan_quote.set(None); // Clear previous Titan quote
         selected_provider.set(None); // Clear provider selection
+        manual_provider_override.set(None); // Clear manual override
         
         if !value.is_empty() {
             if let Ok(amount) = value.parse::<f64>() {
@@ -1069,7 +1332,7 @@ pub fn SwapModal(
                 };
                 buying_amount.set(fallback_formatted);
                 
-                // Fetch quotes from BOTH Jupiter and Titan in parallel
+                // Fetch quotes from ALL THREE providers (Jupiter, Dflow, Titan) in parallel
                 if amount <= selling_balance && amount > 0.0 {
                     let amount_lamports = to_lamports(amount, &selling_token(), &tokens_clone4);
                     
@@ -1093,61 +1356,87 @@ pub fn SwapModal(
                     spawn(async move {
                         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
                         
-                        // Spawn both quote requests in parallel
-                        println!("🔄 Fetching quotes from both Jupiter and Titan...");
+                        // Spawn all three quote requests in parallel
+                        println!("🔄 Fetching quotes from Jupiter, Dflow, and Titan...");
                         
-                        // Fetch all three providers in parallel
-                        fetch_jupiter_order(input_mint_jup, output_mint_jup, amount_lamports, user_pubkey_jup);
-                        fetch_dflow_quote(input_mint_dflow, output_mint_dflow, amount_lamports, 50);
+                        // Jupiter request (legacy /quote API)
+                        fetch_jupiter_quote(input_mint_jup, output_mint_jup, amount_lamports);
+                        
+                        // Dflow request (runs in parallel)
+                        fetch_dflow_quote(input_mint_dflow, output_mint_dflow, amount_lamports);
+                        
+                        // Titan request (runs in parallel)
                         fetch_titan_quotes(input_mint_titan, output_mint_titan, amount_lamports, user_pubkey_titan);
                     });
                 }
             }
         } else {
             buying_amount.set("0.00".to_string());
-            jupiter_order.set(None);
+            jupiter_quote.set(None);
+            dflow_quote.set(None);
             titan_quote.set(None);
         }
     };
 
-    // Quote comparison logic: Compare all three providers and select the best
+    // Quote comparison logic: Compare Jupiter, Dflow, and Titan quotes and select the best
     use_effect(move || {
-        let jupiter_o = jupiter_order();
+        let jup_quote = jupiter_quote();
         let dflow_q = dflow_quote();
         let titan_q = titan_quote();
         
         // Collect all available quotes with their output amounts
         let mut quotes = Vec::new();
         
-        if let Some(order) = jupiter_o.clone() {
-            let output = order.out_amount.parse::<u64>().unwrap_or(0);
-            quotes.push(("Jupiter", output));
+        if let Some(quote) = jup_quote {
+            let output = quote.out_amount.parse::<u64>().unwrap_or(0);
+            quotes.push(("Jupiter".to_string(), output));
         }
         
-        if let Some(order) = dflow_q.clone() {
-            let output = order.out_amount.parse::<u64>().unwrap_or(0);
-            quotes.push(("Dflow", output));
+        if let Some(quote) = dflow_q {
+            let output = quote.out_amount.parse::<u64>().unwrap_or(0);
+            quotes.push(("Dflow".to_string(), output));
         }
         
-        if let Some((_, route)) = titan_q.clone() {
-            quotes.push(("Titan", route.out_amount));
+        if let Some((provider_name, route)) = titan_q {
+            quotes.push(("Titan".to_string(), route.out_amount));
         }
         
-        if !quotes.is_empty() {
-            // Find the best quote (highest output)
-            let best = quotes.iter().max_by_key(|(_, amount)| amount).unwrap();
-            let (winner, best_amount) = best;
-            
+        if quotes.is_empty() {
+            // No quotes available yet
+            return;
+        }
+        
+        // Find the best quote (highest output amount)
+        let best_quote = quotes.iter().max_by_key(|(_, output)| output);
+        
+        if let Some((provider, best_output)) = best_quote {
             println!("📊 Quote Comparison:");
-            for (provider, amount) in &quotes {
-                println!("   {}: {} lamports", provider, amount);
+            for (prov, output) in &quotes {
+                println!("   {}: {} lamports", prov, output);
             }
-            println!("🏆 {} wins with {} lamports", winner, best_amount);
+            println!("🏆 {} wins with best rate", provider);
             
-            selected_provider.set(Some(winner.to_string()));
+            // Check if user has manually overridden provider selection
+            let active_provider = if let Some(manual) = manual_provider_override() {
+                // Use manual override if it exists in quotes
+                if quotes.iter().any(|(p, _)| p == &manual) {
+                    manual
+                } else {
+                    provider.clone()
+                }
+            } else {
+                provider.clone()
+            };
             
-            // Update buying amount with winner's quote
-            let converted_amount = from_lamports(*best_amount, &buying_token(), &tokens_clone5);
+            selected_provider.set(Some(active_provider.clone()));
+            
+            // Update buying amount with selected provider's quote
+            let selected_output = quotes.iter()
+                .find(|(p, _)| p == &active_provider)
+                .map(|(_, output)| *output)
+                .unwrap_or(*best_output);
+            
+            let converted_amount = from_lamports(selected_output, &buying_token(), &tokens_clone5);
             let formatted = if converted_amount < 0.01 && converted_amount > 0.0 {
                 format!("{:.6}", converted_amount)
             } else {
@@ -1158,7 +1447,6 @@ pub fn SwapModal(
     });
 
     // Handle swap execution with real transaction signing
-    let tx_client_for_swap = global_tx_client.clone();
     let handle_swap = {
         move |_| {
             println!("🔄 Swap button clicked! Selling: {} {} -> Buying: {} {}", 
@@ -1168,9 +1456,6 @@ pub fn SwapModal(
                 error_message.set(Some("Please enter an amount to sell".to_string()));
                 return;
             }
-
-            // Clone for this swap execution - allows button to be clicked multiple times
-            let tx_client_clone = tx_client_for_swap.clone();
 
             // Clone custom_rpc at the start so it can be used in multiple spawn blocks
             let custom_rpc_for_titan = custom_rpc_clone.clone();
@@ -1317,47 +1602,8 @@ pub fn SwapModal(
                                     println!("✅ Transaction signed successfully!");
                                     println!("🚀 Submitting to Solana RPC...");
                                     
-                                    // Execute Titan swap via direct Solana RPC submission using pre-initialized TPU
-                                    let tx_client = tx_client_clone.clone();
-                                    spawn(async move {
-                                        println!("🔷 Executing Titan swap via Solana RPC...");
-                                        
-                                        // Convert base64 signed transaction to bytes
-                                        let signed_tx_bytes = match base64::decode(&signed_transaction_b64) {
-                                            Ok(bytes) => bytes,
-                                            Err(e) => {
-                                                println!("❌ Failed to decode base64 transaction: {}", e);
-                                                swapping.set(false);
-                                                error_message.set(Some(format!("Transaction decode error: {}", e)));
-                                                return;
-                                            }
-                                        };
-                                        
-                                        println!("📄 Decoded transaction: {} bytes", signed_tx_bytes.len());
-                                        
-                                        // Encode to base58 for Solana RPC submission
-                                        let signed_tx_b58 = bs58::encode(&signed_tx_bytes).into_string();
-                                        
-                                        println!("📝 Encoded to base58: {} chars", signed_tx_b58.len());
-                                        
-                                        // Use the pre-initialized global TransactionClient (TPU already initialized at app startup)
-                                        println!("[TPU] Using pre-initialized TransactionClient with TPU ready");
-                                        
-                                        // Submit directly to Solana RPC (via TPU + RPC in parallel)
-                                        match tx_client.send_transaction(&signed_tx_b58).await {
-                                            Ok(signature) => {
-                                                println!("✅ Titan swap executed successfully! Signature: {}", signature);
-                                                transaction_signature.set(signature);
-                                                swapping.set(false);
-                                                show_success_modal.set(true);
-                                            }
-                                            Err(e) => {
-                                                println!("❌ Titan swap failed: {}", e);
-                                                swapping.set(false);
-                                                error_message.set(Some(format!("Swap failed: {}", e)));
-                                            }
-                                        }
-                                    });
+                                    // Execute Titan swap via direct Solana RPC submission
+                                    execute_titan_swap(signed_transaction_b64, custom_rpc_for_titan);
                                 }
                                 Err(e) => {
                                     println!("❌ Transaction signing failed: {}", e);
@@ -1370,414 +1616,339 @@ pub fn SwapModal(
                         error_message.set(Some("No Titan quote available".to_string()));
                     }
                 } else if provider == Some("Jupiter".to_string()) {
-                    // Jupiter won - use Ultra API (simple sign + execute)
-                    if let Some(order) = jupiter_order.read().as_ref().cloned() {
-                        println!("✅ Using Jupiter Ultra for swap");
-                        
-                        // Check for order errors
-                        if let Some(error_msg) = &order.error_message {
-                            error_message.set(Some(format!("Cannot swap: {}", error_msg)));
-                            return;
-                        }
-                        
-                        // Check for transaction
-                        let unsigned_tx_b64 = match &order.transaction {
-                            Some(tx) if !tx.is_empty() => tx.clone(),
-                            _ => {
-                                error_message.set(Some("No transaction in Jupiter order".to_string()));
-                                return;
-                            }
-                        };
-                        
+                    // Jupiter instruction-based swap execution
+                    if let Some(quote) = jupiter_quote() {
+                        println!("✅ Using Jupiter legacy API for swap");
                         swapping.set(true);
                         error_message.set(None);
                         
+                        // Get user pubkey
+                        let user_pubkey = if let Some(address) = hw_address() {
+                            address
+                        } else if let Some(wallet_info) = &wallet_clone2 {
+                            wallet_info.address.clone()
+                        } else {
+                            error_message.set(Some("No wallet available".to_string()));
+                            swapping.set(false);
+                            return;
+                        };
+                        
                         // Clone values for async block
+                        let quote_clone = quote.clone();
                         let hw_clone = hardware_wallet_clone2.clone();
                         let wallet_info_clone = wallet_clone2.clone();
-                        let request_id = order.request_id.clone();
+                        let custom_rpc_jup = custom_rpc_for_titan.clone();
                         
                         spawn(async move {
-                            // Determine if hardware wallet
-                            let is_hardware = hw_clone.is_some();
-                            was_hardware_transaction.set(is_hardware);
+                            println!("🔷 Fetching Jupiter swap instructions...");
                             
-                            if is_hardware {
-                                show_hardware_approval.set(true);
-                            }
-                            
-                            println!("🔐 Signing Jupiter Ultra transaction...");
-                            
-                            // Sign transaction
-                            let signing_result = if let Some(hw) = hw_clone {
-                                println!("💻 Using hardware wallet signer");
-                                let hw_signer = HardwareSigner::from_wallet(hw);
-                                sign_jupiter_transaction(&hw_signer, &unsigned_tx_b64).await
-                            } else if let Some(wallet_info) = wallet_info_clone {
-                                println!("🔑 Using software wallet signer");
-                                match Wallet::from_wallet_info(&wallet_info) {
-                                    Ok(wallet) => {
-                                        let sw_signer = SoftwareSigner::new(wallet);
-                                        sign_jupiter_transaction(&sw_signer, &unsigned_tx_b64).await
-                                    }
-                                    Err(e) => {
-                                        Err(format!("Failed to load wallet: {}", e))
-                                    }
-                                }
-                            } else {
-                                Err("No wallet available for signing".to_string())
+                            // Build swap-instructions request
+                            let swap_request = JupiterSwapInstructionsRequest {
+                                user_public_key: user_pubkey.clone(),
+                                wrap_and_unwrap_sol: true,
+                                use_shared_accounts: true,
+                                dynamic_compute_unit_limit: true,
+                                prioritization_fee_lamports: serde_json::json!("auto"),
+                                quote_response: quote_clone,
                             };
                             
-                            if is_hardware {
-                                show_hardware_approval.set(false);
-                            }
+                            let client = reqwest::Client::builder()
+                                .timeout(std::time::Duration::from_secs(30))
+                                .build()
+                                .unwrap_or_else(|_| reqwest::Client::new());
+                            let response = client
+                                .post("https://api.jup.ag/swap/v1/swap-instructions")
+                                .header("x-api-key", "ddbf7533-efd7-41a4-b794-59325ccbc383")
+                                .json(&swap_request)
+                                .send()
+                                .await;
                             
-                            match signing_result {
-                                Ok(signed_transaction_b64) => {
-                                    println!("✅ Jupiter transaction signed!");
-                                    println!("🚀 Executing via Jupiter Ultra API...");
-                                    
-                                    // Execute via Jupiter Ultra execute endpoint
-                                    let client = reqwest::Client::new();
-                                    let execute_request = JupiterUltraExecuteRequest {
-                                        signed_transaction: signed_transaction_b64,
-                                        request_id,
-                                    };
-                                    
-                                    match client
-                                        .post("https://api.jup.ag/ultra/v1/execute")
-                                        .header("x-api-key", "ddbf7533-efd7-41a4-b794-59325ccbc383")
-                                        .json(&execute_request)
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(response) => {
-                                            if response.status().is_success() {
-                                                match response.json::<JupiterUltraExecuteResponse>().await {
-                                                    Ok(result) => {
-                                                        if result.status == "Success" {
-                                                            if let Some(signature) = result.signature {
-                                                                println!("✅ Jupiter Ultra swap executed! Signature: {}", signature);
-                                                                transaction_signature.set(signature);
-                                                                swapping.set(false);
-                                                                show_success_modal.set(true);
-                                                            } else {
-                                                                println!("❌ No signature in success response");
-                                                                swapping.set(false);
-                                                                error_message.set(Some("No signature returned".to_string()));
+                            match response {
+                                Ok(resp) => {
+                                    if resp.status().is_success() {
+                                        match resp.json::<JupiterSwapInstructionsResponse>().await {
+                                            Ok(swap_ix_response) => {
+                                                println!("✅ Jupiter swap instructions received");
+                                                
+                                                // Build transaction from instructions with jules tip
+                                                let rpc_url = custom_rpc_jup.as_deref().unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
+                                                let user_pk = match SolanaPubkey::from_str(&user_pubkey) {
+                                                    Ok(pk) => pk,
+                                                    Err(e) => {
+                                                        swapping.set(false);
+                                                        error_message.set(Some(format!("Invalid pubkey: {}", e)));
+                                                        return;
+                                                    }
+                                                };
+                                                
+                                                // Collect cleanup instructions
+                                                let cleanup_ixs = if let Some(cleanup) = swap_ix_response.cleanup_instruction {
+                                                    vec![cleanup]
+                                                } else {
+                                                    vec![]
+                                                };
+                                                
+                                                match build_transaction_from_instructions(
+                                                    swap_ix_response.compute_budget_instructions,
+                                                    swap_ix_response.setup_instructions,
+                                                    swap_ix_response.swap_instruction,
+                                                    cleanup_ixs,
+                                                    swap_ix_response.other_instructions,
+                                                    swap_ix_response.address_lookup_table_addresses,
+                                                    user_pk,
+                                                    rpc_url,
+                                                ).await {
+                                                    Ok(unsigned_tx_bytes) => {
+                                                        println!("✅ Jupiter transaction built with jules tip");
+                                                        
+                                                        // Convert to base64 for signing
+                                                        let unsigned_tx_b64 = base64::encode(&unsigned_tx_bytes);
+                                                        
+                                                        // Determine if hardware wallet
+                                                        let is_hardware = hw_clone.is_some();
+                                                        was_hardware_transaction.set(is_hardware);
+                                                        
+                                                        if is_hardware {
+                                                            show_hardware_approval.set(true);
+                                                        }
+                                                        
+                                                        println!("🔐 Signing Jupiter transaction...");
+                                                        
+                                                        // Sign the transaction
+                                                        let signing_result = if let Some(hw) = hw_clone {
+                                                            let hw_signer = HardwareSigner::from_wallet(hw);
+                                                            sign_jupiter_transaction(&hw_signer, &unsigned_tx_b64).await
+                                                        } else if let Some(wallet_info) = wallet_info_clone {
+                                                            match Wallet::from_wallet_info(&wallet_info) {
+                                                                Ok(wallet) => {
+                                                                    let sw_signer = SoftwareSigner::new(wallet);
+                                                                    sign_jupiter_transaction(&sw_signer, &unsigned_tx_b64).await
+                                                                }
+                                                                Err(e) => Err(format!("Failed to load wallet: {}", e))
                                                             }
                                                         } else {
-                                                            let error = result.error.unwrap_or("Unknown error".to_string());
-                                                            println!("❌ Jupiter Ultra execute failed: {}", error);
-                                                            swapping.set(false);
-                                                            error_message.set(Some(format!("Swap failed: {}", error)));
+                                                            Err("No wallet available for signing".to_string())
+                                                        };
+                                                        
+                                                        if is_hardware {
+                                                            show_hardware_approval.set(false);
+                                                        }
+                                                        
+                                                        match signing_result {
+                                                            Ok(signed_tx) => {
+                                                                println!("✅ Jupiter transaction signed!");
+                                                                println!("🚀 Submitting to Solana RPC...");
+                                                                execute_titan_swap(signed_tx, custom_rpc_jup);
+                                                            }
+                                                            Err(e) => {
+                                                                println!("❌ Jupiter signing failed: {}", e);
+                                                                swapping.set(false);
+                                                                error_message.set(Some(format!("Failed to sign: {}", e)));
+                                                            }
                                                         }
                                                     }
                                                     Err(e) => {
-                                                        println!("❌ Failed to parse execute response: {}", e);
+                                                        println!("❌ Failed to build Jupiter transaction: {}", e);
                                                         swapping.set(false);
-                                                        error_message.set(Some("Failed to parse response".to_string()));
+                                                        error_message.set(Some(format!("Failed to build transaction: {}", e)));
                                                     }
                                                 }
-                                            } else {
-                                                println!("❌ Jupiter Ultra execute error: {}", response.status());
+                                            }
+                                            Err(e) => {
+                                                println!("❌ Failed to parse Jupiter swap-instructions response: {}", e);
                                                 swapping.set(false);
-                                                error_message.set(Some(format!("Execute error: {}", response.status())));
+                                                error_message.set(Some("Failed to get swap instructions from Jupiter".to_string()));
                                             }
                                         }
-                                        Err(e) => {
-                                            println!("❌ Jupiter Ultra execute request failed: {}", e);
-                                            swapping.set(false);
-                                            error_message.set(Some("Network error".to_string()));
-                                        }
+                                    } else {
+                                        println!("❌ Jupiter swap-instructions request failed: {}", resp.status());
+                                        swapping.set(false);
+                                        error_message.set(Some(format!("Jupiter API error: {}", resp.status())));
                                     }
                                 }
                                 Err(e) => {
-                                    println!("❌ Transaction signing failed: {}", e);
+                                    println!("❌ Jupiter swap-instructions request failed: {}", e);
                                     swapping.set(false);
-error_message.set(Some(format!("Failed to sign: {}", e)));
+                                    error_message.set(Some("Failed to connect to Jupiter API".to_string()));
                                 }
                             }
                         });
                     } else {
-                        error_message.set(Some("No Jupiter order available".to_string()));
-                        swapping.set(false);
+                        error_message.set(Some("No Jupiter quote available".to_string()));
                     }
                 } else if provider == Some("Dflow".to_string()) {
-                    // Dflow won - fetch instructions and execute swap
-                    if let Some(quote) = dflow_quote.read().as_ref().cloned() {
+                    // Dflow instruction-based swap execution
+                    if let Some(quote) = dflow_quote() {
                         println!("✅ Using Dflow for swap");
-                        println!("📊 Fetching Dflow swap instructions...");
-                        
                         swapping.set(true);
                         error_message.set(None);
                         
-                        // Get user pubkey - prioritize hardware wallet
-                        let user_pubkey_str = if let Some(address) = hw_address() {
-                            Some(address)
-                        } else if let Some(wallet_info) = &wallet_clone_for_titan {
-                            Some(wallet_info.address.clone())
+                        // Get user pubkey
+                        let user_pubkey = if let Some(address) = hw_address() {
+                            address
+                        } else if let Some(wallet_info) = &wallet_clone2 {
+                            wallet_info.address.clone()
                         } else {
-                            None
-                        };
-                        
-                        let user_pubkey_str = match user_pubkey_str {
-                            Some(pk) => pk,
-                            None => {
-                                error_message.set(Some("No wallet available".to_string()));
-                                swapping.set(false);
-                                return;
-                            }
-                        };
-                        
-                        // Parse pubkey
-                        let user_pubkey = match user_pubkey_str.parse::<SolanaPubkey>() {
-                            Ok(pk) => pk,
-                            Err(e) => {
-                                error_message.set(Some(format!("Invalid pubkey: {}", e)));
-                                swapping.set(false);
-                                return;
-                            }
+                            error_message.set(Some("No wallet available".to_string()));
+                            swapping.set(false);
+                            return;
                         };
                         
                         // Clone values for async block
+                        let quote_clone = quote.clone();
                         let hw_clone = hardware_wallet_clone2.clone();
                         let wallet_info_clone = wallet_clone2.clone();
-                        let custom_rpc_dflow = custom_rpc_clone.clone();
+                        let custom_rpc_dflow = custom_rpc_for_titan.clone();
                         
-                        // Fetch Dflow swap instructions then build transaction
                         spawn(async move {
-                            println!("🔧 Fetching Dflow swap instructions...");
+                            println!("🌊 Fetching Dflow swap instructions...");
                             
-                            let client = reqwest::Client::new();
-                            
-                            // Request swap instructions from Dflow
-                            let instructions_request = DflowSwapInstructionsRequest {
-                                user_public_key: user_pubkey_str.clone(),
+                            // Build swap-instructions request
+                            let swap_request = DflowSwapInstructionsRequest {
+                                user_public_key: user_pubkey.clone(),
                                 wrap_and_unwrap_sol: true,
                                 dynamic_compute_unit_limit: true,
-                                prioritization_fee_lamports: serde_json::json!("auto"),
-                                quote_response: quote,
+                                prioritization_fee_lamports: serde_json::json!({"autoMultiplier": 1}),
+                                quote_response: quote_clone,
                             };
                             
-                            let instructions = match client
+                            let client = reqwest::Client::new();
+                            let response = client
                                 .post("https://quote-api.dflow.net/swap-instructions")
                                 .header("x-api-key", "HboXeWH6dkjayWfKnkmh")
-                                .json(&instructions_request)
+                                .header("content-type", "application/json")
+                                .json(&swap_request)
                                 .send()
-                                .await
-                            {
-                                Ok(response) => {
-                                    if response.status().is_success() {
-                                        match response.json::<DflowSwapInstructionsResponse>().await {
-                                            Ok(inst) => {
-                                                println!("✅ Dflow instructions received ({} total)", 
-                                                    inst.compute_budget_instructions.len() + 
-                                                    inst.setup_instructions.len() + 1);
-                                                inst
+                                .await;
+                            
+                            match response {
+                                Ok(resp) => {
+                                    if resp.status().is_success() {
+                                        match resp.json::<DflowSwapInstructionsResponse>().await {
+                                            Ok(swap_ix_response) => {
+                                                println!("✅ Dflow swap instructions received");
+                                                
+                                                // Build transaction from instructions with jules tip
+                                                let rpc_url = custom_rpc_dflow.as_deref().unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
+                                                let user_pk = match SolanaPubkey::from_str(&user_pubkey) {
+                                                    Ok(pk) => pk,
+                                                    Err(e) => {
+                                                        swapping.set(false);
+                                                        error_message.set(Some(format!("Invalid pubkey: {}", e)));
+                                                        return;
+                                                    }
+                                                };
+                                                
+                                                match build_transaction_from_instructions(
+                                                    swap_ix_response.compute_budget_instructions,
+                                                    swap_ix_response.setup_instructions,
+                                                    swap_ix_response.swap_instruction,
+                                                    swap_ix_response.cleanup_instructions,
+                                                    swap_ix_response.other_instructions,
+                                                    swap_ix_response.address_lookup_table_addresses,
+                                                    user_pk,
+                                                    rpc_url,
+                                                ).await {
+                                                    Ok(unsigned_tx_bytes) => {
+                                                        println!("✅ Dflow transaction built with jules tip");
+                                                        
+                                                        // Convert to base64 for signing
+                                                        let unsigned_tx_b64 = base64::encode(&unsigned_tx_bytes);
+                                                        
+                                                        // Determine if hardware wallet
+                                                        let is_hardware = hw_clone.is_some();
+                                                        was_hardware_transaction.set(is_hardware);
+                                                        
+                                                        if is_hardware {
+                                                            show_hardware_approval.set(true);
+                                                        }
+                                                        
+                                                        println!("🔐 Signing Dflow transaction...");
+                                                        
+                                                        // Sign the transaction
+                                                        let signing_result = if let Some(hw) = hw_clone {
+                                                            let hw_signer = HardwareSigner::from_wallet(hw);
+                                                            sign_jupiter_transaction(&hw_signer, &unsigned_tx_b64).await
+                                                        } else if let Some(wallet_info) = wallet_info_clone {
+                                                            match Wallet::from_wallet_info(&wallet_info) {
+                                                                Ok(wallet) => {
+                                                                    let sw_signer = SoftwareSigner::new(wallet);
+                                                                    sign_jupiter_transaction(&sw_signer, &unsigned_tx_b64).await
+                                                                }
+                                                                Err(e) => Err(format!("Failed to load wallet: {}", e))
+                                                            }
+                                                        } else {
+                                                            Err("No wallet available for signing".to_string())
+                                                        };
+                                                        
+                                                        if is_hardware {
+                                                            show_hardware_approval.set(false);
+                                                        }
+                                                        
+                                                        match signing_result {
+                                                            Ok(signed_tx) => {
+                                                                println!("✅ Dflow transaction signed!");
+                                                                println!("🚀 Submitting to Solana RPC...");
+                                                                execute_titan_swap(signed_tx, custom_rpc_dflow);
+                                                            }
+                                                            Err(e) => {
+                                                                println!("❌ Dflow signing failed: {}", e);
+                                                                swapping.set(false);
+                                                                error_message.set(Some(format!("Failed to sign: {}", e)));
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        println!("❌ Failed to build Dflow transaction: {}", e);
+                                                        swapping.set(false);
+                                                        error_message.set(Some(format!("Failed to build transaction: {}", e)));
+                                                    }
+                                                }
                                             }
                                             Err(e) => {
-                                                println!("❌ Failed to parse Dflow instructions: {}", e);
+                                                println!("❌ Failed to parse Dflow swap-instructions response: {}", e);
                                                 swapping.set(false);
-                                                error_message.set(Some(format!("Failed to parse instructions: {}", e)));
-                                                return;
+                                                error_message.set(Some("Failed to get swap instructions from Dflow".to_string()));
                                             }
                                         }
                                     } else {
-                                        println!("❌ Dflow instructions API error: {}", response.status());
+                                        println!("❌ Dflow swap-instructions request failed: {}", resp.status());
                                         swapping.set(false);
-                                        error_message.set(Some(format!("Dflow API error: {}", response.status())));
-                                        return;
+                                        error_message.set(Some(format!("Dflow API error: {}", resp.status())));
                                     }
                                 }
                                 Err(e) => {
-                                    println!("❌ Dflow instructions request failed: {}", e);
+                                    println!("❌ Dflow swap-instructions request failed: {}", e);
                                     swapping.set(false);
-                                    error_message.set(Some(format!("Network error: {}", e)));
-                                    return;
-                                }
-                            };
-                            
-                            println!("🔧 Building Dflow transaction from instructions...");
-                            
-                            let rpc_url = custom_rpc_dflow.as_deref().unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
-                            
-                            // Build transaction using unified builder (includes timeout + Jules tip)
-                            let unsigned_tx_bytes = match build_transaction_from_instructions(
-                                instructions.compute_budget_instructions,
-                                instructions.setup_instructions,
-                                instructions.swap_instruction,
-                                instructions.cleanup_instructions,
-                                instructions.other_instructions,
-                                instructions.address_lookup_table_addresses,
-                                user_pubkey,
-                                rpc_url,
-                            ).await {
-                                Ok(bytes) => {
-                                    println!("✅ Dflow transaction built: {} bytes", bytes.len());
-                                    bytes
-                                }
-                                Err(e) => {
-                                    println!("❌ Failed to build Dflow transaction: {}", e);
-                                    swapping.set(false);
-                                    error_message.set(Some(format!("Failed to build transaction: {}", e)));
-                                    return;
-                                }
-                            };
-                            
-                            // Convert to base64 for signing
-                            let unsigned_tx_b64 = base64::encode(&unsigned_tx_bytes);
-                            
-                            // Determine if hardware wallet
-                            let is_hardware = hw_clone.is_some();
-                            was_hardware_transaction.set(is_hardware);
-                            
-                            if is_hardware {
-                                show_hardware_approval.set(true);
-                            }
-                            
-                            println!("🔐 Signing Dflow transaction...");
-                            
-                            // Sign transaction
-                            let signing_result = if let Some(hw) = hw_clone {
-                                println!("💻 Using hardware wallet signer");
-                                let hw_signer = HardwareSigner::from_wallet(hw);
-                                sign_jupiter_transaction(&hw_signer, &unsigned_tx_b64).await
-                            } else if let Some(wallet_info) = wallet_info_clone {
-                                println!("🔑 Using software wallet signer");
-                                match Wallet::from_wallet_info(&wallet_info) {
-                                    Ok(wallet) => {
-                                        let sw_signer = SoftwareSigner::new(wallet);
-                                        sign_jupiter_transaction(&sw_signer, &unsigned_tx_b64).await
-                                    }
-                                    Err(e) => {
-                                        Err(format!("Failed to load wallet: {}", e))
-                                    }
-                                }
-                            } else {
-                                Err("No wallet available for signing".to_string())
-                            };
-                            
-                            if is_hardware {
-                                show_hardware_approval.set(false);
-                            }
-                            
-                            match signing_result {
-                                Ok(signed_transaction_b64) => {
-                                    println!("✅ Dflow transaction signed successfully!");
-                                    println!("🚀 Submitting to Solana via TPU...");
-                                    
-                                    // Execute Dflow swap via TPU
-                                    let tx_client = tx_client_clone.clone();
-                                    spawn(async move {
-                                        println!("💜 Executing Dflow swap via TPU + RPC...");
-                                        
-                                        // Convert base64 to bytes
-                                        let signed_tx_bytes = match base64::decode(&signed_transaction_b64) {
-                                            Ok(bytes) => bytes,
-                                            Err(e) => {
-                                                println!("❌ Failed to decode transaction: {}", e);
-                                                swapping.set(false);
-                                                error_message.set(Some(format!("Transaction decode error: {}", e)));
-                                                return;
-                                            }
-                                        };
-                                        
-                                        println!("📄 Decoded transaction: {} bytes", signed_tx_bytes.len());
-                                        
-                                        // Encode to base58 for submission
-                                        let signed_tx_b58 = bs58::encode(&signed_tx_bytes).into_string();
-                                        
-                                        println!("📝 Encoded to base58: {} chars", signed_tx_b58.len());
-                                        
-                                        // Submit via pre-initialized TPU client (initialized at app startup)
-                                        println!("[TPU] Using pre-initialized TransactionClient with TPU ready");
-                                        
-                                        match tx_client.send_transaction(&signed_tx_b58).await {
-                                            Ok(signature) => {
-                                                println!("✅ Dflow swap executed successfully! Signature: {}", signature);
-                                                transaction_signature.set(signature);
-                                                swapping.set(false);
-                                                show_success_modal.set(true);
-                                            }
-                                            Err(e) => {
-                                                println!("❌ Dflow swap failed: {}", e);
-                                                swapping.set(false);
-                                                error_message.set(Some(format!("Swap failed: {}", e)));
-                                            }
-                                        }
-                                    });
-                                }
-                                Err(e) => {
-                                    println!("❌ Transaction signing failed: {}", e);
-                                    swapping.set(false);
-                                    error_message.set(Some(format!("Failed to sign transaction: {}", e)));
+                                    error_message.set(Some("Failed to connect to Dflow API".to_string()));
                                 }
                             }
                         });
                     } else {
                         error_message.set(Some("No Dflow quote available".to_string()));
-                        swapping.set(false);
                     }
                 } else {
-                    // No provider selected or no quotes available
                     error_message.set(Some("No quote available - please wait for quotes".to_string()));
                 }
             }
         }
     };
 
-    // Handle token swap direction - preserve buying amount and refetch quotes
+    // Handle token swap direction
     let handle_token_swap = move |_| {
         println!("🔄 Token swap direction clicked!");
         let current_selling = selling_token();
         let current_buying = buying_token();
-        let current_buying_amount = buying_amount();
+        selling_token.set(current_buying);
+        buying_token.set(current_selling);
         
-        // Swap tokens
-        selling_token.set(current_buying.clone());
-        buying_token.set(current_selling.clone());
-        
-        // Preserve buying amount as new selling amount and refetch quotes
-        selling_amount.set(current_buying_amount.clone());
+        // Clear amounts when swapping tokens
+        selling_amount.set("".to_string());
         buying_amount.set("0.00".to_string());
         error_message.set(None);
-        jupiter_order.set(None);
+        jupiter_quote.set(None);
         dflow_quote.set(None);
         titan_quote.set(None);
-        selected_provider.set(None);
-        
-        // Refetch quotes if there's an amount
-        if !current_buying_amount.is_empty() && current_buying_amount != "0.00" {
-            if let Ok(amount) = current_buying_amount.parse::<f64>() {
-                if amount > 0.0 {
-                    // Use tokens_clone_swap for this handler
-                    let tokens = tokens_clone_swap.clone();
-                    let amount_lamports = to_lamports(amount, &current_buying, &tokens);
-                    
-                    // Get mints before spawning
-                    let input_mint = get_token_mint(&current_buying, &tokens).to_string();
-                    let output_mint = get_token_mint(&current_selling, &tokens).to_string();
-                    
-                    // Get user pubkey inline (can't reuse get_user_pubkey closure)
-                    let user_pubkey_result = if let Some(address) = hw_address() {
-                        Some(address)
-                    } else if let Some(wallet_info) = &wallet_clone_for_buying {
-                        Some(wallet_info.address.clone())
-                    } else {
-                        None
-                    };
-                    
-                    spawn(async move {
-                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                        println!("🔄 Refetching quotes after swap...");
-                        fetch_jupiter_order(input_mint.clone(), output_mint.clone(), amount_lamports, user_pubkey_result.clone());
-                        fetch_dflow_quote(input_mint.clone(), output_mint.clone(), amount_lamports, 50);
-                        fetch_titan_quotes(input_mint, output_mint, amount_lamports, user_pubkey_result);
-                    });
-                }
-            }
-        }
     };
 
     // Get token balances using cloned tokens
@@ -1798,22 +1969,16 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
     // Calculate USD values
     let selling_usd_value = use_memo(move || {
         if let Ok(amount) = selling_amount().parse::<f64>() {
-            let price = tokens_clone_selling_usd.iter()
-                .find(|t| t.symbol == selling_token())
-                .map(|t| t.price)
-                .unwrap_or(1.0);
+            let price = get_token_price_usd(&selling_token());
             amount * price
         } else {
             0.0
         }
     });
-    
+
     let buying_usd_value = use_memo(move || {
         if let Ok(amount) = buying_amount().parse::<f64>() {
-            let price = tokens_clone_buying_usd.iter()
-                .find(|t| t.symbol == buying_token())
-                .map(|t| t.price)
-                .unwrap_or(1.0);
+            let price = get_token_price_usd(&buying_token());
             amount * price
         } else {
             0.0
@@ -1840,14 +2005,14 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                     margin: 16px auto;
                 ",
                 
-                // Modal header
+                // Modal header - COMPACT
                 div {
                     class: "swap-header-v2",
                     style: "
                         display: flex;
                         justify-content: space-between;
                         align-items: center;
-                        padding: 24px;
+                        padding: 16px;
                         border-bottom: none;
                         background: transparent;
                     ",
@@ -1855,7 +2020,7 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                         class: "swap-title-v2",
                         style: "
                             color: #f8fafc;
-                            font-size: 22px;
+                            font-size: 20px;
                             font-weight: 700;
                             margin: 0;
                             letter-spacing: -0.025em;
@@ -1868,13 +2033,13 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             background: none;
                             border: none;
                             color: white;
-                            font-size: 28px;
+                            font-size: 24px;
                             cursor: pointer;
                             padding: 0;
                             border-radius: 0;
                             transition: all 0.2s ease;
-                            min-width: 32px;
-                            min-height: 32px;
+                            min-width: 28px;
+                            min-height: 28px;
                             display: flex;
                             align-items: center;
                             justify-content: center;
@@ -1884,28 +2049,28 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                     }
                 }
                 
-                // Show error if any
+                // Show error if any - COMPACT
                 if let Some(error) = error_message() {
                     div {
                         class: "error-message",
                         style: "
-                            padding: 12px 16px;
+                            padding: 8px 12px;
                             background-color: rgba(220, 38, 38, 0.1);
                             border: 1px solid #dc2626;
                             color: #fca5a5;
-                            border-radius: 10px;
-                            margin: 16px 24px;
-                            font-size: 13px;
+                            border-radius: 8px;
+                            margin: 8px 16px;
+                            font-size: 12px;
                             text-align: center;
                         ",
                         "{error}"
                     }
                 }
                 
-                // Selling section
+                // Selling section - COMPACT
                 div {
                     class: "swap-section",
-                    style: "padding: 16px 24px 12px;",
+                    style: "padding: 12px 16px 8px;",
                     
                     div {
                         class: "swap-section-header",
@@ -1913,16 +2078,16 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            margin-bottom: 16px;
+                            margin-bottom: 8px;
                         ",
                         span { 
-                            style: "color: #94a3b8; font-size: 15px; font-weight: 500;",
-                            "You're selling" 
+                            style: "color: #94a3b8; font-size: 13px; font-weight: 500;",
+                            "Sell" 
                         }
                         span { 
                             class: "swap-balance",
-                            style: "color: #cbd5e1; font-size: 13px;",
-                            "Balance: {selling_balance():.6} {selling_token()}"
+                            style: "color: #cbd5e1; font-size: 11px;",
+                            "Bal: {selling_balance():.4}"
                         }
                     }
                     
@@ -1934,19 +2099,19 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             align-items: center;
                             background: #1a1a1a;
                             border: 1.5px solid #4a4a4a;
-                            border-radius: 12px;
-                            padding: 20px;
-                            gap: 16px;
+                            border-radius: 10px;
+                            padding: 12px;
+                            gap: 12px;
                             transition: border-color 0.2s ease;
                         ",
                         
-                        // Token selector
+                        // Token selector - COMPACT
                         div {
                             class: "swap-token-side",
-                            style: "display: flex; align-items: center; gap: 12px; flex-shrink: 0;",
+                            style: "display: flex; align-items: center; gap: 8px; flex-shrink: 0;",
                             img {
                                 class: "swap-token-icon",
-                                style: "width: 32px; height: 32px; border-radius: 50%;",
+                                style: "width: 28px; height: 28px; border-radius: 50%;",
                                 src: get_token_icon(&selling_token(), &tokens_clone6),
                                 alt: selling_token()
                             }
@@ -1955,14 +2120,14 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                 style: "
                                     background: #2a2a2a;
                                     border: 1px solid #5a5a5a;
-                                    border-radius: 10px;
+                                    border-radius: 8px;
                                     color: #ffffff;
-                                    font-size: 17px;
+                                    font-size: 15px;
                                     font-weight: 700;
                                     cursor: pointer;
                                     outline: none;
-                                    padding: 10px 14px;
-                                    min-height: 48px;
+                                    padding: 8px 10px;
+                                    min-height: 38px;
                                     -webkit-appearance: none;
                                     -moz-appearance: none;
                                     appearance: none;
@@ -1972,7 +2137,9 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                     selling_token.set(e.value());
                                     selling_amount.set("".to_string());
                                     buying_amount.set("0.00".to_string());
-                                    jupiter_order.set(None);
+                                    jupiter_quote.set(None);
+                                    dflow_quote.set(None);
+                                    titan_quote.set(None);
                                 },
                                 
                                 // Dynamically generate options from user's tokens
@@ -1985,7 +2152,7 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             }
                         }
                         
-                        // Amount input
+                        // Amount input - COMPACT
                         div {
                             class: "swap-amount-side",
                             style: "
@@ -2002,14 +2169,14 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                     background: transparent;
                                     border: none;
                                     color: #ffffff;
-                                    font-size: 28px;
+                                    font-size: 22px;
                                     font-weight: 700;
                                     text-align: right;
                                     width: 100%;
                                     outline: none;
                                     padding: 0;
                                     margin: 0;
-                                    min-height: 48px;
+                                    min-height: 32px;
                                 ",
                                 r#type: "text",
                                 inputmode: "decimal",
@@ -2022,9 +2189,9 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                 class: "swap-amount-usd",
                                 style: "
                                     color: #94a3b8;
-                                    font-size: 14px;
+                                    font-size: 11px;
                                     text-align: right;
-                                    margin-top: 4px;
+                                    margin-top: 2px;
                                     font-weight: 500;
                                 ",
                                 "${selling_usd_value():.2}"
@@ -2033,13 +2200,13 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                     }
                 }
                 
-                // Swap direction arrow
+                // Swap direction arrow - COMPACT
                 div {
                     class: "swap-arrow-container",
                     style: "
                         display: flex;
                         justify-content: center;
-                        margin: 12px 0;
+                        margin: 8px 0;
                         position: relative;
                         z-index: 10;
                     ",
@@ -2049,10 +2216,10 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             background: #3a3a3a;
                             border: 1.5px solid #5a5a5a;
                             border-radius: 50%;
-                            min-width: 48px;
-                            min-height: 48px;
+                            min-width: 36px;
+                            min-height: 36px;
                             color: #ffffff;
-                            font-size: 20px;
+                            font-size: 16px;
                             cursor: pointer;
                             transition: all 0.2s ease;
                             display: flex;
@@ -2065,15 +2232,15 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                         img {
                             src: "{ICON_SWITCH}",
                             alt: "Switch",
-                            style: "width: 24px; height: 24px; transform: rotate(90deg); filter: brightness(0) invert(1);"
+                            style: "width: 18px; height: 18px; transform: rotate(90deg); filter: brightness(0) invert(1);"
                         }
                     }
                 }
                 
-                // Buying section
+                // Buying section - COMPACT
                 div {
                     class: "swap-section",
-                    style: "padding: 16px 24px 20px;",
+                    style: "padding: 8px 16px 12px;",
                     
                     div {
                         class: "swap-section-header",
@@ -2081,16 +2248,16 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             display: flex;
                             justify-content: space-between;
                             align-items: center;
-                            margin-bottom: 16px;
+                            margin-bottom: 8px;
                         ",
                         span { 
-                            style: "color: #94a3b8; font-size: 15px; font-weight: 500;",
-                            "You're buying" 
+                            style: "color: #94a3b8; font-size: 13px; font-weight: 500;",
+                            "Buy" 
                         }
                         span { 
                             class: "swap-balance",
-                            style: "color: #cbd5e1; font-size: 13px;",
-                            "Balance: {buying_balance():.6} {buying_token()}"
+                            style: "color: #cbd5e1; font-size: 11px;",
+                            "Bal: {buying_balance():.4}"
                         }
                     }
                     
@@ -2102,18 +2269,18 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             align-items: center;
                             background: #1a1a1a;
                             border: 1.5px solid #4a4a4a;
-                            border-radius: 12px;
-                            padding: 20px;
-                            gap: 16px;
+                            border-radius: 10px;
+                            padding: 12px;
+                            gap: 12px;
                         ",
                         
-                        // Token selector
+                        // Token selector - COMPACT
                         div {
                             class: "swap-token-side",
-                            style: "display: flex; align-items: center; gap: 12px; flex-shrink: 0;",
+                            style: "display: flex; align-items: center; gap: 8px; flex-shrink: 0;",
                             img {
                                 class: "swap-token-icon",
-                                style: "width: 32px; height: 32px; border-radius: 50%;",
+                                style: "width: 28px; height: 28px; border-radius: 50%;",
                                 src: get_token_icon(&buying_token(), &tokens_clone6),
                                 alt: buying_token()
                             }
@@ -2122,14 +2289,14 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                 style: "
                                     background: #2a2a2a;
                                     border: 1px solid #5a5a5a;
-                                    border-radius: 10px;
+                                    border-radius: 8px;
                                     color: #ffffff;
-                                    font-size: 17px;
+                                    font-size: 15px;
                                     font-weight: 700;
                                     cursor: pointer;
                                     outline: none;
-                                    padding: 10px 14px;
-                                    min-height: 48px;
+                                    padding: 8px 10px;
+                                    min-height: 38px;
                                     -webkit-appearance: none;
                                     -moz-appearance: none;
                                     appearance: none;
@@ -2138,53 +2305,9 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                 onchange: move |e| {
                                     buying_token.set(e.value());
                                     buying_amount.set("0.00".to_string());
-                                    jupiter_order.set(None);
+                                    jupiter_quote.set(None);
                                     dflow_quote.set(None);
                                     titan_quote.set(None);
-                                    selected_provider.set(None);
-                                    
-                                    // Re-fetch quotes if there's a selling amount
-                                    if !selling_amount().is_empty() {
-                                        if let Ok(amount) = selling_amount().parse::<f64>() {
-                                if amount > 0.0 {
-                                    let amount_lamports = to_lamports(amount, &selling_token(), &tokens_clone6);
-                                    let input_mint = get_token_mint(&selling_token(), &tokens_clone6).to_string();
-                                    let output_mint = get_token_mint(&e.value(), &tokens_clone6).to_string();
-                                                
-                                                // Get user pubkey - prioritize hardware wallet
-                                                let user_pubkey_str = if let Some(address) = hw_address() {
-                                                    Some(address)
-                                                } else if let Some(wallet_info) = &wallet_clone_for_buying_dropdown {
-                                                    Some(wallet_info.address.clone())
-                                                } else {
-                                                    None
-                                                };
-                                                
-                                                if let Some(user_pubkey) = user_pubkey_str {
-                                                    let input_mint_jup = input_mint.clone();
-                                                    let output_mint_jup = output_mint.clone();
-                                                    let user_pubkey_jup = user_pubkey.clone();
-                                                    
-                                                    let input_mint_dflow = input_mint.clone();
-                                                    let output_mint_dflow = output_mint.clone();
-                                                    
-                                                    let input_mint_titan = input_mint.clone();
-                                                    let output_mint_titan = output_mint.clone();
-                                                    let user_pubkey_titan = user_pubkey.clone();
-                                                    
-                                                    spawn(async move {
-                                                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                                                        
-                                                        println!("🔄 Refetching quotes for new buying token...");
-                                                        
-                                                        fetch_jupiter_order(input_mint_jup, output_mint_jup, amount_lamports, Some(user_pubkey_jup));
-                                                        fetch_dflow_quote(input_mint_dflow, output_mint_dflow, amount_lamports, 50);
-                                                        fetch_titan_quotes(input_mint_titan, output_mint_titan, amount_lamports, Some(user_pubkey_titan));
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
                                 },
                                 
                                 // Dynamically generate options from user's tokens
@@ -2197,7 +2320,7 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             }
                         }
                         
-                        // Amount display (read-only)
+                        // Amount display (read-only) - COMPACT
                         div {
                             class: "swap-amount-side",
                             style: "
@@ -2214,11 +2337,11 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                     background: transparent;
                                     border: none;
                                     color: #10b981;
-                                    font-size: 28px;
+                                    font-size: 22px;
                                     font-weight: 700;
                                     text-align: right;
                                     width: 100%;
-                                    min-height: 48px;
+                                    min-height: 32px;
                                     display: flex;
                                     align-items: center;
                                     justify-content: flex-end;
@@ -2229,9 +2352,9 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                 class: "swap-amount-usd",
                                 style: "
                                     color: #94a3b8;
-                                    font-size: 14px;
+                                    font-size: 11px;
                                     text-align: right;
-                                    margin-top: 4px;
+                                    margin-top: 2px;
                                     font-weight: 500;
                                 ",
                                 "${buying_usd_value():.2}"
@@ -2240,117 +2363,306 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                     }
                 }
                 
-                // Three-provider comparison
-                if !selling_amount().is_empty() && selling_amount() != "0" {
+                // Provider Selector - COMPACT
+                div {
+                    class: "provider-selector",
+                    style: "
+                        background: #1a1a1a;
+                        border-radius: 10px;
+                        border: 1.5px solid #4a4a4a;
+                        padding: 10px;
+                        margin: 0 16px 12px;
+                    ",
+                    
                     div {
-                        style: "padding: 0 24px; margin-bottom: 12px;",
+                        style: "color: #94a3b8; font-size: 11px; margin-bottom: 8px; font-weight: 600;",
+                        "SELECT PROVIDER"
+                    }
+                    
+                    // Provider options
+                    div {
+                        style: "display: flex; flex-direction: column; gap: 6px;",
+                        
+                        // Jupiter
                         div {
-                            style: "display: flex; flex-direction: column; gap: 6px;",
-                            div {
-                                style: format!("background: linear-gradient(90deg, {} 0%, {} 100%); border-left: 4px solid {}; border-radius: 10px; padding: 12px 14px; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; justify-content: space-between; align-items: center; cursor: pointer; {}",
-                                    if selected_provider() == Some("Jupiter".to_string()) { "#1e3a5f" } else { "#1a1a1a" },
-                                    if selected_provider() == Some("Jupiter".to_string()) { "#1a2942" } else { "#1a1a1a" },
-                                    if selected_provider() == Some("Jupiter".to_string()) { "#3b82f6" } else { "transparent" },
-                                    if selected_provider() == Some("Jupiter".to_string()) { "box-shadow: 0 8px 16px rgba(59,130,246,0.25); transform: scale(1.02);" } else { "" }
-                                ),
-                                onclick: move |_| {
-                                    if jupiter_order().is_some() {
-                                        selected_provider.set(Some("Jupiter".to_string()));
-                                        println!("👆 User manually selected Jupiter");
-                                    }
+                            class: "provider-option",
+                            style: format!("
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                padding: 8px 10px;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                transition: all 0.2s ease;
+                                background: {};
+                                border: 1px solid {};
+                                box-shadow: {};
+                            ", 
+                                if fetching_jupiter() {
+                                    "linear-gradient(90deg, rgba(251,191,36,0.15) 0%, rgba(251,191,36,0.3) 50%, rgba(251,191,36,0.15) 100%)"
+                                } else if selected_provider() == Some("Jupiter".to_string()) {
+                                    "#2a2a2a"
+                                } else {
+                                    "transparent"
                                 },
-                                div { 
-                                    style: format!("font-size: 13px; font-weight: 700; color: {};", 
-                                        if selected_provider() == Some("Jupiter".to_string()) { "#60a5fa" } else { "#94a3b8" }
-                                    ),
+                                if fetching_jupiter() {
+                                    "#fbbf24"
+                                } else if selected_provider() == Some("Jupiter".to_string()) {
+                                    "#10b981"
+                                } else {
+                                    "#3a3a3a"
+                                },
+                                if fetching_jupiter() {
+                                    "0 0 30px rgba(251,191,36,0.4), inset 0 0 20px rgba(251,191,36,0.1)"
+                                } else {
+                                    "none"
+                                }
+                            ),
+                            onclick: move |_| {
+                                manual_provider_override.set(Some("Jupiter".to_string()));
+                                selected_provider.set(Some("Jupiter".to_string()));
+                            },
+                            
+                            div {
+                                style: "display: flex; align-items: center; gap: 8px;",
+                                div {
+                                    style: format!("
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 50%;
+                                        border: 2px solid {};
+                                        background: {};
+                                    ",
+                                        if selected_provider() == Some("Jupiter".to_string()) { "#10b981" } else { "#4a4a4a" },
+                                        if selected_provider() == Some("Jupiter".to_string()) { "#10b981" } else { "transparent" }
+                                    )
+                                }
+                                span {
+                                    style: "color: #f8fafc; font-size: 13px; font-weight: 600;",
                                     "Jupiter"
                                 }
-                                if fetching_jupiter() { div { style: "height: 18px; width: 90px; background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px;", } }
-                                else if let Some(order) = jupiter_order() { div { style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Jupiter".to_string()) { "#10b981" } else { "#e2e8f0" }), {format!("{:.6} {}", from_lamports(order.out_amount.parse().unwrap_or(0), &buying_token(), &tokens_clone_price), buying_token())} } }
-                                else { div { style: "color: #64748b; font-size: 12px;", "..." } }
                             }
-                            div {
-                                style: format!("background: linear-gradient(90deg, {} 0%, {} 100%); border-left: 4px solid {}; border-radius: 10px; padding: 12px 14px; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; justify-content: space-between; align-items: center; cursor: pointer; {}",
-                                    if selected_provider() == Some("Dflow".to_string()) { "#2d1b4e" } else { "#1a1a1a" },
-                                    if selected_provider() == Some("Dflow".to_string()) { "#1f1335" } else { "#1a1a1a" },
-                                    if selected_provider() == Some("Dflow".to_string()) { "#8b5cf6" } else { "transparent" },
-                                    if selected_provider() == Some("Dflow".to_string()) { "box-shadow: 0 8px 16px rgba(139,92,246,0.25); transform: scale(1.02);" } else { "" }
-                                ),
-                                onclick: move |_| {
-                                    if dflow_quote().is_some() {
-                                        selected_provider.set(Some("Dflow".to_string()));
-                                        println!("👆 User manually selected Dflow");
+                            
+                            if let Some(quote) = jupiter_quote() {
+                                span {
+                                    style: "color: #cbd5e1; font-size: 11px;",
+                                    {
+                                        let output = quote.out_amount.parse::<u64>().unwrap_or(0);
+                                        let converted = from_lamports(output, &buying_token(), &tokens);
+                                        if converted < 0.01 && converted > 0.0 {
+                                            format!("{:.6}", converted)
+                                        } else {
+                                            format!("{:.4}", converted)
+                                        }
                                     }
+                                }
+                            } else if fetching_jupiter() {
+                                span {
+                                    style: "color: #fbbf24; font-size: 11px; display: inline-flex; gap: 2px;",
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0s; opacity: 0.4;", "•" }
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0.2s; opacity: 0.4;", "•" }
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0.4s; opacity: 0.4;", "•" }
+                                }
+                            }
+                        }
+                        
+                        // Dflow
+                        div {
+                            class: "provider-option",
+                            style: format!("
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                padding: 8px 10px;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                transition: all 0.2s ease;
+                                background: {};
+                                border: 1px solid {};
+                                box-shadow: {};
+                            ",
+                                if fetching_dflow() {
+                                    "linear-gradient(90deg, rgba(251,191,36,0.15) 0%, rgba(251,191,36,0.3) 50%, rgba(251,191,36,0.15) 100%)"
+                                } else if selected_provider() == Some("Dflow".to_string()) {
+                                    "#2a2a2a"
+                                } else {
+                                    "transparent"
                                 },
-                                div { 
-                                    style: format!("font-size: 13px; font-weight: 700; color: {};", 
-                                        if selected_provider() == Some("Dflow".to_string()) { "#a78bfa" } else { "#94a3b8" }
-                                    ),
+                                if fetching_dflow() {
+                                    "#fbbf24"
+                                } else if selected_provider() == Some("Dflow".to_string()) {
+                                    "#10b981"
+                                } else {
+                                    "#3a3a3a"
+                                },
+                                if fetching_dflow() {
+                                    "0 0 30px rgba(251,191,36,0.4), inset 0 0 20px rgba(251,191,36,0.1)"
+                                } else {
+                                    "none"
+                                }
+                            ),
+                            onclick: move |_| {
+                                manual_provider_override.set(Some("Dflow".to_string()));
+                                selected_provider.set(Some("Dflow".to_string()));
+                            },
+                            
+                            div {
+                                style: "display: flex; align-items: center; gap: 8px;",
+                                div {
+                                    style: format!("
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 50%;
+                                        border: 2px solid {};
+                                        background: {};
+                                    ",
+                                        if selected_provider() == Some("Dflow".to_string()) { "#10b981" } else { "#4a4a4a" },
+                                        if selected_provider() == Some("Dflow".to_string()) { "#10b981" } else { "transparent" }
+                                    )
+                                }
+                                span {
+                                    style: "color: #f8fafc; font-size: 13px; font-weight: 600;",
                                     "Dflow"
                                 }
-                                if fetching_dflow() { div { style: "height: 18px; width: 90px; background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px;", } }
-                                else if let Some(quote) = dflow_quote() { div { style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Dflow".to_string()) { "#10b981" } else { "#e2e8f0" }), {format!("{:.6} {}", from_lamports(quote.out_amount.parse().unwrap_or(0), &buying_token(), &tokens_clone_price), buying_token())} } }
-                                else { div { style: "color: #64748b; font-size: 12px;", "..." } }
                             }
-                            div {
-                                style: format!("background: linear-gradient(90deg, {} 0%, {} 100%); border-left: 4px solid {}; border-radius: 10px; padding: 12px 14px; transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); display: flex; justify-content: space-between; align-items: center; cursor: pointer; {}",
-                                    if selected_provider() == Some("Titan".to_string()) { "#3d2817" } else { "#1a1a1a" },
-                                    if selected_provider() == Some("Titan".to_string()) { "#2d1f12" } else { "#1a1a1a" },
-                                    if selected_provider() == Some("Titan".to_string()) { "#f59e0b" } else { "transparent" },
-                                    if selected_provider() == Some("Titan".to_string()) { "box-shadow: 0 8px 16px rgba(245,158,11,0.25); transform: scale(1.02);" } else { "" }
-                                ),
-                                onclick: move |_| {
-                                    if titan_quote().is_some() {
-                                        selected_provider.set(Some("Titan".to_string()));
-                                        println!("👆 User manually selected Titan");
+                            
+                            if let Some(quote) = dflow_quote() {
+                                span {
+                                    style: "color: #cbd5e1; font-size: 11px;",
+                                    {
+                                        let output = quote.out_amount.parse::<u64>().unwrap_or(0);
+                                        let converted = from_lamports(output, &buying_token(), &tokens);
+                                        if converted < 0.01 && converted > 0.0 {
+                                            format!("{:.6}", converted)
+                                        } else {
+                                            format!("{:.4}", converted)
+                                        }
                                     }
+                                }
+                            } else if fetching_dflow() {
+                                span {
+                                    style: "color: #fbbf24; font-size: 11px; display: inline-flex; gap: 2px;",
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0s; opacity: 0.4;", "•" }
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0.2s; opacity: 0.4;", "•" }
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0.4s; opacity: 0.4;", "•" }
+                                }
+                            }
+                        }
+                        
+                        // Titan
+                        div {
+                            class: "provider-option",
+                            style: format!("
+                                display: flex;
+                                justify-content: space-between;
+                                align-items: center;
+                                padding: 8px 10px;
+                                border-radius: 6px;
+                                cursor: pointer;
+                                transition: all 0.2s ease;
+                                background: {};
+                                border: 1px solid {};
+                                box-shadow: {};
+                            ",
+                                if fetching_titan() {
+                                    "linear-gradient(90deg, rgba(251,191,36,0.15) 0%, rgba(251,191,36,0.3) 50%, rgba(251,191,36,0.15) 100%)"
+                                } else if selected_provider() == Some("Titan".to_string()) {
+                                    "#2a2a2a"
+                                } else {
+                                    "transparent"
                                 },
-                                div { 
-                                    style: format!("font-size: 13px; font-weight: 700; color: {};", 
-                                        if selected_provider() == Some("Titan".to_string()) { "#fbbf24" } else { "#94a3b8" }
-                                    ),
+                                if fetching_titan() {
+                                    "#fbbf24"
+                                } else if selected_provider() == Some("Titan".to_string()) {
+                                    "#10b981"
+                                } else {
+                                    "#3a3a3a"
+                                },
+                                if fetching_titan() {
+                                    "0 0 30px rgba(251,191,36,0.4), inset 0 0 20px rgba(251,191,36,0.1)"
+                                } else {
+                                    "none"
+                                }
+                            ),
+                            onclick: move |_| {
+                                manual_provider_override.set(Some("Titan".to_string()));
+                                selected_provider.set(Some("Titan".to_string()));
+                            },
+                            
+                            div {
+                                style: "display: flex; align-items: center; gap: 8px;",
+                                div {
+                                    style: format!("
+                                        width: 16px;
+                                        height: 16px;
+                                        border-radius: 50%;
+                                        border: 2px solid {};
+                                        background: {};
+                                    ",
+                                        if selected_provider() == Some("Titan".to_string()) { "#10b981" } else { "#4a4a4a" },
+                                        if selected_provider() == Some("Titan".to_string()) { "#10b981" } else { "transparent" }
+                                    )
+                                }
+                                span {
+                                    style: "color: #f8fafc; font-size: 13px; font-weight: 600;",
                                     "Titan"
                                 }
-                                if fetching_titan() { div { style: "height: 18px; width: 90px; background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px;", } }
-                                else if let Some((_, route)) = titan_quote() { div { style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Titan".to_string()) { "#10b981" } else { "#e2e8f0" }), {format!("{:.6} {}", from_lamports(route.out_amount, &buying_token(), &tokens_clone_price), buying_token())} } }
-                                else { div { style: "color: #64748b; font-size: 12px;", "..." } }
+                            }
+                            
+                            if let Some((_, route)) = titan_quote() {
+                                span {
+                                    style: "color: #cbd5e1; font-size: 11px;",
+                                    {
+                                        let converted = from_lamports(route.out_amount, &buying_token(), &tokens);
+                                        if converted < 0.01 && converted > 0.0 {
+                                            format!("{:.6}", converted)
+                                        } else {
+                                            format!("{:.4}", converted)
+                                        }
+                                    }
+                                }
+                            } else if fetching_titan() {
+                                span {
+                                    style: "color: #fbbf24; font-size: 11px; display: inline-flex; gap: 2px;",
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0s; opacity: 0.4;", "•" }
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0.2s; opacity: 0.4;", "•" }
+                                    span { style: "animation: pulse 1.4s ease-in-out infinite; animation-delay: 0.4s; opacity: 0.4;", "•" }
+                                }
                             }
                         }
                     }
                 }
                 
-
-                
-                // Action button
+                // Action button - COMPACT
                 div {
                     class: "modal-buttons",
                     style: "
                         display: flex;
-                        padding: 0 24px 28px;
+                        padding: 0 16px 16px;
                     ",
                     button {
                         class: "button-standard primary",
                         style: "
                             width: 100%;
-                            padding: 18px 24px;
-                            border-radius: 12px;
+                            padding: 14px 20px;
+                            border-radius: 10px;
                             border: none;
                             cursor: pointer;
-                            font-size: 16px;
+                            font-size: 15px;
                             font-weight: 700;
                             text-transform: uppercase;
                             letter-spacing: 0.5px;
                             transition: all 0.2s ease;
                             background: white;
                             color: #1a1a1a;
-                            min-height: 56px;
+                            min-height: 48px;
                             box-shadow: 0 4px 12px rgba(255, 255, 255, 0.2);
                         ",
                         disabled: swapping() || selling_amount().is_empty() || fetching_jupiter(),
                         onclick: handle_swap,
                         
-                        if fetching_jupiter() {
-                            "Getting Quote..."
+                        if fetching_jupiter() || fetching_dflow() || fetching_titan() {
+                            "Getting Quotes..."
                         } else if swapping() {
                             "Swapping..."
                         } else {
@@ -2358,8 +2670,6 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                         }
                     }
                 }
-                
-
             }
         }
     }

@@ -20,8 +20,8 @@ impl Default for TpuConfig {
         Self {
             // TPU enabled by default with hardcoded Triton configuration
             enabled: true,
-            grpc_endpoint: "https://triton.mainnet.rpcpool.com".to_string(),
-            grpc_token: Some("xxd99".to_string()),
+            grpc_endpoint: "https://vassilio-mainnet-50da.mainnet.rpcpool.com/cc44bf77-cdc3-4bf9-8c55-4b76f9dced99".to_string(),
+            grpc_token: Some("cc44bf77-cdc3-4bf9-8c55-4b76f9dced99".to_string()),
             fanout_count: 3,
         }
     }
