@@ -256,26 +256,57 @@ impl TransactionClient {
     
     /// Initialize TPU in the background (non-blocking)
     /// Call this at app startup to avoid lag on first transaction
+    /// DISABLED ON iOS: iOS does not support TPU background spawning
     pub fn init_tpu_background(self: &Arc<Self>) {
-        if !self.tpu_config.is_valid() {
-            println!("[TPU] TPU not configured, skipping background initialization");
+        #[cfg(target_os = "ios")]
+        {
+            println!("[TPU] TPU background initialization disabled on iOS");
             return;
         }
-        
-        let client = Arc::clone(self);
-        tokio::spawn(async move {
-            println!("[TPU] Starting background TPU initialization...");
-            let _ = client.get_tpu_sender().await;
-            println!("[TPU] Background TPU initialization complete");
-        });
+
+        #[cfg(not(target_os = "ios"))]
+        {
+            if !self.tpu_config.is_valid() {
+                println!("[TPU] TPU not configured, skipping background initialization");
+                return;
+            }
+
+            let client = Arc::clone(self);
+
+            // Use try_spawn to handle runtime issues gracefully
+            match tokio::runtime::Handle::try_current() {
+                Ok(handle) => {
+                    handle.spawn(async move {
+                        println!("[TPU] Starting background TPU initialization...");
+                        match client.get_tpu_sender().await {
+                            Some(_) => println!("[TPU] Background TPU initialization complete"),
+                            None => println!("[TPU] Background TPU initialization failed (continuing without TPU)"),
+                        }
+                    });
+                }
+                Err(e) => {
+                    println!("[TPU] Cannot spawn background task: {:?}", e);
+                    println!("[TPU] TPU will initialize on first transaction instead");
+                }
+            }
+        }
     }
     
     /// Get or initialize TPU sender (lazy async initialization)
+    /// DISABLED ON iOS: Always returns None on iOS platform
     async fn get_tpu_sender(&self) -> Option<Arc<Mutex<YellowstoneTpuSender>>> {
-        // Return None if TPU is not configured
-        if !self.tpu_config.is_valid() {
+        // TPU not supported on iOS
+        #[cfg(target_os = "ios")]
+        {
             return None;
         }
+
+        #[cfg(not(target_os = "ios"))]
+        {
+            // Return None if TPU is not configured
+            if !self.tpu_config.is_valid() {
+                return None;
+            }
         
         // Check if TPU initialization previously failed - skip retry
         if self.tpu_init_failed.load(Ordering::Relaxed) {
@@ -325,6 +356,7 @@ impl TransactionClient {
                 println!("[TPU] TPU initialization disabled for this session");
                 None
             }
+        }
         }
     }
 
@@ -553,24 +585,33 @@ impl TransactionClient {
         let signature = transaction.signatures[0];
         
         // Parallel TPU send (fire-and-forget if TPU is enabled)
-        if let Some(tpu_sender) = self.get_tpu_sender().await {
-            let tpu_sender_clone = Arc::clone(&tpu_sender);
-            let tx_bytes_clone = tx_bytes.clone();
-            let sig_clone = signature;
-            let fanout = self.tpu_config.fanout_count;
-            
-            tokio::spawn(async move {
-                let mut sender = tpu_sender_clone.lock().await;
-                match sender.send_txn(sig_clone, tx_bytes_clone).await {
-                    Ok(_) => {
-                        println!("[TPU] Transaction {} sent via TPU", sig_clone);
+        // DISABLED ON iOS: iOS restricts tokio::spawn in background, causing crashes
+        #[cfg(not(target_os = "ios"))]
+        {
+            if let Some(tpu_sender) = self.get_tpu_sender().await {
+                let tpu_sender_clone = Arc::clone(&tpu_sender);
+                let tx_bytes_clone = tx_bytes.clone();
+                let sig_clone = signature;
+                let fanout = self.tpu_config.fanout_count;
+
+                tokio::spawn(async move {
+                    let mut sender = tpu_sender_clone.lock().await;
+                    match sender.send_txn(sig_clone, tx_bytes_clone).await {
+                        Ok(_) => {
+                            println!("[TPU] Transaction {} sent via TPU", sig_clone);
+                        }
+                        Err(e) => {
+                            println!("[TPU] Failed to send transaction via TPU: {:?}", e);
+                            // Don't fail the whole transaction - RPC might still work
+                        }
                     }
-                    Err(e) => {
-                        println!("[TPU] Failed to send transaction via TPU: {:?}", e);
-                        // Don't fail the whole transaction - RPC might still work
-                    }
-                }
-            });
+                });
+            }
+        }
+
+        #[cfg(target_os = "ios")]
+        {
+            println!("[TPU] TPU disabled on iOS - using RPC-only submission");
         }
         
         // RPC send (unchanged - this is the source of truth)

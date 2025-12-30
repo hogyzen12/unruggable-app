@@ -194,9 +194,6 @@ pub fn SendTokenModal(
     
     // Add state for hardware wallet approval overlay - always declared
     let mut show_hardware_approval = use_signal(|| false);
-    
-    // Get the global TransactionClient from context (pre-initialized with TPU)
-    let transaction_client = use_context::<Arc<TransactionClient>>();
 
     // Use decimals or default to 6 for most SPL tokens
     let decimals = token_decimals.unwrap_or(6);
@@ -426,9 +423,6 @@ pub fn SendTokenModal(
                             
                             // Clone the onhardware event handler for use in async block
                             let onhardware_handler = onhardware.clone();
-                            
-                            // Clone the transaction client Arc before moving into async
-                            let client = transaction_client.clone();
 
                             spawn(async move {
                                 // Validate inputs
@@ -451,7 +445,7 @@ pub fn SendTokenModal(
 
                                 // ← NO NEED TO VALIDATE recipient_address anymore since it's already a valid pubkey!
 
-                                // Use the global pre-initialized TransactionClient (already cloned above)
+                                let client = TransactionClient::new(rpc_url.as_deref());
 
                                 // Use hardware wallet if available, otherwise use software wallet
                                 if let Some(hw) = hardware_wallet_clone {

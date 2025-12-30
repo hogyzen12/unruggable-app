@@ -9,6 +9,21 @@ use crate::signing::software::SoftwareSigner;
 use crate::signing::TransactionSigner;
 use crate::wallet::Wallet;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+
+// Channel message types for iOS-safe signal updates
+#[derive(Clone, Debug)]
+enum SwapResult {
+    Success(String), // transaction signature
+    Error(String),   // error message
+}
+
+#[derive(Clone, Debug)]
+enum SwapUpdate {
+    Started,
+    HardwareApprovalRequired(bool),
+    Result(SwapResult),
+}
 use solana_sdk::{
     transaction::VersionedTransaction,
     pubkey::Pubkey as SolanaPubkey,
@@ -682,8 +697,11 @@ pub fn SwapModal(
 ) -> Element {
     println!("🔄 SwapModal component rendered with Jupiter Ultra API!");
     
-    // Get the global pre-initialized TransactionClient from context
-    let global_tx_client = use_context::<Arc<TransactionClient>>();
+    // Create channel for iOS-safe signal updates
+    // All async tasks send updates here, main thread processes them
+    let (swap_tx, swap_rx) = mpsc::unbounded_channel::<SwapUpdate>();
+    let swap_tx = use_signal(|| Arc::new(swap_tx));
+    let mut swap_rx = use_signal(|| Some(swap_rx));
     
     // State management
     let mut selling_token = use_signal(|| "SOL".to_string());
@@ -723,7 +741,7 @@ pub fn SwapModal(
     
     // Store hardware wallet address (fetched async)
     let mut hw_address = use_signal(|| None as Option<String>);
-
+    
     // Clone tokens for closures - need separate clones for each closure
     let tokens_clone = tokens.clone();
     let tokens_clone2 = tokens.clone();
@@ -798,6 +816,43 @@ pub fn SwapModal(
             });
         }
     });
+    
+    // iOS-SAFE: Listen to swap updates channel and update signals on main thread
+    // This prevents panic_cannot_unwind crashes on iOS
+    use_effect(move || {
+        if let Some(mut rx) = swap_rx.write().take() {
+            spawn(async move {
+                while let Some(update) = rx.recv().await {
+                    match update {
+                        SwapUpdate::Started => {
+                            println!("[iOS-SAFE] Swap started");
+                            swapping.set(true);
+                            error_message.set(None);
+                        }
+                        SwapUpdate::HardwareApprovalRequired(required) => {
+                            println!("[iOS-SAFE] Hardware approval: {}", required);
+                            show_hardware_approval.set(required);
+                        }
+                        SwapUpdate::Result(result) => {
+                            match result {
+                                SwapResult::Success(signature) => {
+                                    println!("[iOS-SAFE] Swap success: {}", signature);
+                                    transaction_signature.set(signature);
+                                    swapping.set(false);
+                                    show_success_modal.set(true);
+                                }
+                                SwapResult::Error(error) => {
+                                    println!("[iOS-SAFE] Swap error: {}", error);
+                                    swapping.set(false);
+                                    error_message.set(Some(error));
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
 
     // Get user public key - prioritize hardware wallet when present
     let get_user_pubkey = move || -> Option<String> {
@@ -826,17 +881,25 @@ pub fn SwapModal(
 
     // Titan Exchange: Fetch quotes with WebSocket streaming
     let fetch_titan_quotes = move |input_mint: String, output_mint: String, amount_lamports: u64, user_pubkey: Option<String>| {
+        println!("[TITAN-DEBUG] fetch_titan_quotes called with input={}, output={}, amount={}", input_mint, output_mint, amount_lamports);
+
         let client = titan_client();
+
+        println!("[TITAN-DEBUG] About to spawn async task");
         spawn(async move {
+            println!("[TITAN-DEBUG] Inside spawned async task");
+
             // Prevent multiple simultaneous requests
             if fetching_titan() {
+                println!("[TITAN-DEBUG] Already fetching, returning early");
                 return;
             }
-            
+
             fetching_titan.set(true);
-            
+            println!("[TITAN-DEBUG] Set fetching_titan to true");
+
             println!("🔷 Fetching Titan quotes...");
-            
+
             // Get user pubkey - require valid address for transaction generation
             let user_pk = match user_pubkey {
                 Some(pk) => {
@@ -849,26 +912,50 @@ pub fn SwapModal(
                     return;
                 }
             };
-            
-            // Lock and use the client
-            let mut client_lock = client.lock().await;
-            
-            // Connect if not connected
-            if let Err(e) = client_lock.connect().await {
-                println!("❌ Failed to connect to Titan: {}", e);
-                fetching_titan.set(false);
-                return;
+
+            println!("[TITAN-DEBUG] User pubkey validated: {}", user_pk);
+
+            // iOS-SAFE: Use timeout wrapper for all operations to prevent iOS from killing the task
+            let timeout_duration = std::time::Duration::from_secs(10);
+
+            // Connect with timeout - release lock immediately after
+            println!("[Titan] Connecting to WebSocket...");
+            let connect_result = tokio::time::timeout(timeout_duration, async {
+                let mut client_lock = client.lock().await;
+                client_lock.connect().await
+            }).await;
+
+            match connect_result {
+                Ok(Ok(())) => {
+                    println!("[Titan] ✓ Connected successfully");
+                }
+                Ok(Err(e)) => {
+                    println!("❌ Failed to connect to Titan: {}", e);
+                    fetching_titan.set(false);
+                    return;
+                }
+                Err(_) => {
+                    println!("❌ Titan connection timeout (iOS network issue)");
+                    fetching_titan.set(false);
+                    return;
+                }
             }
-            
-            // Request swap quotes
-            match client_lock.request_swap_quotes(
-                &input_mint,
-                &output_mint,
-                amount_lamports,
-                &user_pk,
-                Some(50), // 0.5% slippage
-            ).await {
-                Ok((provider_name, route)) => {
+
+            // Request quotes with timeout - shorter lock duration
+            println!("[Titan] Requesting swap quotes...");
+            let quote_result = tokio::time::timeout(timeout_duration, async {
+                let mut client_lock = client.lock().await;
+                client_lock.request_swap_quotes(
+                    &input_mint,
+                    &output_mint,
+                    amount_lamports,
+                    &user_pk,
+                    Some(50), // 0.5% slippage
+                ).await
+            }).await;
+
+            match quote_result {
+                Ok(Ok((provider_name, route))) => {
                     println!("✅ Titan quote received from provider: {}", provider_name);
                     println!("📊 Output amount: {} lamports", route.out_amount);
                     println!("🔍 Transaction field present: {}", route.transaction.is_some());
@@ -879,15 +966,32 @@ pub fn SwapModal(
                     }
                     titan_quote.set(Some((provider_name, route)));
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     println!("❌ Failed to get Titan quote: {}", e);
                     titan_quote.set(None);
                 }
+                Err(_) => {
+                    println!("❌ Titan quote request timeout (took > 10s)");
+                    titan_quote.set(None);
+                }
             }
-            
-            // Close connection
-            let _ = client_lock.close().await;
-            
+
+            // Close connection with timeout
+            println!("[Titan] Closing connection...");
+            let close_result = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                async {
+                    let mut client_lock = client.lock().await;
+                    client_lock.close().await
+                }
+            ).await;
+
+            match close_result {
+                Ok(Ok(())) => println!("[Titan] ✓ Connection closed"),
+                Ok(Err(e)) => println!("[Titan] Warning: close error: {}", e),
+                Err(_) => println!("[Titan] Warning: close timeout"),
+            }
+
             fetching_titan.set(false);
         });
     };
@@ -1158,7 +1262,6 @@ pub fn SwapModal(
     });
 
     // Handle swap execution with real transaction signing
-    let tx_client_for_swap = global_tx_client.clone();
     let handle_swap = {
         move |_| {
             println!("🔄 Swap button clicked! Selling: {} {} -> Buying: {} {}", 
@@ -1168,9 +1271,6 @@ pub fn SwapModal(
                 error_message.set(Some("Please enter an amount to sell".to_string()));
                 return;
             }
-
-            // Clone for this swap execution - allows button to be clicked multiple times
-            let tx_client_clone = tx_client_for_swap.clone();
 
             // Clone custom_rpc at the start so it can be used in multiple spawn blocks
             let custom_rpc_for_titan = custom_rpc_clone.clone();
@@ -1232,13 +1332,15 @@ pub fn SwapModal(
                         let hw_clone = hardware_wallet_clone2.clone();
                         let wallet_info_clone = wallet_clone2.clone();
                         let custom_rpc_titan = custom_rpc_for_titan.clone();
+                        let custom_rpc_for_client = custom_rpc_for_titan.clone();
                         
                         // Build transaction from Titan's instructions
                         spawn(async move {
                             println!("🔧 Fetching recent blockhash...");
                             
                             // Create RPC client to fetch recent blockhash
-                            let rpc_client = TransactionClient::new(custom_rpc_titan.as_deref());
+                            let rpc_url_for_client = custom_rpc_titan.as_deref();
+                            let rpc_client = TransactionClient::new(rpc_url_for_client);
                             
                             // Fetch recent blockhash
                             let recent_blockhash = match rpc_client.get_recent_blockhash().await {
@@ -1317,9 +1419,10 @@ pub fn SwapModal(
                                     println!("✅ Transaction signed successfully!");
                                     println!("🚀 Submitting to Solana RPC...");
                                     
-                                    // Execute Titan swap via direct Solana RPC submission using pre-initialized TPU
-                                    let tx_client = tx_client_clone.clone();
+                                    // Execute Titan swap via direct Solana RPC submission
+                                    let custom_rpc_final = custom_rpc_for_client.clone();
                                     spawn(async move {
+                                        let tx_client = TransactionClient::new(custom_rpc_final.as_deref());
                                         println!("🔷 Executing Titan swap via Solana RPC...");
                                         
                                         // Convert base64 signed transaction to bytes
@@ -1665,11 +1768,12 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             match signing_result {
                                 Ok(signed_transaction_b64) => {
                                     println!("✅ Dflow transaction signed successfully!");
-                                    println!("🚀 Submitting to Solana via TPU...");
+                                    println!("🚀 Submitting to Solana via RPC...");
                                     
-                                    // Execute Dflow swap via TPU
-                                    let tx_client = tx_client_clone.clone();
+                                    // Execute Dflow swap via RPC
+                                    let custom_rpc_final = custom_rpc_dflow.clone();
                                     spawn(async move {
+                                        let tx_client = TransactionClient::new(custom_rpc_final.as_deref());
                                         println!("💜 Executing Dflow swap via TPU + RPC...");
                                         
                                         // Convert base64 to bytes

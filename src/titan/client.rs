@@ -40,9 +40,11 @@ impl TitanClient {
     /// Connect to Titan WebSocket server with protocol negotiation and JWT authentication
     pub async fn connect(&self) -> Result<(), String> {
         let url = format!("wss://{}/api/v1/ws", self.endpoint);
-        println!("Connecting to Titan: {}", url);
+        println!("[TITAN-CLIENT] Connecting to Titan: {}", url);
+        println!("[TITAN-CLIENT] iOS platform: {}", cfg!(target_os = "ios"));
 
         // Build WebSocket request with protocol negotiation and JWT auth
+        println!("[TITAN-CLIENT] Building WebSocket request...");
         let request = tokio_tungstenite::tungstenite::http::Request::builder()
             .uri(&url)
             .header("Host", &self.endpoint)
@@ -53,18 +55,29 @@ impl TitanClient {
             .header("Sec-WebSocket-Protocol", "v1.api.titan.ag") // Protocol negotiation
             .header("Authorization", format!("Bearer {}", self.jwt_token)) // JWT auth
             .body(())
-            .map_err(|e| format!("Failed to build request: {}", e))?;
+            .map_err(|e| {
+                println!("[TITAN-CLIENT] ❌ Failed to build request: {}", e);
+                format!("Failed to build request: {}", e)
+            })?;
+
+        println!("[TITAN-CLIENT] Request built successfully, attempting connection...");
 
         // Connect to WebSocket
         let (ws_stream, response) = connect_async(request)
             .await
-            .map_err(|e| format!("Failed to connect: {}", e))?;
+            .map_err(|e| {
+                println!("[TITAN-CLIENT] ❌ WebSocket connection failed: {}", e);
+                println!("[TITAN-CLIENT] Error details: {:?}", e);
+                format!("Failed to connect: {}", e)
+            })?;
 
-        println!("Connected to Titan! Response: {:?}", response.status());
+        println!("[TITAN-CLIENT] ✓ Connected to Titan! Response: {:?}", response.status());
 
         // Store the connection
+        println!("[TITAN-CLIENT] Storing WebSocket connection...");
         let mut ws_lock = self.ws.lock().await;
         *ws_lock = Some(ws_stream);
+        println!("[TITAN-CLIENT] ✓ Connection stored successfully");
 
         Ok(())
     }
@@ -105,16 +118,27 @@ impl TitanClient {
     }
 
     /// Receive and decode a MessagePack message from the server
+    /// iOS-SAFE: Limits lock duration and adds timeout protection
     async fn receive_message(&self) -> Result<ServerMessage, String> {
-        let mut ws_lock = self.ws.lock().await;
-        let ws = ws_lock.as_mut().ok_or("Not connected")?;
+        // Add timeout for iOS compatibility (prevents indefinite blocking)
+        let timeout = std::time::Duration::from_secs(8);
 
-        // Receive message
-        let msg = ws.next().await
-            .ok_or("Connection closed")?
-            .map_err(|e| format!("Failed to receive: {}", e))?;
+        let msg = tokio::time::timeout(timeout, async {
+            let mut ws_lock = self.ws.lock().await;
+            let ws = ws_lock.as_mut().ok_or("Not connected")?;
 
-        // Decode MessagePack
+            // Receive message
+            let msg = ws.next().await
+                .ok_or("Connection closed")?
+                .map_err(|e| format!("Failed to receive: {}", e))?;
+
+            Ok::<_, String>(msg)
+        }).await
+        .map_err(|_| "Receive timeout (iOS network issue)".to_string())?;
+
+        let msg = msg?;
+
+        // Decode MessagePack (outside the lock)
         match msg {
             Message::Binary(data) => {
                 println!("Received message ({} bytes)", data.len());
@@ -144,25 +168,30 @@ impl TitanClient {
 
         self.send_request(request).await?;
 
-        // Wait for response
-        loop {
-            let msg = self.receive_message().await?;
-            match msg {
-                ServerMessage::Response(resp) if resp.request_id == request_id => {
-                    match resp.data {
-                        ResponseData::GetInfo(info) => return Ok(info),
-                        _ => return Err("Unexpected response type".to_string()),
+        // Wait for response with timeout (iOS-SAFE)
+        let timeout = std::time::Duration::from_secs(10);
+        let result = tokio::time::timeout(timeout, async {
+            loop {
+                let msg = self.receive_message().await?;
+                match msg {
+                    ServerMessage::Response(resp) if resp.request_id == request_id => {
+                        match resp.data {
+                            ResponseData::GetInfo(info) => return Ok(info),
+                            _ => return Err("Unexpected response type".to_string()),
+                        }
+                    }
+                    ServerMessage::Error(err) if err.request_id == request_id => {
+                        return Err(format!("Server error: {} (code {})", err.message, err.code));
+                    }
+                    _ => {
+                        // Ignore other messages (stream data, etc.)
+                        continue;
                     }
                 }
-                ServerMessage::Error(err) if err.request_id == request_id => {
-                    return Err(format!("Server error: {} (code {})", err.message, err.code));
-                }
-                _ => {
-                    // Ignore other messages (stream data, etc.)
-                    continue;
-                }
             }
-        }
+        }).await;
+
+        result.map_err(|_| "GetInfo timeout".to_string())?
     }
 
     /// Request swap quotes with streaming updates
@@ -220,46 +249,53 @@ impl TitanClient {
         println!("Requesting swap quotes: {} -> {} (amount: {})", input_mint, output_mint, amount);
         self.send_request(request).await?;
 
-        // Wait for initial response with stream ID
-        let stream_id = loop {
-            let msg = self.receive_message().await?;
-            match msg {
-                ServerMessage::Response(resp) if resp.request_id == request_id => {
-                    if let Some(stream) = resp.stream {
-                        println!("Quote stream started with ID: {}", stream.id);
-                        break stream.id;
-                    } else {
-                        return Err("No stream started".to_string());
-                    }
-                }
-                ServerMessage::Error(err) if err.request_id == request_id => {
-                    return Err(format!("Server error: {} (code {})", err.message, err.code));
-                }
-                _ => continue,
-            }
-        };
-
-        // Wait for first quote data
-        let quotes = loop {
-            let msg = self.receive_message().await?;
-            match msg {
-                ServerMessage::StreamData(data) if data.id == stream_id => {
-                    match data.payload {
-                        StreamDataPayload::SwapQuotes(quotes) => {
-                            println!("Received quotes from {} providers", quotes.quotes.len());
-                            break quotes;
+        // Wait for initial response with stream ID (iOS-SAFE with timeout)
+        let timeout = std::time::Duration::from_secs(10);
+        let stream_id = tokio::time::timeout(timeout, async {
+            loop {
+                let msg = self.receive_message().await?;
+                match msg {
+                    ServerMessage::Response(resp) if resp.request_id == request_id => {
+                        if let Some(stream) = resp.stream {
+                            println!("Quote stream started with ID: {}", stream.id);
+                            return Ok(stream.id);
+                        } else {
+                            return Err("No stream started".to_string());
                         }
                     }
-                }
-                ServerMessage::StreamEnd(end) if end.id == stream_id => {
-                    if let Some(err_msg) = end.error_message {
-                        return Err(format!("Stream ended with error: {}", err_msg));
+                    ServerMessage::Error(err) if err.request_id == request_id => {
+                        return Err(format!("Server error: {} (code {})", err.message, err.code));
                     }
-                    return Err("Stream ended without quotes".to_string());
+                    _ => continue,
                 }
-                _ => continue,
             }
-        };
+        }).await
+        .map_err(|_| "Stream start timeout (iOS)".to_string())??;
+
+        // Wait for first quote data (iOS-SAFE with timeout)
+        let quotes = tokio::time::timeout(timeout, async {
+            loop {
+                let msg = self.receive_message().await?;
+                match msg {
+                    ServerMessage::StreamData(data) if data.id == stream_id => {
+                        match data.payload {
+                            StreamDataPayload::SwapQuotes(quotes) => {
+                                println!("Received quotes from {} providers", quotes.quotes.len());
+                                return Ok(quotes);
+                            }
+                        }
+                    }
+                    ServerMessage::StreamEnd(end) if end.id == stream_id => {
+                        if let Some(err_msg) = end.error_message {
+                            return Err(format!("Stream ended with error: {}", err_msg));
+                        }
+                        return Err("Stream ended without quotes".to_string());
+                    }
+                    _ => continue,
+                }
+            }
+        }).await
+        .map_err(|_| "Quote data timeout (iOS)".to_string())??;
 
         // Stop the stream (we only need one quote)
         self.stop_stream(stream_id).await?;
@@ -274,7 +310,7 @@ impl TitanClient {
         Ok((best_provider.clone(), best_route.clone()))
     }
 
-    /// Stop a streaming quote
+    /// Stop a streaming quote (iOS-SAFE with timeout)
     async fn stop_stream(&self, stream_id: u32) -> Result<(), String> {
         let request_id = self.next_request_id().await;
         let request = ClientRequest {
@@ -284,24 +320,29 @@ impl TitanClient {
 
         self.send_request(request).await?;
 
-        // Wait for confirmation
-        loop {
-            let msg = self.receive_message().await?;
-            match msg {
-                ServerMessage::Response(resp) if resp.request_id == request_id => {
-                    println!("Stream {} stopped", stream_id);
-                    return Ok(());
+        // Wait for confirmation with timeout (iOS-SAFE)
+        let timeout = std::time::Duration::from_secs(5);
+        let result = tokio::time::timeout(timeout, async {
+            loop {
+                let msg = self.receive_message().await?;
+                match msg {
+                    ServerMessage::Response(resp) if resp.request_id == request_id => {
+                        println!("Stream {} stopped", stream_id);
+                        return Ok(());
+                    }
+                    ServerMessage::Error(err) if err.request_id == request_id => {
+                        return Err(format!("Failed to stop stream: {}", err.message));
+                    }
+                    ServerMessage::StreamEnd(end) if end.id == stream_id => {
+                        // Stream ended naturally
+                        return Ok(());
+                    }
+                    _ => continue,
                 }
-                ServerMessage::Error(err) if err.request_id == request_id => {
-                    return Err(format!("Failed to stop stream: {}", err.message));
-                }
-                ServerMessage::StreamEnd(end) if end.id == stream_id => {
-                    // Stream ended naturally
-                    return Ok(());
-                }
-                _ => continue,
             }
-        }
+        }).await;
+
+        result.map_err(|_| "Stop stream timeout (non-critical)".to_string())?
     }
 
     /// Close the WebSocket connection

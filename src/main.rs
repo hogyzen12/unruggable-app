@@ -86,15 +86,14 @@ fn App() -> Element {
     ));
 
     // Provide SNS resolver to the entire app
-    use_context_provider(|| sns_resolver);
-    
-    // Initialize global TransactionClient and start background TPU initialization
-    let transaction_client = Arc::new(transaction::TransactionClient::new(None));
-    transaction_client.init_tpu_background();
-    
-    // Provide TransactionClient to the entire app
-    use_context_provider(|| transaction_client);
+    use_context_provider(|| sns_resolver.clone());
 
+    // Provide a shared TransactionClient (no background TPU init to avoid iOS crash)
+    let transaction_client = Arc::new(transaction::TransactionClient::new(None));
+    use_context_provider(|| transaction_client.clone());
+    
+    let wallet = use_signal(|| None as Option<wallet::WalletInfo>);
+    
     rsx! {
         // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
         document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
