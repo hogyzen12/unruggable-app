@@ -63,9 +63,9 @@ tokio-serial = "5.4.4"
 arboard = "3.2"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-solana-remote-wallet = "2.3.7"
-solana-offchain-message = "2.2.1"
-solana-derivation-path = "2.2.1"
+solana-remote-wallet = "3.1.5"
+solana-offchain-message = "3.0.0"
+solana-derivation-path = "3.0.0"
 hidapi = "2.6.3"
 parking_lot = "0.12"
 #dioxus-desktop = { git = "https://github.com/DioxusLabs/dioxus", rev = "f9e7011", default-features = false}
