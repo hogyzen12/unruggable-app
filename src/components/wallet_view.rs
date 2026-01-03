@@ -29,6 +29,7 @@ use crate::currency_utils::{
     format_portfolio_balance
 };
 use crate::components::modals::currency_modal::CurrencyModal;
+use crate::components::{LiquidMetalButton, LiquidMetalStatus};
 // Temporarily disabled integrations for Solana 3.x testing
 use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal}; //, SquadsModal, CarrotModal, BonkStakingModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
@@ -1127,7 +1128,24 @@ pub fn WalletView() -> Element {
         ("", full_address.as_str(), "")
     };
 
-    let short_address = format!("{}...{}", start, end);    
+    let short_address = format!("{}...{}", start, end);
+
+    let hardware_button_status = if hardware_connected() {
+        LiquidMetalStatus::Ok
+    } else if hardware_device_present() {
+        LiquidMetalStatus::Warn
+    } else {
+        LiquidMetalStatus::Neutral
+    };
+
+    let hardware_button_interactive = hardware_device_present() || hardware_connected();
+    let hardware_button_label = if hardware_connected() {
+        "Hardware wallet connected"
+    } else if hardware_device_present() {
+        "Hardware wallet detected"
+    } else {
+        "No hardware wallet detected"
+    };
 
     rsx! {
         div {
@@ -1147,41 +1165,26 @@ pub fn WalletView() -> Element {
             // Header
             div {
                 class: "wallet-header-enhanced",
-                // Left side - Profile/Hardware icon
+                // Left side - Liquid metal hardware button
                 div {
-                    class: {
-                        let mut classes = "profile-icon".to_string();
-                        if hardware_device_present() {
-                            classes.push_str(" hardware-present");
-                        }
-                        if hardware_connected() {
-                            classes.push_str(" hardware-connected");
-                        }
-                        classes
-                    },
-                    style: "position: relative; overflow: visible;",
-                    onclick: move |e| {
-                        e.stop_propagation();
-                        if hardware_device_present() {
-                            show_hardware_modal.set(true);
-                        }
-                    },
-                    img { 
-                        src: ICON_32,
-                        alt: "Profile"
-                    }
-                    div {
-                        class: {
-                            let indicator_class = if hardware_connected() {
-                                "hardware-indicator connected"
-                            } else if hardware_device_present() {
-                                "hardware-indicator present"
-                            } else {
-                                "hardware-indicator default"
-                            };
-                            indicator_class.to_string()
+                    class: "hardware-button-wrapper",
+                    LiquidMetalButton {
+                        status: hardware_button_status,
+                        animated: true,
+                        interactive: hardware_button_interactive,
+                        aria_label: Some(hardware_button_label.to_string()),
+                        class: Some("hardware-wallet-button".to_string()),
+                        onclick: move |_| {
+                            if hardware_button_interactive {
+                                show_hardware_modal.set(true);
+                            }
                         },
-                        style: "position: absolute !important; top: auto !important; right: -2px !important; bottom: -2px !important; left: auto !important; margin: 0 !important; padding: 0 !important; display: block !important; transform: none !important; transition: background-color 0.3s ease, box-shadow 0.3s ease !important; transition-property: background-color, box-shadow !important;"
+                        img {
+                            src: ICON_32,
+                            alt: "Hardware wallet",
+                            width: "24",
+                            height: "24"
+                        }
                     }
                 }
 
@@ -1623,17 +1626,19 @@ pub fn WalletView() -> Element {
                 HardwareWalletModal {
                     onclose: move |_| show_hardware_modal.set(false),
                     existing_wallet: if hardware_connected() { hardware_wallet() } else { None },
-                    ondisconnect: move |_| {
-                        hardware_wallet.set(None);
-                        hardware_connected.set(false);
-                        hardware_pubkey.set(None);
-                        hardware_device_type.set(None);
-                        show_hardware_modal.set(false);
-                    },
-                    onsuccess: move |hw_wallet: Arc<HardwareWallet>| {
-                        hardware_wallet.set(Some(hw_wallet.clone()));
-                        hardware_connected.set(true);
-                        show_hardware_modal.set(false);
+                ondisconnect: move |_| {
+                    hardware_wallet.set(None);
+                    hardware_connected.set(false);
+                    hardware_device_present.set(false);
+                    hardware_pubkey.set(None);
+                    hardware_device_type.set(None);
+                    show_hardware_modal.set(false);
+                },
+                onsuccess: move |hw_wallet: Arc<HardwareWallet>| {
+                    hardware_wallet.set(Some(hw_wallet.clone()));
+                    hardware_connected.set(true);
+                    hardware_device_present.set(true);
+                    show_hardware_modal.set(false);
                         
                         let hw_clone = hw_wallet.clone();
                         spawn(async move {
