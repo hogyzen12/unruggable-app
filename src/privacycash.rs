@@ -337,17 +337,32 @@ pub async fn submit_deposit(authority: &str, tx: &VersionedTransaction) -> Resul
         .json(&req)
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .json::<PrivacyCashResponse>()
-        .await
         .map_err(|e| e.to_string())?;
 
-    if !res.success {
-        log::error!("PrivacyCash deposit failed response: {:?}", res);
-        return Err("PrivacyCash deposit failed".to_string());
+    let status = res.status();
+    let body = res.text().await.map_err(|e| e.to_string())?;
+    let json: Value = serde_json::from_str(&body)
+        .map_err(|e| format!("decode error: {e}; body={body}"))?;
+
+    let success = json.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !success {
+        let err_msg = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("PrivacyCash deposit failed");
+        return Err(err_msg.to_string());
     }
 
-    Ok(res.signature)
+    if !status.is_success() {
+        return Err(format!("PrivacyCash deposit http {}: {}", status, body));
+    }
+
+    let signature = json
+        .get("signature")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("missing signature; body={body}"))?;
+
+    Ok(signature.to_string())
 }
 
 pub async fn submit_withdraw(req: &WithdrawRequest) -> Result<String, String> {
@@ -358,14 +373,30 @@ pub async fn submit_withdraw(req: &WithdrawRequest) -> Result<String, String> {
         .json(req)
         .send()
         .await
-        .map_err(|e| e.to_string())?
-        .json::<PrivacyCashResponse>()
-        .await
         .map_err(|e| e.to_string())?;
 
-    if !res.success {
-        return Err("PrivacyCash withdraw failed".to_string());
+    let status = res.status();
+    let body = res.text().await.map_err(|e| e.to_string())?;
+    let json: Value = serde_json::from_str(&body)
+        .map_err(|e| format!("decode error: {e}; body={body}"))?;
+
+    let success = json.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    if !success {
+        let err_msg = json
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("PrivacyCash withdraw failed");
+        return Err(err_msg.to_string());
     }
 
-    Ok(res.signature)
+    if !status.is_success() {
+        return Err(format!("PrivacyCash withdraw http {}: {}", status, body));
+    }
+
+    let signature = json
+        .get("signature")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("missing signature; body={body}"))?;
+
+    Ok(signature.to_string())
 }
