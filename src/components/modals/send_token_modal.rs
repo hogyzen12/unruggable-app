@@ -193,7 +193,7 @@ pub fn SendTokenModal(
     let mut error_message = use_signal(|| None as Option<String>);
     let mut recipient_balance = use_signal(|| None as Option<f64>);
     let mut checking_balance = use_signal(|| false);
-    let privacy_supported = token_symbol == "USDC";
+    let privacy_supported = matches!(token_symbol.as_str(), "USDC" | "USDT" | "ORE");
     let mut privacy_enabled = use_signal(|| false);
     let mut private_balance = use_signal(|| None as Option<u64>);
     let mut private_balance_loading = use_signal(|| false);

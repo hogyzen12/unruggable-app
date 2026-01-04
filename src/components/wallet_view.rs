@@ -104,6 +104,8 @@ const ICON_DELETE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_RPC: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/RPC.svg";
 const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDT_MINT: &str = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+const ORE_MINT: &str = "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp";
 
 const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
 const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
@@ -484,6 +486,10 @@ pub fn WalletView() -> Element {
     let mut private_balance_loading = use_signal(|| false);
     let mut private_balance_usdc = use_signal(|| None as Option<u64>);
     let mut private_balance_usdc_loading = use_signal(|| false);
+    let mut private_balance_usdt = use_signal(|| None as Option<u64>);
+    let mut private_balance_usdt_loading = use_signal(|| false);
+    let mut private_balance_ore = use_signal(|| None as Option<u64>);
+    let mut private_balance_ore_loading = use_signal(|| false);
     let mut last_privacy_wallet = use_signal(|| None as Option<String>);
 
     //JITO Stuff
@@ -1115,14 +1121,22 @@ pub fn WalletView() -> Element {
         let mut private_balance_loading = private_balance_loading.clone();
         let mut private_balance_usdc = private_balance_usdc.clone();
         let mut private_balance_usdc_loading = private_balance_usdc_loading.clone();
+        let mut private_balance_usdt = private_balance_usdt.clone();
+        let mut private_balance_usdt_loading = private_balance_usdt_loading.clone();
+        let mut private_balance_ore = private_balance_ore.clone();
+        let mut private_balance_ore_loading = private_balance_ore_loading.clone();
         Rc::new(RefCell::new(move || {
             if hw_signal().is_some() {
                 private_balance_sol.set(None);
                 private_balance_usdc.set(None);
+                private_balance_usdt.set(None);
+                private_balance_ore.set(None);
                 return;
             }
             private_balance_loading.set(true);
             private_balance_usdc_loading.set(true);
+            private_balance_usdt_loading.set(true);
+            private_balance_ore_loading.set(true);
             let rpc_url = rpc_signal().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
             let wallet_info = wallets_signal()
                 .get(current_wallet_index_signal())
@@ -1131,26 +1145,38 @@ pub fn WalletView() -> Element {
             let mut private_balance_loading = private_balance_loading.clone();
             let mut private_balance_usdc = private_balance_usdc.clone();
             let mut private_balance_usdc_loading = private_balance_usdc_loading.clone();
+            let mut private_balance_usdt = private_balance_usdt.clone();
+            let mut private_balance_usdt_loading = private_balance_usdt_loading.clone();
+            let mut private_balance_ore = private_balance_ore.clone();
+            let mut private_balance_ore_loading = private_balance_ore_loading.clone();
             spawn(async move {
                 let Some(wallet_info) = wallet_info else {
                     private_balance_loading.set(false);
                     private_balance_usdc_loading.set(false);
+                    private_balance_usdt_loading.set(false);
+                    private_balance_ore_loading.set(false);
                     return;
                 };
                 let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
                     private_balance_loading.set(false);
                     private_balance_usdc_loading.set(false);
+                    private_balance_usdt_loading.set(false);
+                    private_balance_ore_loading.set(false);
                     return;
                 };
                 let signer = SignerType::from_wallet(wallet);
                 let Ok(authority) = signer.get_public_key().await else {
                     private_balance_loading.set(false);
                     private_balance_usdc_loading.set(false);
+                    private_balance_usdt_loading.set(false);
+                    private_balance_ore_loading.set(false);
                     return;
                 };
                 let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
                     private_balance_loading.set(false);
                     private_balance_usdc_loading.set(false);
+                    private_balance_usdt_loading.set(false);
+                    private_balance_ore_loading.set(false);
                     return;
                 };
                 match privacycash::get_private_balance(&authority, &signature, Some(rpc_url.as_str())).await {
@@ -1179,6 +1205,40 @@ pub fn WalletView() -> Element {
                     }
                 }
                 private_balance_usdc_loading.set(false);
+
+                match privacycash::get_private_balance_spl(
+                    &authority,
+                    &signature,
+                    USDT_MINT,
+                    Some(rpc_url.as_str()),
+                )
+                .await
+                {
+                    Ok(balance) => {
+                        private_balance_usdt.set(Some(balance));
+                    }
+                    Err(_) => {
+                        private_balance_usdt.set(None);
+                    }
+                }
+                private_balance_usdt_loading.set(false);
+
+                match privacycash::get_private_balance_spl(
+                    &authority,
+                    &signature,
+                    ORE_MINT,
+                    Some(rpc_url.as_str()),
+                )
+                .await
+                {
+                    Ok(balance) => {
+                        private_balance_ore.set(Some(balance));
+                    }
+                    Err(_) => {
+                        private_balance_ore.set(None);
+                    }
+                }
+                private_balance_ore_loading.set(false);
             });
         }))
     };
@@ -2720,6 +2780,7 @@ pub fn WalletView() -> Element {
                                                                 let token_decimals = match token_symbol.as_str() {
                                                                     "SOL" => Some(9),
                                                                     "USDC" | "USDT" => Some(6),
+                                                                    "ORE" => Some(11),
                                                                     _ => Some(9),
                                                                 };
                                                                 
@@ -2761,7 +2822,7 @@ pub fn WalletView() -> Element {
                                                             if balance > 0 {
                                                                 div {
                                                                     class: "token-amount",
-                                                                    "Private: {(balance as f64) / 1_000_000_000.0:.4} SOL"
+                                                                    "Private: {(balance as f64) / 1_000_000_000.0:.2} SOL"
                                                                 }
                                                             }
                                                         }
@@ -2771,7 +2832,27 @@ pub fn WalletView() -> Element {
                                                             if balance > 0 {
                                                                 div {
                                                                     class: "token-amount",
-                                                                    "Private: {(balance as f64) / 1_000_000.0:.4} USDC"
+                                                                    "Private: {(balance as f64) / 1_000_000.0:.2} USDC"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    if token_symbol == "USDT" {
+                                                        if let Some(balance) = private_balance_usdt() {
+                                                            if balance > 0 {
+                                                                div {
+                                                                    class: "token-amount",
+                                                                    "Private: {(balance as f64) / 1_000_000.0:.2} USDT"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    if token_symbol == "ORE" || token_mint == ORE_MINT {
+                                                        if let Some(balance) = private_balance_ore() {
+                                                            if balance > 0 {
+                                                                div {
+                                                                    class: "token-amount",
+                                                                    "Private: {(balance as f64) / 100_000_000_000.0:.2} ORE"
                                                                 }
                                                             }
                                                         }

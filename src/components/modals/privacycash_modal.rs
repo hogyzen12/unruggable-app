@@ -10,6 +10,38 @@ use crate::transaction::TransactionClient;
 use crate::wallet::{Wallet, WalletInfo};
 
 const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
+const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const USDT_MINT: &str = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+const ORE_MINT: &str = "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp";
+
+struct PrivacyToken {
+    symbol: &'static str,
+    mint: Option<&'static str>,
+    decimals: u8,
+}
+
+const PRIVACY_TOKENS: &[PrivacyToken] = &[
+    PrivacyToken {
+        symbol: "SOL",
+        mint: None,
+        decimals: 9,
+    },
+    PrivacyToken {
+        symbol: "USDC",
+        mint: Some(USDC_MINT),
+        decimals: 6,
+    },
+    PrivacyToken {
+        symbol: "USDT",
+        mint: Some(USDT_MINT),
+        decimals: 6,
+    },
+    PrivacyToken {
+        symbol: "ORE",
+        mint: Some(ORE_MINT),
+        decimals: 11,
+    },
+];
 
 #[component]
 pub fn PrivacyCashModal(
@@ -24,6 +56,7 @@ pub fn PrivacyCashModal(
     let mut busy = use_signal(|| false);
     let mut private_balance = use_signal(|| None as Option<u64>);
     let mut balance_loading = use_signal(|| false);
+    let mut selected_token = use_signal(|| 0usize);
 
     let wallet_info = wallet.clone();
     let rpc_url = custom_rpc.clone();
@@ -31,6 +64,8 @@ pub fn PrivacyCashModal(
     let on_refresh_balance = move |_| {
         let wallet_info = wallet_info.clone();
         let rpc_url = rpc_url.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
+        let token_index = selected_token();
+        let token = &PRIVACY_TOKENS[token_index];
         error.set(None);
         status.set(None);
         balance_loading.set(true);
@@ -61,8 +96,23 @@ pub fn PrivacyCashModal(
                 return;
             };
 
-            println!("[PrivacyCash] Fetching private balance for {}", authority);
-            match privacycash::get_private_balance(&authority, &signature, Some(rpc_url.as_str())).await {
+            println!(
+                "[PrivacyCash] Fetching private balance for {} ({})",
+                authority, token.symbol
+            );
+            let balance_res = match token.mint {
+                Some(mint) => {
+                    privacycash::get_private_balance_spl(
+                        &authority,
+                        &signature,
+                        mint,
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                }
+                None => privacycash::get_private_balance(&authority, &signature, Some(rpc_url.as_str())).await,
+            };
+            match balance_res {
                 Ok(balance) => {
                     println!("[PrivacyCash] Private balance {}", balance);
                     private_balance.set(Some(balance));
@@ -83,6 +133,8 @@ pub fn PrivacyCashModal(
         let wallet_info = wallet_for_deposit.clone();
         let rpc_url = rpc_for_deposit.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
         let amount_value = amount();
+        let token_index = selected_token();
+        let token = &PRIVACY_TOKENS[token_index];
         error.set(None);
         status.set(None);
         busy.set(true);
@@ -122,16 +174,31 @@ pub fn PrivacyCashModal(
                 return;
             };
 
-            let lamports = (amount_f64 * 1_000_000_000.0) as u64;
-            println!("[PrivacyCash] Building deposit tx for {}", authority);
-            let mut tx = match privacycash::build_deposit_tx(
-                &authority,
-                &signature,
-                lamports,
-                Some(rpc_url.as_str()),
-            )
-            .await
-            {
+            let scale = 10_f64.powi(token.decimals as i32);
+            let base_units = (amount_f64 * scale).round() as u64;
+            println!("[PrivacyCash] Building deposit tx for {} ({})", authority, token.symbol);
+            let mut tx = match token.mint {
+                Some(mint) => {
+                    privacycash::build_deposit_spl_tx(
+                        &authority,
+                        &signature,
+                        base_units,
+                        mint,
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                }
+                None => {
+                    privacycash::build_deposit_tx(
+                        &authority,
+                        &signature,
+                        base_units,
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                }
+            };
+            let mut tx = match tx {
                 Ok(tx) => tx,
                 Err(err) => {
                     error.set(Some(format!("Failed to build deposit tx: {err}")));
@@ -174,12 +241,14 @@ pub fn PrivacyCashModal(
 
     let wallet_for_withdraw = wallet.clone();
     let rpc_for_withdraw = custom_rpc.clone();
+    let selected_token_for_withdraw = selected_token.clone();
     let on_withdraw: Rc<RefCell<dyn FnMut(Option<String>)>> = Rc::new(RefCell::new(
         move |recipient_override: Option<String>| {
         let wallet_info = wallet_for_withdraw.clone();
         let amount_value = amount();
         let recipient_value = recipient();
         let rpc_url = rpc_for_withdraw.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
+        let token = &PRIVACY_TOKENS[selected_token_for_withdraw()];
             error.set(None);
             status.set(None);
             busy.set(true);
@@ -232,17 +301,33 @@ pub fn PrivacyCashModal(
                 return;
             };
 
-            let lamports = (amount_f64 * 1_000_000_000.0) as u64;
-            println!("[PrivacyCash] Building withdraw request {}", recipient);
-            let req = match privacycash::build_withdraw_request(
-                &authority,
-                &signature,
-                lamports,
-                &recipient,
-                Some(rpc_url.as_str()),
-            )
-            .await
-            {
+            let scale = 10_f64.powi(token.decimals as i32);
+            let base_units = (amount_f64 * scale).round() as u64;
+            println!("[PrivacyCash] Building withdraw request {} ({})", recipient, token.symbol);
+            let req = match token.mint {
+                Some(mint) => {
+                    privacycash::build_withdraw_spl_request(
+                        &authority,
+                        &signature,
+                        base_units,
+                        &recipient,
+                        mint,
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                }
+                None => {
+                    privacycash::build_withdraw_request(
+                        &authority,
+                        &signature,
+                        base_units,
+                        &recipient,
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                }
+            };
+            let req = match req {
                 Ok(req) => req,
                 Err(err) => {
                     error.set(Some(format!("Failed to build withdraw request: {err}")));
@@ -281,6 +366,11 @@ pub fn PrivacyCashModal(
         }
     };
 
+    let selected_index = selected_token();
+    let selected = &PRIVACY_TOKENS[selected_index];
+    let selected_symbol = selected.symbol;
+    let selected_decimals = selected.decimals;
+
     rsx! {
         div {
             class: "modal-backdrop",
@@ -294,12 +384,34 @@ pub fn PrivacyCashModal(
 
                 div {
                     class: "wallet-field",
-                    label { "Private Balance (SOL):" }
+                    label { "Asset:" }
+                    select {
+                        value: "{selected_index}",
+                        onchange: move |e| {
+                            if let Ok(idx) = e.value().parse::<usize>() {
+                                selected_token.set(idx);
+                                private_balance.set(None);
+                                error.set(None);
+                                status.set(None);
+                            }
+                        },
+                        for (idx, token) in PRIVACY_TOKENS.iter().enumerate() {
+                            option { value: "{idx}", "{token.symbol}" }
+                        }
+                    }
+                }
+
+                div {
+                    class: "wallet-field",
+                    label { "Private Balance ({selected_symbol}):" }
                     div { class: "address-display",
                         if balance_loading() {
                             "Loading..."
                         } else if let Some(balance) = private_balance() {
-                            "{(balance as f64) / 1_000_000_000.0:.6}"
+                            {
+                                let display = balance as f64 / 10_f64.powi(selected_decimals as i32);
+                                rsx! { "{display:.6}" }
+                            }
                         } else {
                             "-"
                         }
@@ -314,7 +426,7 @@ pub fn PrivacyCashModal(
 
                 div {
                     class: "wallet-field",
-                    label { "Amount (SOL):" }
+                    label { "Amount ({selected_symbol}):" }
                     input {
                         r#type: "number",
                         value: "{amount}",
