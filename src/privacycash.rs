@@ -57,16 +57,37 @@ pub struct WithdrawRequest {
     pub feeRecipientAccount: String,
     #[serde(rename = "extAmount")]
     pub extAmount: i64,
-    #[serde(rename = "encryptedOutput1")]
-    pub encryptedOutput1: String,
-    #[serde(rename = "encryptedOutput2")]
-    pub encryptedOutput2: String,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "encryptedOutput1"
+    )]
+    pub encryptedOutput1: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "encryptedOutput2"
+    )]
+    pub encryptedOutput2: Option<String>,
     #[serde(rename = "fee")]
     pub fee: u64,
     #[serde(rename = "lookupTableAddress")]
     pub lookupTableAddress: String,
     #[serde(rename = "senderAddress")]
     pub senderAddress: String,
+
+    // SPL optional fields
+    #[serde(skip_serializing_if = "Option::is_none", rename = "treeAta")]
+    pub treeAta: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "recipientAta")]
+    pub recipientAta: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", rename = "mintAddress")]
+    pub mintAddress: Option<String>,
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        rename = "feeRecipientTokenAccount"
+    )]
+    pub feeRecipientTokenAccount: Option<String>,
 }
 
 pub async fn sign_auth_message(
@@ -213,7 +234,7 @@ pub async fn build_withdraw_request(
     match res {
         Value::String(params_str) => {
             let params_bytes = base64::engine::general_purpose::STANDARD
-                .decode(params_str)
+                .decode(&params_str)
                 .map_err(|_| "Failed to decode withdraw params".to_string())?;
             serde_json::from_slice::<WithdrawRequest>(&params_bytes)
                 .map_err(|_| "Failed to deserialize withdraw params".to_string())
@@ -223,6 +244,233 @@ pub async fn build_withdraw_request(
             obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
         )),
         _ => Err("Unexpected response for withdraw params".to_string()),
+    }
+}
+
+pub async fn build_deposit_spl_tx(
+    authority: &str,
+    signature: &str,
+    base_units: u64,
+    mint_address: &str,
+    rpc_url: Option<&str>,
+) -> Result<VersionedTransaction, String> {
+    log::info!(
+        "[PrivacyCash] build_deposit_spl_tx authority={} base_units={} mint={} rpc_url={:?}",
+        authority,
+        base_units,
+        mint_address,
+        rpc_url
+    );
+    let mut eval = eval(
+        r#"
+        try {
+            let [authority, signature, baseUnits, mintAddress, rpcUrl] = await dioxus.recv();
+            if (rpcUrl && rpcUrl.length > 0) {
+                globalThis.PRIVACY_CASH_RPC_URL = rpcUrl;
+                console.log('PrivacyCash RPC set to', rpcUrl);
+            }
+            console.log('PrivacyCash SPL deposit', { authority, baseUnits, mintAddress });
+            if (!window.PrivacyCash) {
+                throw new Error('PrivacyCash SDK not loaded');
+            }
+            let client = new window.PrivacyCash({
+                publicKey: authority,
+                signature: signature,
+            });
+            let txb64 = await client.depositSPL({ base_units: baseUnits, mintAddress: mintAddress });
+            dioxus.send(txb64);
+        } catch (err) {
+            console.log('PrivacyCash SPL deposit error', err);
+            dioxus.send({ error: err?.toString?.() || String(err) });
+        }
+        "#,
+    );
+
+    eval.send(Value::Array(vec![
+        Value::String(authority.to_string()),
+        Value::String(signature.to_string()),
+        Value::Number(base_units.into()),
+        Value::String(mint_address.to_string()),
+        Value::String(rpc_url.unwrap_or_default().to_string()),
+    ]))
+    .map_err(|_| "Failed to send deposit SPL params".to_string())?;
+
+    let res = eval
+        .recv()
+        .await
+        .map_err(|_| "Failed to receive deposit SPL tx".to_string())?;
+
+    match res {
+        Value::String(tx_str) => {
+            let tx_bytes = base64::engine::general_purpose::STANDARD
+                .decode(tx_str)
+                .map_err(|_| "Failed to decode deposit SPL tx".to_string())?;
+            bincode::deserialize::<VersionedTransaction>(&tx_bytes)
+                .map_err(|_| "Failed to deserialize deposit SPL tx".to_string())
+        }
+        Value::Object(obj) => Err(format!(
+            "Deposit SPL JS error: {}",
+            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+        )),
+        _ => Err("Unexpected response for deposit SPL tx".to_string()),
+    }
+}
+
+pub async fn build_withdraw_spl_request(
+    authority: &str,
+    signature: &str,
+    base_units: u64,
+    recipient: &str,
+    mint_address: &str,
+    rpc_url: Option<&str>,
+) -> Result<WithdrawRequest, String> {
+    log::info!(
+        "[PrivacyCash] build_withdraw_spl_request authority={} base_units={} recipient={} mint={} rpc_url={:?}",
+        authority,
+        base_units,
+        recipient,
+        mint_address,
+        rpc_url
+    );
+    let mut eval = eval(
+        r#"
+        try {
+            let [authority, signature, baseUnits, recipient, mintAddress, rpcUrl] = await dioxus.recv();
+            if (rpcUrl && rpcUrl.length > 0) {
+                globalThis.PRIVACY_CASH_RPC_URL = rpcUrl;
+                console.log('PrivacyCash RPC set to', rpcUrl);
+            }
+            console.log('PrivacyCash SPL withdraw', { authority, baseUnits, recipient, mintAddress });
+            if (!window.PrivacyCash) {
+                throw new Error('PrivacyCash SDK not loaded');
+            }
+            let client = new window.PrivacyCash({
+                publicKey: authority,
+                signature: signature,
+            });
+            let paramsB64 = await client.withdrawSPL({
+                base_units: baseUnits,
+                recipientAddress: recipient,
+                mintAddress: mintAddress
+            });
+            dioxus.send(paramsB64);
+        } catch (err) {
+            console.log('PrivacyCash SPL withdraw error', err);
+            dioxus.send({ error: err?.toString?.() || String(err) });
+        }
+        "#,
+    );
+
+    eval.send(Value::Array(vec![
+        Value::String(authority.to_string()),
+        Value::String(signature.to_string()),
+        Value::Number(base_units.into()),
+        Value::String(recipient.to_string()),
+        Value::String(mint_address.to_string()),
+        Value::String(rpc_url.unwrap_or_default().to_string()),
+    ]))
+    .map_err(|_| "Failed to send withdraw SPL params".to_string())?;
+
+    let res = eval
+        .recv()
+        .await
+        .map_err(|_| "Failed to receive withdraw SPL params".to_string())?;
+
+    match res {
+        Value::String(params_str) => {
+            let params_bytes = base64::engine::general_purpose::STANDARD
+                .decode(&params_str)
+                .map_err(|_| "Failed to decode withdraw SPL params".to_string())?;
+            match serde_json::from_slice::<WithdrawRequest>(&params_bytes) {
+                Ok(params) => Ok(params),
+                Err(err) => {
+                    match serde_json::from_str::<WithdrawRequest>(&params_str) {
+                        Ok(params) => Ok(params),
+                        Err(_) => {
+                            let preview = params_str.chars().take(160).collect::<String>();
+                            Err(format!(
+                                "Failed to deserialize withdraw SPL params: {}; preview={}",
+                                err, preview
+                            ))
+                        }
+                    }
+                }
+            }
+        }
+        Value::Object(obj) => Err(format!(
+            "Withdraw SPL JS error: {}",
+            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+        )),
+        _ => Err("Unexpected response for withdraw SPL params".to_string()),
+    }
+}
+
+pub async fn get_private_balance_spl(
+    authority: &str,
+    signature: &str,
+    mint_address: &str,
+    rpc_url: Option<&str>,
+) -> Result<u64, String> {
+    log::info!(
+        "[PrivacyCash] get_private_balance_spl authority={} mint={} rpc_url={:?}",
+        authority,
+        mint_address,
+        rpc_url
+    );
+    let mut eval = eval(
+        r#"
+        try {
+            let [authority, signature, mintAddress, rpcUrl] = await dioxus.recv();
+            if (rpcUrl && rpcUrl.length > 0) {
+                globalThis.PRIVACY_CASH_RPC_URL = rpcUrl;
+                console.log('PrivacyCash RPC set to', rpcUrl);
+            }
+            if (!window.PrivacyCash) {
+                throw new Error('PrivacyCash SDK not loaded');
+            }
+            let client = new window.PrivacyCash({
+                publicKey: authority,
+                signature: signature,
+            });
+            console.log('PrivacyCash SPL balance start', { authority, mintAddress });
+            let balance = await client.getPrivateBalanceSpl(mintAddress);
+            console.log('PrivacyCash SPL balance result', balance);
+            const raw = (balance && (balance.base_units ?? balance.lamports ?? balance.amount)) ?? balance;
+            dioxus.send(raw);
+        } catch (err) {
+            console.log('PrivacyCash SPL balance error', err);
+            dioxus.send({ error: err?.toString?.() || String(err) });
+        }
+        "#,
+    );
+
+    eval.send(Value::Array(vec![
+        Value::String(authority.to_string()),
+        Value::String(signature.to_string()),
+        Value::String(mint_address.to_string()),
+        Value::String(rpc_url.unwrap_or_default().to_string()),
+    ]))
+    .map_err(|_| "Failed to send balance SPL params".to_string())?;
+
+    let res = eval
+        .recv()
+        .await
+        .map_err(|_| "Failed to receive balance SPL".to_string())?;
+
+    match res {
+        Value::Number(balance) => {
+            let val = balance
+                .as_u64()
+                .or_else(|| balance.as_f64().map(|v| v.round() as u64))
+                .ok_or_else(|| "Invalid balance response".to_string())?;
+            log::info!("[PrivacyCash] SPL private balance {}", val);
+            Ok(val)
+        }
+        Value::Object(obj) => Err(format!(
+            "Balance SPL JS error: {}",
+            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+        )),
+        _ => Err("Unexpected response for balance SPL".to_string()),
     }
 }
 
@@ -366,10 +614,15 @@ pub async fn submit_deposit(authority: &str, tx: &VersionedTransaction) -> Resul
 }
 
 pub async fn submit_withdraw(req: &WithdrawRequest) -> Result<String, String> {
-    log::info!("PrivacyCash withdraw -> {}", PRIVACY_CASH_API_URL);
+    let endpoint = if req.mintAddress.is_some() {
+        "/withdraw/spl"
+    } else {
+        "/withdraw"
+    };
+    log::info!("PrivacyCash withdraw -> {}{}", PRIVACY_CASH_API_URL, endpoint);
     let client = reqwest::Client::new();
     let res = client
-        .post(format!("{}/withdraw", PRIVACY_CASH_API_URL))
+        .post(format!("{}{}", PRIVACY_CASH_API_URL, endpoint))
         .json(req)
         .send()
         .await

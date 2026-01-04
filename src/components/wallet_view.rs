@@ -103,6 +103,7 @@ const ICON_EXPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_DELETE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/DELETE_wallet.svg";
 const ICON_RPC: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/RPC.svg";
 const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
+const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 
 const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
 const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
@@ -481,6 +482,8 @@ pub fn WalletView() -> Element {
     // Privacy Cash balance
     let mut private_balance_sol = use_signal(|| None as Option<u64>);
     let mut private_balance_loading = use_signal(|| false);
+    let mut private_balance_usdc = use_signal(|| None as Option<u64>);
+    let mut private_balance_usdc_loading = use_signal(|| false);
     let mut last_privacy_wallet = use_signal(|| None as Option<String>);
 
     //JITO Stuff
@@ -1104,37 +1107,50 @@ pub fn WalletView() -> Element {
     let current_wallet = wallets.read().get(current_wallet_index()).cloned();
 
     let refresh_private_balance: Rc<RefCell<dyn FnMut()>> = {
-        let wallet_info = current_wallet.clone();
+        let wallets_signal = wallets.clone();
+        let current_wallet_index_signal = current_wallet_index.clone();
         let rpc_signal = custom_rpc.clone();
         let hw_signal = hardware_wallet.clone();
         let mut private_balance_sol = private_balance_sol.clone();
         let mut private_balance_loading = private_balance_loading.clone();
+        let mut private_balance_usdc = private_balance_usdc.clone();
+        let mut private_balance_usdc_loading = private_balance_usdc_loading.clone();
         Rc::new(RefCell::new(move || {
             if hw_signal().is_some() {
                 private_balance_sol.set(None);
+                private_balance_usdc.set(None);
                 return;
             }
             private_balance_loading.set(true);
+            private_balance_usdc_loading.set(true);
             let rpc_url = rpc_signal().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
-            let wallet_info = wallet_info.clone();
+            let wallet_info = wallets_signal()
+                .get(current_wallet_index_signal())
+                .cloned();
             let mut private_balance_sol = private_balance_sol.clone();
             let mut private_balance_loading = private_balance_loading.clone();
+            let mut private_balance_usdc = private_balance_usdc.clone();
+            let mut private_balance_usdc_loading = private_balance_usdc_loading.clone();
             spawn(async move {
                 let Some(wallet_info) = wallet_info else {
                     private_balance_loading.set(false);
+                    private_balance_usdc_loading.set(false);
                     return;
                 };
                 let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
                     private_balance_loading.set(false);
+                    private_balance_usdc_loading.set(false);
                     return;
                 };
                 let signer = SignerType::from_wallet(wallet);
                 let Ok(authority) = signer.get_public_key().await else {
                     private_balance_loading.set(false);
+                    private_balance_usdc_loading.set(false);
                     return;
                 };
                 let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
                     private_balance_loading.set(false);
+                    private_balance_usdc_loading.set(false);
                     return;
                 };
                 match privacycash::get_private_balance(&authority, &signature, Some(rpc_url.as_str())).await {
@@ -1146,17 +1162,35 @@ pub fn WalletView() -> Element {
                     }
                 }
                 private_balance_loading.set(false);
+
+                match privacycash::get_private_balance_spl(
+                    &authority,
+                    &signature,
+                    USDC_MINT,
+                    Some(rpc_url.as_str()),
+                )
+                .await
+                {
+                    Ok(balance) => {
+                        private_balance_usdc.set(Some(balance));
+                    }
+                    Err(_) => {
+                        private_balance_usdc.set(None);
+                    }
+                }
+                private_balance_usdc_loading.set(false);
             });
         }))
     };
 
     {
         let refresh_private_balance = Rc::clone(&refresh_private_balance);
-        let current_wallet_snapshot = current_wallet.clone();
         use_effect(move || {
             let _ = wallets();
             let _ = current_wallet_index();
-            let current_addr = current_wallet_snapshot.as_ref().map(|w| w.address.clone());
+            let current_addr = wallets()
+                .get(current_wallet_index())
+                .map(|w| w.address.clone());
             if current_addr != last_privacy_wallet() {
                 last_privacy_wallet.set(current_addr);
                 refresh_private_balance.borrow_mut()();
@@ -2723,14 +2757,22 @@ pub fn WalletView() -> Element {
                                                         "{format_token_amount(token_balance, &token_symbol)}"
                                                     }
                                                     if token_symbol == "SOL" {
-                                                        div {
-                                                            class: "token-amount",
-                                                            if private_balance_loading() {
-                                                                "Private: ..."
-                                                            } else if let Some(balance) = private_balance_sol() {
-                                                                "Private: {(balance as f64) / 1_000_000_000.0:.4} SOL"
-                                                            } else {
-                                                                "Private: -"
+                                                        if let Some(balance) = private_balance_sol() {
+                                                            if balance > 0 {
+                                                                div {
+                                                                    class: "token-amount",
+                                                                    "Private: {(balance as f64) / 1_000_000_000.0:.4} SOL"
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    if token_symbol == "USDC" {
+                                                        if let Some(balance) = private_balance_usdc() {
+                                                            if balance > 0 {
+                                                                div {
+                                                                    class: "token-amount",
+                                                                    "Private: {(balance as f64) / 1_000_000.0:.4} USDC"
+                                                                }
                                                             }
                                                         }
                                                     }
