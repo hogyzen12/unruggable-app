@@ -138,6 +138,7 @@ fn parse_lookup_table_addresses(data: &[u8]) -> Result<Vec<SolanaPubkey>, String
 /// * `payer` - The transaction fee payer pubkey
 /// * `recent_blockhash` - Recent blockhash for the transaction
 /// * `rpc_url` - RPC endpoint to fetch lookup table accounts
+/// * `is_hardware_wallet` - Whether a hardware wallet is being used
 /// 
 /// # Returns
 /// Serialized transaction bytes ready for signing
@@ -146,6 +147,7 @@ pub async fn build_transaction_from_route(
     payer: SolanaPubkey,
     recent_blockhash: Hash,
     rpc_url: &str,
+    is_hardware_wallet: bool,
 ) -> Result<Vec<u8>, String> {
     println!("Building transaction from Titan route");
     println!("   Instructions: {}", route.instructions.len());
@@ -175,9 +177,9 @@ pub async fn build_transaction_from_route(
     let mut instructions = vec![timeout_ix];
     instructions.extend(titan_instructions);
     
-    // Add Jito tip if enabled
+    // Add Jito tip if enabled AND not using hardware wallet
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx {
+    if jito_settings.jito_tx && !is_hardware_wallet {
         let jito_tip_address = SolanaPubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")
             .map_err(|e| format!("Invalid Jito tip address: {}", e))?;
         
@@ -186,6 +188,8 @@ pub async fn build_transaction_from_route(
         instructions.push(tip_ix);
         
         println!("   Added Jito tip (0.0001 SOL) to Titan swap");
+    } else if is_hardware_wallet {
+        println!("   Hardware wallet detected - skipping Jito tips");
     }
     
     // Fetch lookup table accounts if any are provided

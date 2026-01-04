@@ -213,8 +213,8 @@ pub async fn instant_unstake_stake_account(
     let transaction_client = TransactionClient::new(rpc_url);
     
     // Create signer
-    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
-        Box::new(HardwareSigner::from_wallet(hw))
+    let signer: Box<dyn TransactionSigner> = if let Some(ref hw) = hardware_wallet {
+        Box::new(HardwareSigner::from_wallet(hw.clone()))
     } else if let Some(w) = wallet_info {
         let wallet = Wallet::from_wallet_info(w)
             .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
@@ -244,13 +244,15 @@ pub async fn instant_unstake_stake_account(
     ));
     instructions.push(instant_unstake_ix);
 
-    // Add Jito tips (enabled by default)
+    // Add Jito tips if enabled AND not using hardware wallet
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx {
+    if jito_settings.jito_tx && hardware_wallet.is_none() {
         println!("Adding Jito tips");
         if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
             println!("Jito tips failed: {}, continuing", e);
         }
+    } else if hardware_wallet.is_some() {
+        println!("Hardware wallet detected - skipping Jito tips");
     }
 
     // Get recent blockhash
@@ -363,8 +365,8 @@ pub async fn normal_unstake_stake_account(
     let transaction_client = TransactionClient::new(rpc_url);
     
     // Create signer
-    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
-        Box::new(HardwareSigner::from_wallet(hw))
+    let signer: Box<dyn TransactionSigner> = if let Some(ref hw) = hardware_wallet {
+        Box::new(HardwareSigner::from_wallet(hw.clone()))
     } else if let Some(w) = wallet_info {
         let wallet = Wallet::from_wallet_info(w)
             .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
@@ -396,13 +398,15 @@ pub async fn normal_unstake_stake_account(
     // Add the main deactivate instruction
     instructions.push(deactivate_ix);
 
-    // Add Jito tips if enabled
+    // Add Jito tips if enabled AND not using hardware wallet
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx {
+    if jito_settings.jito_tx && hardware_wallet.is_none() {
         println!("Adding Jito tips");
         if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
             println!("Jito tips failed: {}, continuing", e);
         }
+    } else if hardware_wallet.is_some() {
+        println!("Hardware wallet detected - skipping Jito tips");
     }
 
     // Get recent blockhash
@@ -553,8 +557,8 @@ pub async fn partial_unstake_stake_account(
     let transaction_client = TransactionClient::new(rpc_url);
     
     // Create signer
-    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
-        Box::new(HardwareSigner::from_wallet(hw))
+    let signer: Box<dyn TransactionSigner> = if let Some(ref hw) = hardware_wallet {
+        Box::new(HardwareSigner::from_wallet(hw.clone()))
     } else if let Some(w) = wallet_info {
         let wallet = Wallet::from_wallet_info(w)
             .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
@@ -614,13 +618,15 @@ pub async fn partial_unstake_stake_account(
     let deactivate_ix = build_deactivate_stake_instruction(&new_stake_pubkey, &user_pubkey)?;
     instructions.push(deactivate_ix);
 
-    // Add Jito tips if enabled
+    // Add Jito tips if enabled AND not using hardware wallet
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx {
+    if jito_settings.jito_tx && hardware_wallet.is_none() {
         println!("Adding Jito tips");
         if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
             println!("Jito tips failed: {}, continuing", e);
         }
+    } else if hardware_wallet.is_some() {
+        println!("Hardware wallet detected - skipping Jito tips");
     }
 
     // Get recent blockhash
@@ -776,8 +782,8 @@ pub async fn withdraw_stake_account(
     let transaction_client = TransactionClient::new(rpc_url);
     
     // Create signer
-    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
-        Box::new(HardwareSigner::from_wallet(hw))
+    let signer: Box<dyn TransactionSigner> = if let Some(ref hw) = hardware_wallet {
+        Box::new(HardwareSigner::from_wallet(hw.clone()))
     } else if let Some(w) = wallet_info {
         let wallet = Wallet::from_wallet_info(w)
             .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
@@ -814,13 +820,15 @@ pub async fn withdraw_stake_account(
     // Add the main withdraw instruction
     instructions.push(withdraw_ix);
 
-    // Add Jito tips if enabled
+    // Add Jito tips if enabled AND not using hardware wallet
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx {
+    if jito_settings.jito_tx && hardware_wallet.is_none() {
         println!("Adding Jito tips");
         if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
             println!("Jito tips failed: {}, continuing", e);
         }
+    } else if hardware_wallet.is_some() {
+        println!("Hardware wallet detected - skipping Jito tips");
     }
 
     // Get recent blockhash

@@ -15,6 +15,7 @@ pub mod transaction_history_modal;
 pub mod lend_modal;
 pub mod export_wallet_modal;
 pub mod delete_wallet_modal;
+pub mod privacycash_modal;
 // Temporarily disabled for Solana 3.x testing (these depend on Solana 2.x SDKs)
 // pub mod squads_modal;
 // pub mod carrot_modal;
@@ -37,6 +38,7 @@ pub use transaction_history_modal::TransactionHistoryModal;
 pub use lend_modal::LendModal;
 pub use export_wallet_modal::ExportWalletModal;
 pub use delete_wallet_modal::DeleteWalletModal;
+pub use privacycash_modal::PrivacyCashModal;
 // Temporarily disabled for Solana 3.x testing (these depend on Solana 2.x SDKs)
 // pub use carrot_modal::CarrotModal;
 // pub use squads_modal::SquadsModal;

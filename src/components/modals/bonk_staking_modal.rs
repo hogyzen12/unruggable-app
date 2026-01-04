@@ -468,8 +468,9 @@ pub fn BonkStakingModal(
                                                 
                                                 let client = BonkStakingClient::new(rpc_clone.as_deref());
                                                 let amount_lamports = (amt_f64 * 1_000_000_000.0) as u64;
+                                                let is_hardware = hw_clone.is_some();
                                                 
-                                                match client.stake_bonk_with_signer(&*signer, amount_lamports, duration).await {
+                                                match client.stake_bonk_with_signer(&*signer, amount_lamports, duration, is_hardware).await {
                                                     Ok(result) => {
                                                         show_hardware_approval.set(false);
                                                         transaction_signature.set(result.signature);

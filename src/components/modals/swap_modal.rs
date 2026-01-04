@@ -147,7 +147,7 @@ async fn fetch_lookup_tables(
     Ok(lookup_tables)
 }
 
-/// Build transaction from swap instructions and add Jules tip
+/// Build transaction from swap instructions and add Jules tip (unless hardware wallet)
 async fn build_transaction_from_instructions(
     compute_budget_ixs: Vec<SwapInstruction>,
     setup_ixs: Vec<SwapInstruction>,
@@ -157,6 +157,7 @@ async fn build_transaction_from_instructions(
     lookup_table_addresses: Vec<String>,
     payer: SolanaPubkey,
     rpc_url: &str,
+    is_hardware_wallet: bool,
 ) -> Result<Vec<u8>, String> {
     println!("🔧 Building transaction from swap instructions");
     
@@ -199,13 +200,18 @@ async fn build_transaction_from_instructions(
         all_instructions.push(swap_instruction_to_solana(&ix)?);
     }
     
-    // Add Jules tip instruction (LAST)
-    let jules_tip_address = SolanaPubkey::from_str(JULES_TIP_ADDRESS)
-        .map_err(|e| format!("Invalid Jules tip address: {}", e))?;
-    let tip_ix = system_instruction::transfer(&payer, &jules_tip_address, JULES_TIP_LAMPORTS);
-    all_instructions.push(tip_ix);
+    // Add Jules tip instruction (LAST) - skip for hardware wallets
+    if !is_hardware_wallet {
+        let jules_tip_address = SolanaPubkey::from_str(JULES_TIP_ADDRESS)
+            .map_err(|e| format!("Invalid Jules tip address: {}", e))?;
+        let tip_ix = system_instruction::transfer(&payer, &jules_tip_address, JULES_TIP_LAMPORTS);
+        all_instructions.push(tip_ix);
+        
+        println!("   Added Jules tip (0.0001 SOL) to swap transaction");
+    } else {
+        println!("   Hardware wallet detected - skipping Jules tip");
+    }
     
-    println!("   Added Jules tip (0.0001 SOL) to swap transaction");
     println!("   Total instructions: {}", all_instructions.len());
     
     // Fetch lookup tables if any
@@ -1358,11 +1364,13 @@ pub fn SwapModal(
                             
                             // Build transaction from Titan route with lookup tables
                             let rpc_url = custom_rpc_titan.as_deref().unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
+                            let is_hardware = hw_clone.is_some();
                             let unsigned_tx_bytes = match build_transaction_from_route(
                                 &titan_route,
                                 user_pubkey,
                                 recent_blockhash,
                                 rpc_url,
+                                is_hardware,
                             ).await {
                                 Ok(bytes) => {
                                     println!("✅ Transaction built: {} bytes", bytes.len());
@@ -1704,8 +1712,9 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             println!("🔧 Building Dflow transaction from instructions...");
                             
                             let rpc_url = custom_rpc_dflow.as_deref().unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
+                            let is_hardware = hw_clone.is_some();
                             
-                            // Build transaction using unified builder (includes timeout + Jules tip)
+                            // Build transaction using unified builder (includes timeout + Jules tip unless hardware wallet)
                             let unsigned_tx_bytes = match build_transaction_from_instructions(
                                 instructions.compute_budget_instructions,
                                 instructions.setup_instructions,
@@ -1715,6 +1724,7 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                 instructions.address_lookup_table_addresses,
                                 user_pubkey,
                                 rpc_url,
+                                is_hardware,
                             ).await {
                                 Ok(bytes) => {
                                     println!("✅ Dflow transaction built: {} bytes", bytes.len());

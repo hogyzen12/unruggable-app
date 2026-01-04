@@ -31,7 +31,7 @@ use crate::currency_utils::{
 use crate::components::modals::currency_modal::CurrencyModal;
 use crate::components::{LiquidMetalButton, LiquidMetalStatus};
 // Temporarily disabled integrations for Solana 3.x testing
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal}; //, SquadsModal, CarrotModal, BonkStakingModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, PrivacyCashModal}; //, SquadsModal, CarrotModal, BonkStakingModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -131,10 +131,7 @@ async fn fetch_token_prices(
     // Use the new cached function
     match prices::get_cached_prices_and_changes().await {
         Ok((current_prices, multi_data)) => {
-            println!("✅ Got prices and multi-timeframe data");
-            
-            // Set the multi-timeframe data signal
-            multi_timeframe_data.set(multi_data.clone());
+            // println!("✅ Got prices and multi-timeframe data");
             
             // Convert to old format for backward compatibility
             let mut old_format_changes = HashMap::new();
@@ -142,11 +139,11 @@ async fn fetch_token_prices(
                 old_format_changes.insert(token.clone(), (data.change_1d_amount, data.change_1d_percentage));
                 
                 // Print all timeframes for debugging
-                println!("📊 {}: 1D={:+.1}%, 3D={:+.1}%, 7D={:+.1}%", 
-                         token,
-                         data.change_1d_percentage.unwrap_or(0.0),
-                         data.change_3d_percentage.unwrap_or(0.0),
-                         data.change_7d_percentage.unwrap_or(0.0));
+                // println!("📊 {}: 1D={:+.1}%, 3D={:+.1}%, 7D={:+.1}%", 
+                //          token,
+                //          data.change_1d_percentage.unwrap_or(0.0),
+                //          data.change_3d_percentage.unwrap_or(0.0),
+                //          data.change_7d_percentage.unwrap_or(0.0));
             }
             
             // Set both signals
@@ -169,11 +166,11 @@ async fn fetch_token_prices(
                 sol_price.set(*new_sol_price);
             }
             
-            println!("✅ Successfully updated all price data with cache");
+            // println!("✅ Successfully updated all price data with cache");
         },
         Err(e) => {
             price_error.set(Some(format!("Failed to fetch prices: {}", e)));
-            println!("❌ Error fetching prices: {}", e);
+            log::error!("Error fetching prices: {}", e);
         }
     }
     
@@ -194,12 +191,12 @@ async fn fetch_token_prices_for_discovered_tokens(
     prices_loading.set(true);
     price_error.set(None);
 
-    println!("Fetching prices for discovered tokens: {:?}", discovered_tokens);
+    // println!("Fetching prices for discovered tokens: {:?}", discovered_tokens);
 
     // Use the corrected function name from prices.rs
     match prices::get_prices_for_tokens(discovered_tokens).await {
         Ok(current_prices) => {
-            println!("Got dynamic prices: {:?}", current_prices);
+            // println!("Got dynamic prices: {:?}", current_prices);
             
             // Create dummy multi-timeframe data for backward compatibility
             let mut multi_data = HashMap::new();
@@ -244,11 +241,11 @@ async fn fetch_token_prices_for_discovered_tokens(
                 sol_price.set(*new_sol_price);
             }
             
-            println!("Successfully updated all price data for {} tokens", current_prices.len());
+            // println!("Successfully updated all price data for {} tokens", current_prices.len());
         },
         Err(e) => {
             price_error.set(Some(format!("Failed to fetch prices: {}", e)));
-            println!("Error fetching prices: {}", e);
+            log::error!("Error fetching prices: {}", e);
         }
     }
     
@@ -455,6 +452,7 @@ pub fn WalletView() -> Element {
     let mut show_history_modal = use_signal(|| false);
     let mut show_stake_modal = use_signal(|| false);
     let mut show_swap_modal = use_signal(|| false);
+    let mut show_privacycash_modal = use_signal(|| false);
     // Temporarily disabled for Solana 3.x testing
     // let mut show_squads_modal = use_signal(|| false);
     // let mut show_carrot_modal = use_signal(|| false);
@@ -572,9 +570,16 @@ pub fn WalletView() -> Element {
         spawn(async move {
             loop {
                 let is_present = HardwareWallet::is_device_present();
+                let was_present = hardware_device_present();
+                
+                if is_present != was_present {
+                    log::info!("🔍 Hardware device presence changed: {} -> {}", was_present, is_present);
+                }
+                
                 hardware_device_present.set(is_present);
                 
                 if !is_present && hardware_connected() {
+                    log::info!("🔌 Hardware device removed, disconnecting...");
                     hardware_connected.set(false);
                     hardware_wallet.set(None);
                     hardware_pubkey.set(None);
@@ -688,36 +693,36 @@ pub fn WalletView() -> Element {
         symbol: &str, 
         changes_map: &HashMap<String, (Option<f64>, Option<f64>)>
     ) -> f64 {
-        println!("Looking up price change for {}", symbol);
-        println!("Available tokens in changes_map: {:?}", changes_map.keys().collect::<Vec<_>>());
+        // println!("Looking up price change for {}", symbol);
+        // println!("Available tokens in changes_map: {:?}", changes_map.keys().collect::<Vec<_>>());
         
         // Try exact match first - get the PERCENTAGE (second value in tuple)
         if let Some((_, Some(percentage))) = changes_map.get(symbol) {
-            println!("✅ Found exact match for {}: {:.4}%", symbol, percentage);
+            // println!("✅ Found exact match for {}: {:.4}%", symbol, percentage);
             return *percentage;
         }
         
         // Try uppercase
         let uppercase = symbol.to_uppercase();
         if let Some((_, Some(percentage))) = changes_map.get(&uppercase) {
-            println!("✅ Found uppercase match for {}: {:.4}%", symbol, percentage);
+            // println!("✅ Found uppercase match for {}: {:.4}%", symbol, percentage);
             return *percentage;
         }
         
         // Try lowercase
         let lowercase = symbol.to_lowercase();
         if let Some((_, Some(percentage))) = changes_map.get(&lowercase) {
-            println!("✅ Found lowercase match for {}: {:.4}%", symbol, percentage);
+            // println!("✅ Found lowercase match for {}: {:.4}%", symbol, percentage);
             return *percentage;
         }
         
         // Check if we have the data but it's None
         if changes_map.contains_key(symbol) {
-            println!("❌ {} found in map but percentage is None", symbol);
+            // println!("❌ {} found in map but percentage is None", symbol);
             return 0.0; // Return 0% instead of random
         }
         
-        println!("❌ {} not found in changes_map at all", symbol);
+        // println!("❌ {} not found in changes_map at all", symbol);
         
         // Instead of random values, return 0.0 and log the issue
         // This will make it obvious when historical data is missing
@@ -790,7 +795,7 @@ pub fn WalletView() -> Element {
             
             
             // Fetch token accounts from BOTH Token and Token-2022 programs
-            println!("Fetching token accounts from both Token and Token-2022 programs...");
+            // println!("Fetching token accounts from both Token and Token-2022 programs...");
             
             // Fetch from standard Token program
             let filter_token = Some(rpc::TokenAccountFilter::ProgramId(
@@ -798,7 +803,7 @@ pub fn WalletView() -> Element {
             ));
             let token_accounts = rpc::get_token_accounts_by_owner(&address, filter_token, rpc_url.as_deref()).await
                 .unwrap_or_else(|e| {
-                    println!("Failed to fetch Token program accounts: {}", e);
+                    log::warn!("Failed to fetch Token program accounts: {}", e);
                     vec![]
                 });
             
@@ -808,7 +813,7 @@ pub fn WalletView() -> Element {
             ));
             let token22_accounts = rpc::get_token_accounts_by_owner(&address, filter_token22, rpc_url.as_deref()).await
                 .unwrap_or_else(|e| {
-                    println!("Failed to fetch Token-2022 program accounts: {}", e);
+                    log::warn!("Failed to fetch Token-2022 program accounts: {}", e);
                     vec![]
                 });
             
@@ -817,14 +822,14 @@ pub fn WalletView() -> Element {
             let token22_count = token22_accounts.len();
             all_token_accounts.extend(token22_accounts);
             
-            println!("Found {} token accounts total ({} Token + {} Token-2022)", 
-                all_token_accounts.len(), 
-                all_token_accounts.len() - token22_count,
-                token22_count
-            );
+            // println!("Found {} token accounts total ({} Token + {} Token-2022)", 
+            //     all_token_accounts.len(), 
+            //     all_token_accounts.len() - token22_count,
+            //     token22_count
+            // );
             
             if !all_token_accounts.is_empty() {
-                    println!("Raw token accounts for address {}: {:?}", address, all_token_accounts);
+                    // println!("Raw token accounts for address {}: {:?}", address, all_token_accounts);
                     
                     // Access the HashMap inside the Memo using read()
                     let verified_tokens_map = &verified_tokens_clone();
@@ -832,23 +837,23 @@ pub fn WalletView() -> Element {
                     // Get snapshots of current prices and historical changes
                     let token_prices_snapshot = token_prices_snapshot.clone();
                     let token_changes_snapshot = token_changes.read().clone();
-                    println!("PRICE DEBUG: token_changes_snapshot in token creation: {:#?}", token_changes_snapshot);
+                    // println!("PRICE DEBUG: token_changes_snapshot in token creation: {:#?}", token_changes_snapshot);
                     
                     let all_non_zero_accounts: Vec<_> = all_token_accounts
                         .into_iter()
                         .filter(|account| {
                             let is_non_zero = account.amount > 0.0;
-                            println!(
-                                "Token {}: amount={}, will_include={}",
-                                account.mint,
-                                account.amount,
-                                is_non_zero
-                            );
+                            // println!(
+                            //     "Token {}: amount={}, will_include={}",
+                            //     account.mint,
+                            //     account.amount,
+                            //     is_non_zero
+                            // );
                             is_non_zero  // <- INCLUDE ALL NON-ZERO TOKENS
                         })
                         .collect();
 
-                    println!("All non-zero token accounts: {} tokens", all_non_zero_accounts.len());
+                    // println!("All non-zero token accounts: {} tokens", all_non_zero_accounts.len());
 
                     // STEP 2: Fetch token metadata from Jupiter Token API
                     let mint_addresses: Vec<String> = all_non_zero_accounts.iter()
@@ -858,11 +863,11 @@ pub fn WalletView() -> Element {
                     let token_metadata = if !mint_addresses.is_empty() {
                         match prices::get_token_metadata(mint_addresses).await {
                             Ok(metadata) => {
-                                println!("Successfully fetched metadata for {} tokens", metadata.len());
+                                // println!("Successfully fetched metadata for {} tokens", metadata.len());
                                 metadata
                             },
                             Err(e) => {
-                                println!("Error fetching token metadata: {}", e);
+                                log::warn!("Error fetching token metadata: {}", e);
                                 HashMap::new()
                             }
                         }
@@ -891,7 +896,7 @@ pub fn WalletView() -> Element {
                     }
 
                     // STEP 4: Fetch prices for ALL tokens
-                    println!("Fetching prices for {} discovered tokens", mint_to_symbol_map.len());
+                    // println!("Fetching prices for {} discovered tokens", mint_to_symbol_map.len());
                     let token_prices_result = if !mint_to_symbol_map.is_empty() {
                         prices::get_prices_for_tokens(mint_to_symbol_map.clone()).await
                     } else {
@@ -900,11 +905,11 @@ pub fn WalletView() -> Element {
 
                     let dynamic_token_prices = match token_prices_result {
                         Ok(prices) => {
-                            println!("Successfully fetched prices for {} tokens", prices.len());
+                            // println!("Successfully fetched prices for {} tokens", prices.len());
                             prices
                         },
                         Err(e) => {
-                            println!("Error fetching dynamic prices: {}", e);
+                            log::warn!("Error fetching dynamic prices: {}", e);
                             HashMap::new()
                         }
                     };
@@ -941,8 +946,8 @@ pub fn WalletView() -> Element {
                             let multi_data_snapshot = multi_timeframe_data.read().clone();
                             let (change_1d, change_3d, change_7d) = get_multi_timeframe_changes(&symbol, &multi_data_snapshot);
                             
-                            println!("Creating token {}: price=${:.4}, 1D={:.1}%, 3D={:.1}%, 7D={:.1}%", 
-                                    symbol, price, change_1d, change_3d, change_7d);
+                            // println!("Creating token {}: price=${:.4}, 1D={:.1}%, 3D={:.1}%, 7D={:.1}%", 
+                            //         symbol, price, change_1d, change_3d, change_7d);
                             
                             let value_usd = account.amount * price;
                             
@@ -1130,22 +1135,34 @@ pub fn WalletView() -> Element {
 
     let short_address = format!("{}...{}", start, end);
 
-    let hardware_button_status = if hardware_connected() {
+    let hw_connected = hardware_connected();
+    let hw_device_present = hardware_device_present();
+
+    let hardware_button_status = if hw_connected {
         LiquidMetalStatus::Ok
-    } else if hardware_device_present() {
+    } else if hw_device_present {
         LiquidMetalStatus::Warn
     } else {
         LiquidMetalStatus::Neutral
     };
 
-    let hardware_button_interactive = hardware_device_present() || hardware_connected();
-    let hardware_button_label = if hardware_connected() {
+    let hardware_button_interactive = hw_device_present || hw_connected;
+    let hardware_button_label = if hw_connected {
         "Hardware wallet connected"
-    } else if hardware_device_present() {
+    } else if hw_device_present {
         "Hardware wallet detected"
     } else {
         "No hardware wallet detected"
     };
+
+    // Log hardware button state whenever it's computed
+    log::info!(
+        "🔘 Button render: connected={}, present={}, status={:?}, interactive={}",
+        hw_connected,
+        hw_device_present,
+        hardware_button_status,
+        hardware_button_interactive
+    );
 
     rsx! {
         div {
@@ -1627,6 +1644,7 @@ pub fn WalletView() -> Element {
                     onclose: move |_| show_hardware_modal.set(false),
                     existing_wallet: if hardware_connected() { hardware_wallet() } else { None },
                 ondisconnect: move |_| {
+                    log::info!("🔌 Hardware modal: disconnect callback fired");
                     hardware_wallet.set(None);
                     hardware_connected.set(false);
                     hardware_device_present.set(false);
@@ -1635,6 +1653,7 @@ pub fn WalletView() -> Element {
                     show_hardware_modal.set(false);
                 },
                 onsuccess: move |hw_wallet: Arc<HardwareWallet>| {
+                    log::info!("✅ Hardware modal: success callback fired");
                     hardware_wallet.set(Some(hw_wallet.clone()));
                     hardware_connected.set(true);
                     hardware_device_present.set(true);
@@ -1696,6 +1715,16 @@ pub fn WalletView() -> Element {
                         if !event.connected {
                             hardware_wallet.set(None);
                         }
+                    }
+                }
+            }
+
+            if show_privacycash_modal() {
+                PrivacyCashModal {
+                    wallet: current_wallet.clone(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| {
+                        show_privacycash_modal.set(false);
                     }
                 }
             }
@@ -2136,6 +2165,24 @@ pub fn WalletView() -> Element {
                                 } else {
                                     "Send"
                                 }
+                            }
+                        }
+
+                        button {
+                            class: "action-button-segmented",
+                            onclick: move |_| show_privacycash_modal.set(true),
+
+                            div {
+                                class: "action-icon-segmented",
+                                img {
+                                    src: "{ICON_SEND}",
+                                    alt: "Private"
+                                }
+                            }
+
+                            div {
+                                class: "action-label-segmented",
+                                "Private"
                             }
                         }
                         

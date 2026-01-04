@@ -241,6 +241,7 @@ impl StakingClient {
         signer: &dyn TransactionSigner,
         validator_vote_account: &str,
         stake_amount_sol: f64,
+        is_hardware_wallet: bool,
     ) -> Result<StakeAccountInfo, StakingError> {
         // Convert SOL to lamports
         let stake_amount_lamports = (stake_amount_sol * 1_000_000_000.0) as u64;
@@ -337,11 +338,13 @@ impl StakingClient {
             ),
         ];
 
-        // Apply Jito modifications if JitoTx is enabled
-        if jito_settings.jito_tx {
+        // Apply Jito modifications if JitoTx is enabled AND not using hardware wallet
+        if jito_settings.jito_tx && !is_hardware_wallet {
             println!("JitoTx is enabled, applying Jito modifications to staking transaction");
             self.apply_jito_modifications(&authority_pubkey, &mut instructions)
                 .map_err(|e| StakingError::TransactionFailed(format!("Failed to apply Jito modifications: {}", e)))?;
+        } else if is_hardware_wallet {
+            println!("Hardware wallet detected - skipping Jito tips");
         }
 
         // Create a message with all instructions
@@ -421,10 +424,12 @@ pub async fn create_stake_account(
 ) -> Result<StakeAccountInfo, StakingError> {
     let staking_client = StakingClient::new(rpc_url);
     
+    let is_hardware_wallet = hardware_wallet.is_some();
+    
     // Create the appropriate signer based on what's provided
-    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
+    let signer: Box<dyn TransactionSigner> = if let Some(ref hw) = hardware_wallet {
         // Create HardwareSigner from the HardwareWallet
-        Box::new(HardwareSigner::from_wallet(hw))
+        Box::new(HardwareSigner::from_wallet(hw.clone()))
     } else if let Some(w) = wallet_info {
         let wallet = Wallet::from_wallet_info(w)
             .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
@@ -434,7 +439,7 @@ pub async fn create_stake_account(
         return Err(StakingError::WalletError("No wallet or hardware wallet provided".to_string()));
     };
 
-    staking_client.create_stake_account_with_jito(signer.as_ref(), validator_vote_account, stake_amount_sol).await
+    staking_client.create_stake_account_with_jito(signer.as_ref(), validator_vote_account, stake_amount_sol, is_hardware_wallet).await
 }
 
 /// Convert RPC stake account data to DetailedStakeAccount format
@@ -655,8 +660,8 @@ pub async fn merge_stake_accounts(
     println!("🔄 MERGE OPERATION: Merging {} accounts", merge_group.accounts.len());
     
     // Create signer (reuse existing pattern)
-    let signer: Box<dyn TransactionSigner> = if let Some(hw) = hardware_wallet {
-        Box::new(HardwareSigner::from_wallet(hw))
+    let signer: Box<dyn TransactionSigner> = if let Some(ref hw) = hardware_wallet {
+        Box::new(HardwareSigner::from_wallet(hw.clone()))
     } else if let Some(w) = wallet_info {
         let wallet = Wallet::from_wallet_info(w)
             .map_err(|e| StakingError::WalletError(format!("Failed to create wallet: {}", e)))?;
@@ -689,12 +694,15 @@ pub async fn merge_stake_accounts(
     // Prepend timeout instruction
     instructions.insert(0, timeout_ix);
 
-    // Apply Jito tips if enabled
+    // Apply Jito tips if enabled AND not using hardware wallet
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx {
+    let is_hardware_wallet = hardware_wallet.is_some();
+    if jito_settings.jito_tx && !is_hardware_wallet {
         println!("Applying Jito modifications");
         staking_client.apply_jito_modifications(&authority_pubkey, &mut instructions)
             .map_err(|e| StakingError::TransactionFailed(format!("Jito error: {}", e)))?;
+    } else if is_hardware_wallet {
+        println!("Hardware wallet detected - skipping Jito tips");
     }
 
     // Create and sign transaction (reuse existing pattern)

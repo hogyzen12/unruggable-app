@@ -600,13 +600,14 @@ pub fn CarrotModal(
                                             
                                             // Create client
                                             let client = CarrotClient::new(rpc_clone.as_deref());
+                                            let is_hardware = hw_clone.is_some();
                                             
                                             // Execute operation
                                             let result = if operation == "deposit" {
-                                                client.deposit_with_signer(&*signer, &asset_mint, amount_lamports).await
+                                                client.deposit_with_signer(&*signer, &asset_mint, amount_lamports, is_hardware).await
                                                     .map(|r| (r.signature, r.crt_received, "CRT".to_string()))
                                             } else {
-                                                client.withdraw_with_signer(&*signer, &asset_mint, amount_lamports).await
+                                                client.withdraw_with_signer(&*signer, &asset_mint, amount_lamports, is_hardware).await
                                                     .map(|r| (r.signature, r.asset_received, asset.to_string()))
                                             };
                                             

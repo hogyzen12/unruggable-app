@@ -441,7 +441,8 @@ impl TransactionClient {
 
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications to bulk transaction");
-            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+            // Note: bulk transactions currently don't support hardware wallets, defaulting to false
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, false)?;
         }
 
         // Get recent blockhash
@@ -728,7 +729,8 @@ impl TransactionClient {
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
-            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+            // Note: send_sol currently doesn't support hardware wallets, defaulting to false
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, false)?;
         }
         
         // Create a message with all instructions
@@ -882,7 +884,8 @@ impl TransactionClient {
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
-            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+            // Note: send_spl_token currently doesn't support hardware wallets, defaulting to false
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, false)?;
         }
         
         // Create a message with all instructions
@@ -1053,7 +1056,14 @@ impl TransactionClient {
         &self,
         from_pubkey: &Pubkey,
         instructions: &mut Vec<solana_sdk::instruction::Instruction>,
+        is_hardware_wallet: bool,
     ) -> Result<(), Box<dyn Error>> {
+        // Skip Jito tips for hardware wallet transactions
+        if is_hardware_wallet {
+            println!("Hardware wallet detected - skipping Jito tips");
+            return Ok(());
+        }
+        
         // First Jito address (as per JS example)
         let jito_address1 = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
         

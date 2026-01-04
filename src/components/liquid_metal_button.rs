@@ -44,6 +44,9 @@ pub fn LiquidMetalButton(
     #[props(optional)] style: Option<String>,
     children: Element,
 ) -> Element {
+    // Log when the component renders with the current status
+    log::info!("⚙️  LiquidMetalButton rendering with status={:?}, interactive={}", status, interactive);
+    
     let mut class_name = String::from("ball ");
     class_name.push_str(status.class());
     if animated {
@@ -55,6 +58,8 @@ pub fn LiquidMetalButton(
             class_name.push_str(extra);
         }
     }
+    
+    log::info!("⚙️  LiquidMetalButton computed class=\"{}\"", class_name);
 
     let handler = onclick.clone();
     let clickable = interactive;

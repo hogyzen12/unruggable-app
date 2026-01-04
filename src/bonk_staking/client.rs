@@ -75,6 +75,7 @@ impl BonkStakingClient {
         amount: u64,
         duration_days: u64,
         nonce: Option<u32>,
+        is_hardware_wallet: bool,
     ) -> Result<StakeResult> {
         let user_pubkey_str = signer.get_public_key().await?;
         let user_pubkey = Pubkey::from_str(&user_pubkey_str)?;
@@ -126,9 +127,9 @@ impl BonkStakingClient {
         );
         instructions.push(stake_ix);
 
-        // Check Jito settings and add tip if enabled
+        // Check Jito settings and add tip if enabled AND not using hardware wallet
         let jito_settings = get_current_jito_settings();
-        if jito_settings.jito_tx {
+        if jito_settings.jito_tx && !is_hardware_wallet {
             let jito_tip_address = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
             let tip_ix = system_instruction::transfer(&user_pubkey, &jito_tip_address, 100_000);
             instructions.push(tip_ix);
@@ -296,7 +297,8 @@ impl BonkStakingClient {
         signer: &dyn TransactionSigner,
         amount: u64,
         duration_days: u64,
+        is_hardware_wallet: bool,
     ) -> Result<StakeResult> {
-        self.stake_with_signer(signer, amount, duration_days, None).await
+        self.stake_with_signer(signer, amount, duration_days, None, is_hardware_wallet).await
     }
 }

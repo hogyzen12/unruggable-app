@@ -1,5 +1,7 @@
+use dioxus::document::eval;
 use dioxus::prelude::*;
 use std::sync::Arc;
+use serde_json::Value;
 
 mod wallet;
 mod rpc;
@@ -17,6 +19,7 @@ mod currency_utils;
 mod sns;
 mod config;
 mod token_utils;
+mod privacycash;
 // Temporarily disabled for Solana 3.x testing (these depend on Solana 2.x SDKs)
 // mod squads;
 // mod carrot;
@@ -38,12 +41,12 @@ enum Route {
 // Android does. For apple builds use hosted resources.
 
 // For iOS/macOS builds, uncomment the remote URLs and comment out the asset! macros
-const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
-const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
+//const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
+//const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
 
 // For local/Android builds, use the asset! macro
-//const MAIN_CSS: Asset = asset!("/assets/main.css");
-//const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
+const MAIN_CSS: Asset = asset!("/assets/main.css");
+const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
 
 // ── DESKTOP (macOS/Windows/Linux) ─────────────────────────────────────────────
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
@@ -73,6 +76,32 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    let privacy_wasm = asset!("/assets/transaction2.wasm", AssetOptions::builder().with_hash_suffix(false));
+    let privacy_zkey = asset!("/assets/transaction2.zkey", AssetOptions::builder().with_hash_suffix(false));
+
+    let wasm_url = privacy_wasm.to_string();
+    let zkey_url = privacy_zkey.to_string();
+    println!("[PrivacyCash] asset wasm url: {}", wasm_url);
+    println!("[PrivacyCash] asset zkey url: {}", zkey_url);
+
+    use_effect(move || {
+        let wasm_url = wasm_url.clone();
+        let zkey_url = zkey_url.clone();
+        spawn(async move {
+            let mut e = eval(
+                r#"
+                let [wasmUrl, zkeyUrl] = await dioxus.recv();
+                globalThis.PRIVACY_CASH_WASM_URL = wasmUrl;
+                globalThis.PRIVACY_CASH_ZKEY_URL = zkeyUrl;
+                console.log('PrivacyCash asset globals set', { wasmUrl, zkeyUrl });
+                "#,
+            );
+            let _ = e.send(Value::Array(vec![
+                Value::String(wasm_url),
+                Value::String(zkey_url),
+            ]));
+        });
+    });
     // Check if onboarding has been completed
     let mut show_onboarding = use_signal(|| true);
     //let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
@@ -97,12 +126,14 @@ fn App() -> Element {
     rsx! {
         // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
         document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        document::Link { rel: "stylesheet", href: PIN_CSS_URL }
+        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
+        //document::Link { rel: "stylesheet", href: PIN_CSS_URL }
         
         // For local/Android builds, use these lines (comment out for iOS/macOS)
-        //document::Link { rel: "stylesheet", href: MAIN_CSS }
-        //document::Link { rel: "stylesheet", href: PIN_CSS }
+        document::Link { rel: "stylesheet", href: MAIN_CSS }
+        document::Link { rel: "stylesheet", href: PIN_CSS }
+
+        document::Script { src: asset!("/assets/privacy.js", AssetOptions::builder().with_hash_suffix(false)), defer: true }
         
         // Show PIN unlock if PIN is set and app is locked
         if is_locked() {

@@ -114,6 +114,7 @@ impl CarrotClient {
         signer: &dyn TransactionSigner,
         asset_mint: &Pubkey,
         amount: u64,
+        is_hardware_wallet: bool,
     ) -> Result<DepositResult> {
         println!("[Carrot] Starting deposit: amount={}, asset_mint={}", amount, asset_mint);
         
@@ -159,13 +160,15 @@ impl CarrotClient {
         )?;
         instructions.push(issue_ix);
         
-        // Check Jito settings and add tip if enabled
+        // Check Jito settings and add tip if enabled AND not using hardware wallet
         let jito_settings = get_current_jito_settings();
-        if jito_settings.jito_tx {
+        if jito_settings.jito_tx && !is_hardware_wallet {
             let jito_tip_address = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
             let tip_ix = system_instruction::transfer(&member_pubkey, &jito_tip_address, 100_000);
             instructions.push(tip_ix);
             println!("[Carrot] Added Jito tip to deposit transaction");
+        } else if is_hardware_wallet {
+            println!("[Carrot] Hardware wallet detected - skipping Jito tips");
         }
         
         // Get recent blockhash
@@ -221,6 +224,7 @@ impl CarrotClient {
         signer: &dyn TransactionSigner,
         asset_mint: &Pubkey,
         crt_amount: u64,
+        is_hardware_wallet: bool,
     ) -> Result<WithdrawResult> {
         println!("[Carrot] Starting withdraw: crt_amount={}, asset_mint={}", crt_amount, asset_mint);
         
@@ -272,13 +276,15 @@ impl CarrotClient {
         )?;
         instructions.push(redeem_ix);
         
-        // Check Jito settings and add tip if enabled
+        // Check Jito settings and add tip if enabled AND not using hardware wallet
         let jito_settings = get_current_jito_settings();
-        if jito_settings.jito_tx {
+        if jito_settings.jito_tx && !is_hardware_wallet {
             let jito_tip_address = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
             let tip_ix = system_instruction::transfer(&member_pubkey, &jito_tip_address, 100_000);
             instructions.push(tip_ix);
             println!("[Carrot] Added Jito tip to withdraw transaction");
+        } else if is_hardware_wallet {
+            println!("[Carrot] Hardware wallet detected - skipping Jito tips");
         }
         
         // Get recent blockhash
