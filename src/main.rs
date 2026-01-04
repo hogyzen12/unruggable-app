@@ -43,6 +43,9 @@ enum Route {
 // For iOS/macOS builds, uncomment the remote URLs and comment out the asset! macros
 //const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
 //const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
+const PRIVACY_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/privacy.js";
+const PRIVACY_WASM_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/transaction2.wasm";
+const PRIVACY_ZKEY_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/transaction2.zkey";
 
 // For local/Android builds, use the asset! macro
 const MAIN_CSS: Asset = asset!("/assets/main.css");
@@ -76,11 +79,22 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let privacy_wasm = asset!("/assets/transaction2.wasm", AssetOptions::builder().with_hash_suffix(false));
-    let privacy_zkey = asset!("/assets/transaction2.zkey", AssetOptions::builder().with_hash_suffix(false));
-
-    let wasm_url = privacy_wasm.to_string();
-    let zkey_url = privacy_zkey.to_string();
+    let (privacy_js_src, wasm_url, zkey_url) = if cfg!(any(target_os = "wasm")) {
+        (
+            PRIVACY_JS_URL.to_string(),
+            PRIVACY_WASM_URL.to_string(),
+            PRIVACY_ZKEY_URL.to_string(),
+        )
+    } else {
+        let privacy_js = asset!("/assets/privacy.js", AssetOptions::builder().with_hash_suffix(false));
+        let privacy_wasm = asset!("/assets/transaction2.wasm", AssetOptions::builder().with_hash_suffix(false));
+        let privacy_zkey = asset!("/assets/transaction2.zkey", AssetOptions::builder().with_hash_suffix(false));
+        (
+            privacy_js.to_string(),
+            privacy_wasm.to_string(),
+            privacy_zkey.to_string(),
+        )
+    };
     println!("[PrivacyCash] asset wasm url: {}", wasm_url);
     println!("[PrivacyCash] asset zkey url: {}", zkey_url);
 
@@ -133,7 +147,7 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         document::Link { rel: "stylesheet", href: PIN_CSS }
 
-        document::Script { src: asset!("/assets/privacy.js", AssetOptions::builder().with_hash_suffix(false)), defer: true }
+        document::Script { src: privacy_js_src.clone(), defer: true }
         
         // Show PIN unlock if PIN is set and app is locked
         if is_locked() {

@@ -1326,6 +1326,82 @@ body {
     box-shadow: none;
 }
 
+/* Privacy toggle styling for send modal */
+.privacy-field {
+    margin-top: 6px;
+}
+.privacy-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+.privacy-label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #e6e6e6;
+}
+.privacy-subtitle {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.55);
+}
+.privacy-toggle {
+    position: relative;
+    width: 52px;
+    height: 28px;
+    display: inline-block;
+}
+.privacy-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+.privacy-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 999px;
+    transition: background 0.2s ease;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.privacy-slider::before {
+    content: "";
+    position: absolute;
+    height: 22px;
+    width: 22px;
+    left: 3px;
+    top: 2px;
+    background: #f4f4f4;
+    border-radius: 999px;
+    transition: transform 0.2s ease;
+}
+.privacy-toggle input:checked + .privacy-slider {
+    background: linear-gradient(135deg, #3a6ff7 0%, #6ad3ff 100%);
+    border-color: rgba(106, 211, 255, 0.5);
+}
+.privacy-toggle input:checked + .privacy-slider::before {
+    transform: translateX(22px);
+}
+.privacy-meta {
+    margin-top: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.6);
+}
+.privacy-hint {
+    margin-top: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.55);
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
 .key-format-info {
     margin-top: 8px;
     color: #6b7280;

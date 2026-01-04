@@ -30,6 +30,8 @@ use crate::currency_utils::{
 };
 use crate::components::modals::currency_modal::CurrencyModal;
 use crate::components::{LiquidMetalButton, LiquidMetalStatus};
+use crate::privacycash;
+use crate::signing::{SignerType, TransactionSigner};
 // Temporarily disabled integrations for Solana 3.x testing
 use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, PrivacyCashModal}; //, SquadsModal, CarrotModal, BonkStakingModal};
 use crate::components::modals::send_modal::HardwareWalletEvent;
@@ -45,6 +47,8 @@ use crate::components::modals::BackgroundModal;
 use crate::prices::CandlestickData;
 use crate::config::tokens::{get_verified_tokens, VerifiedToken};
 use std::sync::Arc;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::collections::HashMap;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use arboard::Clipboard as SystemClipboard;
@@ -98,6 +102,7 @@ const ICON_IMPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_EXPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/EXPORT_wallet.svg";
 const ICON_DELETE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/DELETE_wallet.svg";
 const ICON_RPC: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/RPC.svg";
+const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
 
 const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
 const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
@@ -448,6 +453,7 @@ pub fn WalletView() -> Element {
     let mut modal_mode = use_signal(|| "create".to_string());
     let mut show_rpc_modal = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
+    let mut send_modal_private = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
     let mut show_history_modal = use_signal(|| false);
     let mut show_stake_modal = use_signal(|| false);
@@ -471,6 +477,11 @@ pub fn WalletView() -> Element {
     // RPC management
     let mut custom_rpc = use_signal(|| load_rpc_from_storage());
     let mut rpc_input = use_signal(|| custom_rpc().unwrap_or_default());
+
+    // Privacy Cash balance
+    let mut private_balance_sol = use_signal(|| None as Option<u64>);
+    let mut private_balance_loading = use_signal(|| false);
+    let mut last_privacy_wallet = use_signal(|| None as Option<String>);
 
     //JITO Stuff
     let mut show_jito_modal = use_signal(|| false);
@@ -1091,6 +1102,67 @@ pub fn WalletView() -> Element {
     });
 
     let current_wallet = wallets.read().get(current_wallet_index()).cloned();
+
+    let refresh_private_balance: Rc<RefCell<dyn FnMut()>> = {
+        let wallet_info = current_wallet.clone();
+        let rpc_signal = custom_rpc.clone();
+        let hw_signal = hardware_wallet.clone();
+        let mut private_balance_sol = private_balance_sol.clone();
+        let mut private_balance_loading = private_balance_loading.clone();
+        Rc::new(RefCell::new(move || {
+            if hw_signal().is_some() {
+                private_balance_sol.set(None);
+                return;
+            }
+            private_balance_loading.set(true);
+            let rpc_url = rpc_signal().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
+            let wallet_info = wallet_info.clone();
+            let mut private_balance_sol = private_balance_sol.clone();
+            let mut private_balance_loading = private_balance_loading.clone();
+            spawn(async move {
+                let Some(wallet_info) = wallet_info else {
+                    private_balance_loading.set(false);
+                    return;
+                };
+                let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                    private_balance_loading.set(false);
+                    return;
+                };
+                let signer = SignerType::from_wallet(wallet);
+                let Ok(authority) = signer.get_public_key().await else {
+                    private_balance_loading.set(false);
+                    return;
+                };
+                let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
+                    private_balance_loading.set(false);
+                    return;
+                };
+                match privacycash::get_private_balance(&authority, &signature, Some(rpc_url.as_str())).await {
+                    Ok(balance) => {
+                        private_balance_sol.set(Some(balance));
+                    }
+                    Err(_) => {
+                        private_balance_sol.set(None);
+                    }
+                }
+                private_balance_loading.set(false);
+            });
+        }))
+    };
+
+    {
+        let refresh_private_balance = Rc::clone(&refresh_private_balance);
+        let current_wallet_snapshot = current_wallet.clone();
+        use_effect(move || {
+            let _ = wallets();
+            let _ = current_wallet_index();
+            let current_addr = current_wallet_snapshot.as_ref().map(|w| w.address.clone());
+            if current_addr != last_privacy_wallet() {
+                last_privacy_wallet.set(current_addr);
+                refresh_private_balance.borrow_mut()();
+            }
+        });
+    }
     
     // Get full address for display
     let full_address = if hardware_connected() && hardware_pubkey().is_some() {
@@ -1163,6 +1235,9 @@ pub fn WalletView() -> Element {
         hardware_button_status,
         hardware_button_interactive
     );
+
+    let refresh_for_success = Rc::clone(&refresh_private_balance);
+    let refresh_for_privacy = Rc::clone(&refresh_private_balance);
 
     rsx! {
         div {
@@ -1681,13 +1756,17 @@ pub fn WalletView() -> Element {
                     hardware_wallet: hardware_wallet(),
                     current_balance: balance(),
                     custom_rpc: custom_rpc(),
+                    initial_privacy_enabled: send_modal_private(),
                     onclose: move |_| {
                         show_send_modal.set(false);
+                        send_modal_private.set(false);
                         // Don't reset hardware_wallet here
                     },
                     onsuccess: move |_| {
                         show_send_modal.set(false);
+                        send_modal_private.set(false);
                         // Don't reset hardware_wallet here either
+                        refresh_for_success.borrow_mut()();
                         if let Some(wallet) = wallets.read().get(current_wallet_index()) {
                             let address = wallet.address.clone();
                             let rpc_url = custom_rpc();
@@ -1715,6 +1794,9 @@ pub fn WalletView() -> Element {
                         if !event.connected {
                             hardware_wallet.set(None);
                         }
+                    },
+                    on_privacy_refresh: move |_| {
+                        refresh_for_privacy.borrow_mut()();
                     }
                 }
             }
@@ -2170,24 +2252,6 @@ pub fn WalletView() -> Element {
 
                         button {
                             class: "action-button-segmented",
-                            onclick: move |_| show_privacycash_modal.set(true),
-
-                            div {
-                                class: "action-icon-segmented",
-                                img {
-                                    src: "{ICON_SEND}",
-                                    alt: "Private"
-                                }
-                            }
-
-                            div {
-                                class: "action-label-segmented",
-                                "Private"
-                            }
-                        }
-                        
-                        button {
-                            class: "action-button-segmented",
                             onclick: move |_| show_stake_modal.set(true),
                             
                             div {
@@ -2376,6 +2440,19 @@ pub fn WalletView() -> Element {
                                     } else {
                                         "EJECT"
                                     }
+                                }
+                            }
+
+                            button {
+                                class: "action-button-segmented",
+                                onclick: move |_| show_privacycash_modal.set(true),
+                                div {
+                                    class: "action-icon-segmented",
+                                    span { "🔒" }
+                                }
+                                div {
+                                    class: "action-label-segmented",
+                                    "Privacy"
                                 }
                             }
                         }
@@ -2568,38 +2645,68 @@ pub fn WalletView() -> Element {
                                                 
                                                 // Individual send button - ONLY show when NOT in bulk mode
                                                 if !bulk_send_mode() {
-                                                    button {
-                                                        class: "token-send-button",
-                                                        onclick: {
-                                                            let symbol_clone = token_symbol.clone();
-                                                            let mint_clone = token_mint.clone();
-                                                            let token_decimals = match token_symbol.as_str() {
-                                                                "SOL" => Some(9),
-                                                                "USDC" | "USDT" => Some(6),
-                                                                _ => Some(9),
-                                                            };
-                                                            
-                                                            move |e| {
+                                                    if token_symbol == "SOL" {
+                                                        button {
+                                                            class: "token-send-button",
+                                                            onclick: move |e| {
                                                                 e.stop_propagation();
-                                                                if symbol_clone == "SOL" {
-                                                                    show_send_modal.set(true);
-                                                                } else {
+                                                                send_modal_private.set(false);
+                                                                show_send_modal.set(true);
+                                                            },
+                                                            title: "Send SOL",
+                                                            div {
+                                                                class: "token-send-icon",
+                                                                img {
+                                                                    src: "{ICON_SEND}",
+                                                                    alt: "Send",
+                                                                    width: "14",
+                                                                    height: "14",
+                                                                }
+                                                            }
+                                                        }
+                                                        button {
+                                                            class: "token-send-button",
+                                                            onclick: move |e| {
+                                                                e.stop_propagation();
+                                                                send_modal_private.set(true);
+                                                                show_send_modal.set(true);
+                                                            },
+                                                            title: "Private Send SOL",
+                                                            div {
+                                                                class: "token-send-icon",
+                                                                span { "🔒" }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        button {
+                                                            class: "token-send-button",
+                                                            onclick: {
+                                                                let symbol_clone = token_symbol.clone();
+                                                                let mint_clone = token_mint.clone();
+                                                                let token_decimals = match token_symbol.as_str() {
+                                                                    "SOL" => Some(9),
+                                                                    "USDC" | "USDT" => Some(6),
+                                                                    _ => Some(9),
+                                                                };
+                                                                
+                                                                move |e| {
+                                                                    e.stop_propagation();
                                                                     selected_token_symbol.set(symbol_clone.clone());
                                                                     selected_token_mint.set(mint_clone.clone());
                                                                     selected_token_balance.set(token_balance);
                                                                     selected_token_decimals.set(token_decimals);
                                                                     show_send_token_modal.set(true);
                                                                 }
-                                                            }
-                                                        },
-                                                        title: "Send {token_symbol}",
-                                                        div {
-                                                            class: "token-send-icon",
-                                                            img {
-                                                                src: "{ICON_SEND}",
-                                                                alt: "Send",
-                                                                width: "14",
-                                                                height: "14",
+                                                            },
+                                                            title: "Send {token_symbol}",
+                                                            div {
+                                                                class: "token-send-icon",
+                                                                img {
+                                                                    src: "{ICON_SEND}",
+                                                                    alt: "Send",
+                                                                    width: "14",
+                                                                    height: "14",
+                                                                }
                                                             }
                                                         }
                                                     }
@@ -2614,6 +2721,18 @@ pub fn WalletView() -> Element {
                                                     div {
                                                         class: "token-amount",
                                                         "{format_token_amount(token_balance, &token_symbol)}"
+                                                    }
+                                                    if token_symbol == "SOL" {
+                                                        div {
+                                                            class: "token-amount",
+                                                            if private_balance_loading() {
+                                                                "Private: ..."
+                                                            } else if let Some(balance) = private_balance_sol() {
+                                                                "Private: {(balance as f64) / 1_000_000_000.0:.4} SOL"
+                                                            } else {
+                                                                "Private: -"
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }

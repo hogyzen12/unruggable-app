@@ -3,10 +3,17 @@ use crate::wallet::{Wallet, WalletInfo};
 use crate::hardware::HardwareWallet;
 use crate::transaction::TransactionClient;
 use crate::signing::hardware::HardwareSigner;
+use crate::signing::{SignerType, TransactionSigner};
+use crate::privacycash;
 use crate::rpc;
 use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
 use solana_sdk::pubkey::Pubkey; // ← ADD THIS IMPORT
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
+
+const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
 
 /// Hardware wallet approval overlay component shown during transaction signing
 #[component]
@@ -168,9 +175,11 @@ pub fn SendModalWithHardware(
     hardware_wallet: Option<Arc<HardwareWallet>>,
     current_balance: f64,
     custom_rpc: Option<String>,
+    initial_privacy_enabled: bool,
     onclose: EventHandler<()>,
     onsuccess: EventHandler<String>,
     #[props(!optional)] onhardware: EventHandler<HardwareWalletEvent>,
+    #[props(!optional)] on_privacy_refresh: EventHandler<()>,
 ) -> Element {
     // Always declare all hooks at the top of the component - never conditionally
     let mut recipient = use_signal(|| "".to_string());
@@ -180,6 +189,10 @@ pub fn SendModalWithHardware(
     let mut error_message = use_signal(|| None as Option<String>);
     let mut recipient_balance = use_signal(|| None as Option<f64>);
     let mut checking_balance = use_signal(|| false);
+    let mut privacy_enabled = use_signal(|| initial_privacy_enabled);
+    let mut private_balance = use_signal(|| None as Option<u64>);
+    let mut private_balance_loading = use_signal(|| false);
+    let mut privacy_progress = use_signal(|| None as Option<String>);
     
     // Add state for transaction success modal - always declared
     let mut show_success_modal = use_signal(|| false);
@@ -215,6 +228,62 @@ pub fn SendModalWithHardware(
             checking_balance.set(false);
         }
     });
+
+    let refresh_private_balance: Rc<RefCell<dyn FnMut()>> = {
+        let wallet_info = wallet.clone();
+        let rpc_url = custom_rpc.clone();
+        let hw_for_refresh = hardware_wallet.clone();
+        let mut private_balance = private_balance.clone();
+        let mut private_balance_loading = private_balance_loading.clone();
+        Rc::new(RefCell::new(move || {
+            if hw_for_refresh.is_some() {
+                private_balance.set(None);
+                return;
+            }
+            private_balance_loading.set(true);
+            let rpc_url = rpc_url.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
+            let wallet_info = wallet_info.clone();
+            let mut private_balance = private_balance.clone();
+            let mut private_balance_loading = private_balance_loading.clone();
+            spawn(async move {
+                let Some(wallet_info) = wallet_info else {
+                    private_balance_loading.set(false);
+                    return;
+                };
+                let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                    private_balance_loading.set(false);
+                    return;
+                };
+                let signer = SignerType::from_wallet(wallet);
+                let Ok(authority) = signer.get_public_key().await else {
+                    private_balance_loading.set(false);
+                    return;
+                };
+                let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
+                    private_balance_loading.set(false);
+                    return;
+                };
+                match privacycash::get_private_balance(&authority, &signature, Some(rpc_url.as_str())).await {
+                    Ok(balance) => {
+                        private_balance.set(Some(balance));
+                    }
+                    Err(_) => {
+                        private_balance.set(None);
+                    }
+                }
+                private_balance_loading.set(false);
+            });
+        }))
+    };
+
+    {
+        let refresh_private_balance = Rc::clone(&refresh_private_balance);
+        use_effect(move || {
+            if privacy_enabled() && private_balance().is_none() && !private_balance_loading() {
+                refresh_private_balance.borrow_mut()();
+            }
+        });
+    }
 
     // Now we can return different elements based on conditions
     if show_success_modal() {
@@ -371,6 +440,51 @@ pub fn SendModalWithHardware(
                     }
                 }
 
+                div {
+                    class: "wallet-field privacy-field",
+                    div {
+                        class: "privacy-row",
+                        div {
+                            class: "privacy-label",
+                            span { "Privacy" }
+                            span { class: "privacy-subtitle", "Send privately (Privacy Cash)" }
+                        }
+                        label {
+                            class: "privacy-toggle",
+                            input {
+                                r#type: "checkbox",
+                                checked: privacy_enabled(),
+                                oninput: move |_| {
+                                    let enabled = !privacy_enabled();
+                                    privacy_enabled.set(enabled);
+                                    if !enabled {
+                                        private_balance.set(None);
+                                    }
+                                }
+                            }
+                            span { class: "privacy-slider" }
+                        }
+                    }
+                if privacy_enabled() {
+                    if private_balance_loading() {
+                        div { class: "privacy-meta", "Fetching private balance..." }
+                    } else if let Some(balance) = private_balance() {
+                        div {
+                            class: "privacy-meta",
+                            "Private balance: {(balance as f64) / 1_000_000_000.0:.6} SOL"
+                        }
+                    }
+                    if let Some(progress) = privacy_progress() {
+                        div { class: "privacy-hint", "{progress}" }
+                    }
+                    if hardware_wallet.is_some() {
+                        div { class: "privacy-hint", "Private send is only supported for software wallets right now." }
+                    } else {
+                        div { class: "privacy-hint", "If needed, we will top-up privately then send (2 txs)." }
+                    }
+                }
+                }
+
                 if hardware_wallet.is_some() {
                     div {
                         class: "info-message",
@@ -437,7 +551,133 @@ pub fn SendModalWithHardware(
                                 let client = TransactionClient::new(rpc_url.as_deref());
 
                                 // Use hardware wallet if available, otherwise use software wallet
-                                if let Some(hw) = hardware_wallet_clone {
+                                if privacy_enabled() {
+                                    if hardware_wallet_clone.is_some() {
+                                        error_message.set(Some("Private send is not supported with hardware wallets yet".to_string()));
+                                        sending.set(false);
+                                        show_hardware_approval.set(false);
+                                        return;
+                                    }
+
+                                    let Some(wallet_info) = wallet_info else {
+                                        error_message.set(Some("No wallet available".to_string()));
+                                        sending.set(false);
+                                        return;
+                                    };
+
+                                    let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                                        error_message.set(Some("Failed to load wallet".to_string()));
+                                        sending.set(false);
+                                        return;
+                                    };
+
+                                    let signer = SignerType::from_wallet(wallet);
+                                    let Ok(authority) = signer.get_public_key().await else {
+                                        error_message.set(Some("Failed to get public key".to_string()));
+                                        sending.set(false);
+                                        return;
+                                    };
+
+                                    let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
+                                        error_message.set(Some("Failed to sign auth message".to_string()));
+                                        sending.set(false);
+                                        return;
+                                    };
+
+                                    let rpc_url = rpc_url.unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
+                                    let lamports = (amount_value * 1_000_000_000.0) as u64;
+                                    let mut private_balance_value = private_balance().unwrap_or(0);
+                                    privacy_progress.set(Some("Preparing private send…".to_string()));
+
+                                    if private_balance_value < lamports {
+                                        let topup = lamports - private_balance_value;
+                                        let topup_sol = topup as f64 / 1_000_000_000.0;
+                                        privacy_progress.set(Some("Step 1/2: Depositing to private balance…".to_string()));
+                                        let mut tx = match privacycash::build_deposit_tx(
+                                            &authority,
+                                            &signature,
+                                            topup,
+                                            Some(rpc_url.as_str()),
+                                        )
+                                        .await
+                                        {
+                                            Ok(tx) => tx,
+                                            Err(err) => {
+                                                error_message.set(Some(format!("Failed to build deposit tx: {err}")));
+                                                sending.set(false);
+                                                return;
+                                            }
+                                        };
+
+                                        let tx_client = TransactionClient::new(Some(rpc_url.as_str()));
+                                        let recent_blockhash = match tx_client.get_recent_blockhash().await {
+                                            Ok(hash) => hash,
+                                            Err(err) => {
+                                                error_message.set(Some(format!("Failed to get blockhash: {err}")));
+                                                sending.set(false);
+                                                return;
+                                            }
+                                        };
+
+                                        if let Err(err) = privacycash::sign_transaction(&signer, &mut tx, recent_blockhash).await {
+                                            error_message.set(Some(format!("Failed to sign deposit tx: {err}")));
+                                            sending.set(false);
+                                            return;
+                                        }
+
+                                        if let Err(err) = privacycash::submit_deposit(&authority, &tx).await {
+                                            error_message.set(Some(format!("Deposit failed: {err}")));
+                                            sending.set(false);
+                                            return;
+                                        }
+
+                                        sleep(Duration::from_secs(4)).await;
+                                        if let Ok(balance) = privacycash::get_private_balance(
+                                            &authority,
+                                            &signature,
+                                            Some(rpc_url.as_str()),
+                                        )
+                                        .await
+                                        {
+                                            private_balance_value = balance;
+                                            private_balance.set(Some(balance));
+                                        }
+                                        privacy_progress.set(Some(format!("Step 1/2 complete: Deposited {:.4} SOL", topup_sol)));
+                                    }
+
+                                    privacy_progress.set(Some("Step 2/2: Sending privately…".to_string()));
+                                    let req = match privacycash::build_withdraw_request(
+                                        &authority,
+                                        &signature,
+                                        lamports,
+                                        &recipient_address,
+                                        Some(rpc_url.as_str()),
+                                    )
+                                    .await
+                                    {
+                                        Ok(req) => req,
+                                        Err(err) => {
+                                            error_message.set(Some(format!("Failed to build withdraw request: {err}")));
+                                            sending.set(false);
+                                            return;
+                                        }
+                                    };
+
+                                    match privacycash::submit_withdraw(&req).await {
+                                        Ok(signature) => {
+                                            privacy_progress.set(None);
+                                            transaction_signature.set(signature);
+                                            sending.set(false);
+                                            show_success_modal.set(true);
+                                            on_privacy_refresh.call(());
+                                        }
+                                        Err(err) => {
+                                            privacy_progress.set(None);
+                                            error_message.set(Some(format!("Withdraw failed: {err}")));
+                                            sending.set(false);
+                                        }
+                                    }
+                                } else if let Some(hw) = hardware_wallet_clone {
                                     let hw_signer = HardwareSigner::from_wallet(hw.clone());
                                     match client.send_sol_with_signer(&hw_signer, &recipient_address, amount_value).await {
                                         Ok(signature) => {
