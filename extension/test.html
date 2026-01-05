@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unruggable Wallet Test</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #0a0a0a;
+            color: #fff;
+        }
+        h1 {
+            color: #00ff88;
+        }
+        button {
+            background: #00ff88;
+            color: #000;
+            border: none;
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: 600;
+            border-radius: 8px;
+            cursor: pointer;
+            margin: 8px 4px;
+        }
+        button:hover {
+            background: #00dd77;
+        }
+        button:disabled {
+            background: #444;
+            color: #888;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 12px;
+            border-radius: 8px;
+            margin: 16px 0;
+            background: #1a1a1a;
+            border-left: 4px solid #00ff88;
+        }
+        .error {
+            border-left-color: #ff4444;
+        }
+        .info {
+            border-left-color: #4488ff;
+        }
+        .code {
+            background: #1a1a1a;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+        }
+        .section {
+            margin: 32px 0;
+            padding: 24px;
+            background: #111;
+            border-radius: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🛡️ Unruggable Wallet Test Page</h1>
+
+    <div class="section">
+        <h2>Extension Status</h2>
+        <div id="extensionStatus" class="status info">
+            Checking for Unruggable extension...
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>1. Connect Wallet</h2>
+        <button id="connectBtn" onclick="connectWallet()">Connect Wallet</button>
+        <div id="connectStatus"></div>
+    </div>
+
+    <div class="section">
+        <h2>2. Wallet Info</h2>
+        <div id="walletInfo" class="code">
+            Not connected
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>3. Sign Message</h2>
+        <button id="signMessageBtn" onclick="signMessage()" disabled>Sign Message</button>
+        <div id="signMessageStatus"></div>
+    </div>
+
+    <div class="section">
+        <h2>4. Disconnect</h2>
+        <button id="disconnectBtn" onclick="disconnectWallet()" disabled>Disconnect</button>
+    </div>
+
+    <script>
+        let wallet = null;
+
+        // Check if extension is installed
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                const statusEl = document.getElementById('extensionStatus');
+
+                if (window.solana?.isUnruggable) {
+                    statusEl.className = 'status';
+                    statusEl.innerHTML = '✅ Unruggable extension detected!<br>Desktop app must be running on ws://localhost:7777';
+                    wallet = window.solana;
+
+                    // Set up event listeners
+                    wallet.on('connect', (publicKey) => {
+                        console.log('Connected!', publicKey);
+                        updateWalletInfo();
+                    });
+
+                    wallet.on('disconnect', () => {
+                        console.log('Disconnected!');
+                        updateWalletInfo();
+                    });
+                } else {
+                    statusEl.className = 'status error';
+                    statusEl.innerHTML = '❌ Unruggable extension not detected<br>Please install the extension and refresh this page.';
+                }
+            }, 100);
+        });
+
+        async function connectWallet() {
+            const btn = document.getElementById('connectBtn');
+            const status = document.getElementById('connectStatus');
+
+            try {
+                btn.disabled = true;
+                status.className = 'status info';
+                status.textContent = 'Connecting... Check your desktop app for approval.';
+
+                const response = await wallet.connect();
+
+                status.className = 'status';
+                status.textContent = '✅ Connected successfully!';
+
+                updateWalletInfo();
+
+                // Enable other buttons
+                document.getElementById('signMessageBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = false;
+                btn.textContent = 'Connected';
+
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = '❌ ' + error.message;
+                btn.disabled = false;
+            }
+        }
+
+        function updateWalletInfo() {
+            const info = document.getElementById('walletInfo');
+
+            if (wallet.isConnected && wallet.publicKey) {
+                info.innerHTML = `
+<strong>Connected:</strong> ${wallet.isConnected}
+<strong>Public Key:</strong> ${wallet.publicKey.toString()}
+<strong>Wallet:</strong> Unruggable
+                `.trim();
+            } else {
+                info.textContent = 'Not connected';
+            }
+        }
+
+        async function signMessage() {
+            const btn = document.getElementById('signMessageBtn');
+            const status = document.getElementById('signMessageStatus');
+
+            try {
+                btn.disabled = true;
+                status.className = 'status info';
+                status.textContent = 'Signing... Check your desktop app for approval.';
+
+                const message = new TextEncoder().encode('Hello from Unruggable test page!');
+                const result = await wallet.signMessage(message);
+
+                status.className = 'status';
+                status.innerHTML = `
+✅ Message signed!<br>
+<strong>Signature:</strong> ${Array.from(result.signature).map(b => b.toString(16).padStart(2, '0')).join('')}
+                `.trim();
+
+                btn.disabled = false;
+
+            } catch (error) {
+                status.className = 'status error';
+                status.textContent = '❌ ' + error.message;
+                btn.disabled = false;
+            }
+        }
+
+        async function disconnectWallet() {
+            const btn = document.getElementById('disconnectBtn');
+
+            try {
+                btn.disabled = true;
+                await wallet.disconnect();
+
+                updateWalletInfo();
+
+                // Disable other buttons
+                document.getElementById('signMessageBtn').disabled = true;
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('connectBtn').textContent = 'Connect Wallet';
+
+            } catch (error) {
+                console.error('Disconnect error:', error);
+                btn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>

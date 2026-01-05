@@ -28,6 +28,9 @@ mod titan;
 mod pin;
 mod timeout;
 
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+mod bridge;
+
 use components::*;
 
 #[derive(Debug, Clone, Routable, PartialEq)]
@@ -68,6 +71,31 @@ fn main() {
     );
 
     dioxus::launch(App);
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+fn start_browser_bridge() -> Arc<bridge::BridgeHandler> {
+    use bridge::{BridgeHandler, BridgeServer};
+
+    let handler = Arc::new(BridgeHandler::new());
+    let handler_clone = Arc::clone(&handler);
+
+    std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
+
+        rt.block_on(async {
+            let server = Arc::new(BridgeServer::new(7777));
+            let callback = Arc::new(move |request| handler_clone.handle_request(request));
+
+            server.set_callback(callback);
+
+            if let Err(e) = server.start().await {
+                eprintln!("Bridge server error: {}", e);
+            }
+        });
+    });
+
+    handler
 }
 
 // Web & Mobile keep the generic launcher:
@@ -134,6 +162,13 @@ fn App() -> Element {
     // Provide a shared TransactionClient (no background TPU init to avoid iOS crash)
     let transaction_client = Arc::new(transaction::TransactionClient::new(None));
     use_context_provider(|| transaction_client.clone());
+
+    // Start browser bridge on desktop only
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    let bridge_handler = {
+        let handler = use_context_provider(|| start_browser_bridge());
+        handler
+    };
     
     let wallet = use_signal(|| None as Option<wallet::WalletInfo>);
     
@@ -152,8 +187,15 @@ fn App() -> Element {
         // Show PIN unlock if PIN is set and app is locked
         if is_locked() {
             PinUnlock {
-                on_unlock: move |_| {
+                on_unlock: move |pin: String| {
                     is_locked.set(false);
+                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                    {
+                        match bridge_handler.load_wallet_with_pin(&pin) {
+                            Ok(_) => println!("✅ Bridge: Wallet loaded for browser"),
+                            Err(e) => eprintln!("❌ Bridge: Failed to load wallet: {}", e),
+                        }
+                    }
                 }
             }
         } else if show_onboarding() {

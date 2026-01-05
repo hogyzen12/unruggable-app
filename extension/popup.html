@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unruggable Wallet</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div class="logo">
+        <img src="icons/icon48.png" alt="Unruggable">
+        <span>Unruggable</span>
+      </div>
+      <div id="status-indicator" class="status-indicator disconnected">
+        <div class="status-dot"></div>
+        <span id="status-text">Disconnected</span>
+      </div>
+    </div>
+
+    <!-- Desktop App Not Running -->
+    <div id="not-connected-view" class="view">
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+        </svg>
+        <h3>Desktop App Not Running</h3>
+        <p>Launch the Unruggable desktop app to use your wallet</p>
+        <button class="btn-secondary" id="refresh-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"></polyline>
+            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Wallet Locked View -->
+    <div id="locked-view" class="view hidden">
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+        <h3>Wallet Locked</h3>
+        <p>Unlock your desktop app to access your wallet</p>
+        <button class="btn-secondary" id="open-desktop-btn">Open Desktop App</button>
+      </div>
+    </div>
+
+    <!-- Connected View -->
+    <div id="connected-view" class="view hidden">
+      <!-- Wallet Info -->
+      <div class="wallet-info">
+        <div class="wallet-name-section">
+          <label>Active Wallet</label>
+          <div class="wallet-name" id="wallet-name">Loading...</div>
+        </div>
+        <div class="address-section">
+          <label>Address</label>
+          <div class="address-display">
+            <code id="wallet-address">Loading...</code>
+            <button class="icon-btn" id="copy-address-btn" title="Copy address">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="balance-section">
+          <label>SOL Balance</label>
+          <div class="balance-display">
+            <span id="sol-balance">--</span>
+            <span class="currency">SOL</span>
+          </div>
+          <div class="balance-usd">
+            <span id="usd-balance">$--</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="actions">
+        <button class="action-btn" id="send-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+          Send
+        </button>
+        <button class="action-btn" id="receive-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          Receive
+        </button>
+        <button class="action-btn" id="activity-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+          </svg>
+          Activity
+        </button>
+      </div>
+
+      <!-- Connected dApps -->
+      <div class="section">
+        <div class="section-header">
+          <h4>Connected Sites</h4>
+          <span id="connected-count" class="badge">0</span>
+        </div>
+        <div id="connected-sites" class="connected-sites">
+          <p class="empty-text">No connected sites</p>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="footer">
+        <button class="btn-text" id="settings-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M12 1v6m0 6v6m5.66-17L14.5 6M9.5 18l-3.16 5.66M1 12h6m6 0h6m-17-5.66L6 9.5M18 14.5l5.66 3.16"></path>
+          </svg>
+          Settings
+        </button>
+        <button class="btn-text" id="lock-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          Lock
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

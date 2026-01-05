@@ -50,6 +50,8 @@ use std::sync::Arc;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::collections::HashMap;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+use crate::bridge::BridgeHandler;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use arboard::Clipboard as SystemClipboard;
 use std::collections::HashSet;
@@ -476,6 +478,10 @@ pub fn WalletView() -> Element {
     let mut hardware_device_present = use_signal(|| false);
     let mut hardware_connected = use_signal(|| false);
     let mut hardware_pubkey = use_signal(|| None as Option<String>);
+
+    // Bridge handler (desktop only)
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    let bridge_handler = use_context::<Arc<BridgeHandler>>();
 
     // RPC management
     let mut custom_rpc = use_signal(|| load_rpc_from_storage());
@@ -1509,11 +1515,24 @@ pub fn WalletView() -> Element {
                                 } else { 
                                     "dropdown-item wallet-list-item" 
                                 },
-                                onclick: move |_| {
+                                onclick: {
+                                    let wallet_info_clone = wallet.clone();
+                                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                                    let handler = bridge_handler.clone();
+
+                                    move |_| {
                                     current_wallet_index.set(index);
                                     show_dropdown.set(false);
                                     hardware_connected.set(false);
                                     hardware_pubkey.set(None);
+
+                                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                                    {
+                                        if let Ok(wallet) = Wallet::from_wallet_info(&wallet_info_clone) {
+                                            handler.update_wallet(wallet);
+                                        }
+                                    }
+                                }
                                 },
                                 div {
                                     class: "dropdown-icon",
@@ -1709,11 +1728,24 @@ pub fn WalletView() -> Element {
                 WalletModal {
                     mode: modal_mode(),
                     onclose: move |_| show_wallet_modal.set(false),
-                    onsave: move |wallet_info| {
-                        save_wallet_to_storage(&wallet_info);
-                        wallets.write().push(wallet_info);
-                        current_wallet_index.set(wallets.read().len() - 1);
-                        show_wallet_modal.set(false);
+                    onsave: {
+                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                        let handler_for_save = bridge_handler.clone();
+
+                        move |wallet_info| {
+                            save_wallet_to_storage(&wallet_info);
+
+                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                        {
+                            if let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) {
+                                handler_for_save.update_wallet(wallet);
+                            }
+                        }
+
+                            wallets.write().push(wallet_info);
+                            current_wallet_index.set(wallets.read().len() - 1);
+                            show_wallet_modal.set(false);
+                        }
                     }
                 }
             }
@@ -1730,33 +1762,48 @@ pub fn WalletView() -> Element {
             if show_delete_confirmation() {
                 DeleteWalletModal {
                     wallet: wallets.read().get(current_wallet_index()).cloned(),
-                    onconfirm: move |_| {
-                        // Get the current wallet info for deletion - separate the read operation
-                        let current_index = current_wallet_index();
-                        let wallet_address_to_delete = {
-                            // This scope ensures the read lock is dropped before we try to write
-                            wallets.read().get(current_index).map(|w| w.address.clone())
-                        };
+                    onconfirm: {
+                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                        let handler_for_delete = bridge_handler.clone();
+
+                        move |_| {
+                            // Get the current wallet info for deletion - separate the read operation
+                            let current_index = current_wallet_index();
+                            let wallet_address_to_delete = {
+                                // This scope ensures the read lock is dropped before we try to write
+                                wallets.read().get(current_index).map(|w| w.address.clone())
+                            };
                         
-                        if let Some(wallet_address) = wallet_address_to_delete {
-                            // Delete the wallet from storage
-                            delete_wallet_from_storage(&wallet_address);
+                            if let Some(wallet_address) = wallet_address_to_delete {
+                                // Delete the wallet from storage
+                                delete_wallet_from_storage(&wallet_address);
                             
-                            // Reload wallets from storage (now we can safely write)
-                            wallets.set(load_wallets_from_storage());
+                                // Reload wallets from storage (now we can safely write)
+                                wallets.set(load_wallets_from_storage());
                             
-                            // Reset current index if needed
-                            let wallet_count = wallets.read().len();
-                            if wallet_count == 0 {
-                                current_wallet_index.set(0);
-                            } else if current_index >= wallet_count {
-                                current_wallet_index.set(wallet_count - 1);
+                                // Reset current index if needed
+                                let wallet_count = wallets.read().len();
+                                if wallet_count == 0 {
+                                    current_wallet_index.set(0);
+                                } else if current_index >= wallet_count {
+                                    current_wallet_index.set(wallet_count - 1);
+                                }
+
+                                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                                {
+                                    let new_index = current_wallet_index();
+                                    if let Some(wallet_info) = wallets.read().get(new_index) {
+                                        if let Ok(wallet) = Wallet::from_wallet_info(wallet_info) {
+                                            handler_for_delete.update_wallet(wallet);
+                                        }
+                                    }
+                                }
+                            
+                                // Reset balance
+                                balance.set(0.0);
                             }
-                            
-                            // Reset balance
-                            balance.set(0.0);
+                            show_delete_confirmation.set(false);
                         }
-                        show_delete_confirmation.set(false);
                     },
                     onclose: move |_| show_delete_confirmation.set(false)
                 }

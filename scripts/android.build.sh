@@ -3,6 +3,6 @@ if [ -z "${CI-}" ]; then
   SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &> /dev/null && pwd)
   source "$SCRIPT_DIR/android.env"
 fi
-dxedge build --platform android --release --verbose --target aarch64-linux-android
+#dxedge build --platform android --release --verbose --target aarch64-linux-android
 #Make sure to remove the target/dx folder when building with the script for each cli version.
-#dx build --platform android --release --verbose --target aarch64-linux-android
+dx build --platform android --release --verbose --target aarch64-linux-android

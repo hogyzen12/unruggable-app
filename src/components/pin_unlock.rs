@@ -4,7 +4,7 @@ use crate::storage;
 use crate::components::pin_input::PinInput;
 
 #[component]
-pub fn PinUnlock(on_unlock: EventHandler<()>) -> Element {
+pub fn PinUnlock(on_unlock: EventHandler<String>) -> Element {
     let mut error_message = use_signal(|| None::<String>);
     let mut is_locked = use_signal(|| storage::is_pin_locked());
     
@@ -15,7 +15,7 @@ pub fn PinUnlock(on_unlock: EventHandler<()>) -> Element {
                 // PIN verified successfully
                 log::info!("PIN verified - unlocking app");
                 error_message.set(None);
-                on_unlock.call(());
+                on_unlock.call(pin);
             }
             Err(e) => {
                 // PIN verification failed
