@@ -46,10 +46,10 @@ spl-token = "9.0.0"
 spl-associated-token-account = "8.0.0"
 solana-client = "3.0.0"
 server_fn_macro_default = "0.8.3"
-# Temporarily commented out for Solana 3.x testing (these depend on Solana 2.x)
-# squads-v4-client = "0.1.0"
-# carrot-sdk = "0.1.0"
-# bonk-staking-rewards = "0.1.0"
+# Solana 3.x branch: use local v3 fork for Carrot; keep v2 crates commented.
+squads-v4-client-v3 = "0.1.0"
+carrot-sdk = { package = "carrot-sdk-v3", version = "0.1.0" }
+bonk-staking-rewards-v3 = "0.1.0"
 borsh = "1.5.7"
 solana-winternitz = "0.1.0"
 web-sys = { version = "0.3", features = ["Window", "Storage", "Performance"] }

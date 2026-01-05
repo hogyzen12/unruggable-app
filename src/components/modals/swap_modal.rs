@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
+use crate::config::tokens::get_token_catalog;
 use crate::wallet::WalletInfo;
 use crate::hardware::HardwareWallet;
 use crate::transaction::TransactionClient;
@@ -467,12 +470,29 @@ pub struct DflowSwapInstructionsResponse {
     pub prioritization_fee_lamports: u64,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+struct JupiterTokenMeta {
+    pub address: String,
+    pub symbol: String,
+    pub name: String,
+    pub decimals: u8,
+    #[serde(rename = "logoURI")]
+    pub logo_uri: Option<String>,
+}
+
 // Get token mint address from actual token data
 fn get_token_mint<'a>(symbol: &str, tokens: &'a [Token]) -> &'a str {
     tokens.iter()
         .find(|t| t.symbol == symbol)
         .map(|t| t.mint.as_str())
         .unwrap_or("So11111111111111111111111111111111111111112") // Default to SOL if not found
+}
+
+fn get_token_mint_with_meta(symbol: &str, tokens: &[Token], meta: Option<&JupiterTokenMeta>) -> String {
+    if let Some(meta) = meta {
+        return meta.address.clone();
+    }
+    get_token_mint(symbol, tokens).to_string()
 }
 
 // Get token decimals from tokens vector
@@ -490,6 +510,13 @@ fn get_token_decimals(symbol: &str, tokens: &[Token]) -> u8 {
     }
 }
 
+fn get_token_decimals_with_meta(symbol: &str, tokens: &[Token], meta: Option<&JupiterTokenMeta>) -> u8 {
+    if let Some(meta) = meta {
+        return meta.decimals;
+    }
+    get_token_decimals(symbol, tokens)
+}
+
 // Convert human-readable amount to lamports/smallest unit
 fn to_lamports(amount: f64, symbol: &str, tokens: &[Token]) -> u64 {
     let decimals = get_token_decimals(symbol, tokens);
@@ -499,6 +526,11 @@ fn to_lamports(amount: f64, symbol: &str, tokens: &[Token]) -> u64 {
 // Convert lamports/smallest unit to human-readable amount  
 fn from_lamports(lamports: u64, symbol: &str, tokens: &[Token]) -> f64 {
     let decimals = get_token_decimals(symbol, tokens);
+    lamports as f64 / 10_f64.powi(decimals as i32)
+}
+
+fn from_lamports_with_meta(lamports: u64, symbol: &str, tokens: &[Token], meta: Option<&JupiterTokenMeta>) -> f64 {
+    let decimals = get_token_decimals_with_meta(symbol, tokens, meta);
     lamports as f64 / 10_f64.powi(decimals as i32)
 }
 
@@ -512,6 +544,24 @@ fn get_token_icon<'a>(symbol: &str, tokens: &'a [Token]) -> &'a str {
         .find(|t| t.symbol == symbol)
         .map(|t| t.icon_type.as_str())
         .unwrap_or(ICON_32)
+}
+
+fn get_token_icon_with_meta(symbol: &str, tokens: &[Token], meta: Option<&JupiterTokenMeta>) -> String {
+    if let Some(meta) = meta {
+        if let Some(url) = &meta.logo_uri {
+            if !url.is_empty() {
+                return url.clone();
+            }
+        }
+    }
+    get_token_icon(symbol, tokens).to_string()
+}
+
+fn short_mint(mint: &str) -> String {
+    if mint.len() <= 8 {
+        return mint.to_string();
+    }
+    format!("{}...{}", &mint[..4], &mint[mint.len() - 4..])
 }
 
 // Get full token info by symbol
@@ -591,100 +641,165 @@ pub fn SwapTransactionSuccessModal(
     
     rsx! {
         div {
-            class: "modal-backdrop",
+            style: "
+                position: fixed;
+                inset: 0;
+                background: rgba(0, 0, 0, 0.6);
+                z-index: 9999;
+                display: flex;
+                align-items: flex-start;
+                justify-content: center;
+            ",
             onclick: move |_| onclose.call(()),
-            
+
             div {
-                class: "modal-content",
+                style: "
+                    width: 100%;
+                    max-width: 560px;
+                    background: #121212;
+                    border-bottom-left-radius: 16px;
+                    border-bottom-right-radius: 16px;
+                    padding: 16px;
+                    border: 1px solid #2a2a2a;
+                ",
                 onclick: move |e| e.stop_propagation(),
-                
-                h2 { class: "modal-title", "Swap Completed Successfully! 🎉" }
-                
+
                 div {
-                    class: "tx-icon-container",
-                    div {
-                        class: "tx-success-icon",
-                        "✓" // Checkmark icon
+                    style: "display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;",
+                    div { style: "font-size: 16px; font-weight: 700; color: white;", "Swap complete" }
+                    button {
+                        style: "background: transparent; border: none; color: #9ca3af; font-size: 16px;",
+                        onclick: move |_| onclose.call(()),
+                        "Close"
                     }
                 }
-                
+
                 div {
-                    class: "success-message",
-                    "Your swap transaction was submitted to the Solana network."
-                }
-                
-                div {
-                    class: "swap-summary",
+                    style: "
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                        padding: 12px;
+                        border-radius: 12px;
+                        background: #1a1a1a;
+                        border: 1px solid #2a2a2a;
+                        margin-bottom: 12px;
+                    ",
                     div {
-                        class: "swap-summary-row",
-                        span { "Sold:" }
+                        style: "
+                            width: 34px;
+                            height: 34px;
+                            border-radius: 50%;
+                            background: rgba(16, 185, 129, 0.15);
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            color: #10b981;
+                            font-weight: 700;
+                        ",
+                        "✓"
+                    }
+                    div {
+                        div { style: "font-size: 14px; font-weight: 700; color: white;", "Transaction submitted" }
+                        div { style: "font-size: 12px; color: #94a3b8;", "Your swap is on Solana and should confirm shortly." }
+                    }
+                }
+
+                div {
+                    style: "
+                        background: #1a1a1a;
+                        border: 1px solid #2a2a2a;
+                        border-radius: 12px;
+                        padding: 12px;
+                        margin-bottom: 12px;
+                    ",
+                    div {
+                        style: "display: flex; justify-content: space-between; margin-bottom: 8px; color: #cbd5e1; font-size: 13px;",
+                        span { "Sold" }
                         span { "{selling_amount} {selling_token}" }
                     }
                     div {
-                        class: "swap-summary-row",
-                        span { "Received:" }
+                        style: "display: flex; justify-content: space-between; color: #cbd5e1; font-size: 13px;",
+                        span { "Received" }
                         span { "~{buying_amount} {buying_token}" }
                     }
                 }
-                
-                // Add hardware wallet reconnection notice if this was a hardware wallet transaction
+
                 if was_hardware_wallet {
                     div {
-                        class: "hardware-reconnect-notice",
-                        "Your hardware wallet has been disconnected after the transaction. You'll need to reconnect it for future swaps."
+                        style: "
+                            background: rgba(255, 171, 64, 0.1);
+                            border: 1px solid rgba(255, 171, 64, 0.2);
+                            color: #fbbf24;
+                            border-radius: 10px;
+                            padding: 10px 12px;
+                            font-size: 12px;
+                            margin-bottom: 12px;
+                        ",
+                        "Your hardware wallet disconnected after signing. Reconnect it for future swaps."
                     }
                 }
-                
+
                 div {
-                    class: "transaction-details",
+                    style: "
+                        background: #111;
+                        border: 1px solid #2a2a2a;
+                        border-radius: 12px;
+                        padding: 12px;
+                        margin-bottom: 12px;
+                    ",
+                    div { style: "font-size: 12px; color: #9ca3af; margin-bottom: 6px;", "Transaction signature" }
                     div {
-                        class: "wallet-field",
-                        label { "Transaction Signature:" }
-                        div { 
-                            class: "address-display", 
-                            title: "Click to copy",
-                            onclick: move |_| {
-                                // We can't do actual clipboard operations in Dioxus yet
-                                // This is just for UI indication
-                                log::info!("Signature copied to clipboard: {}", signature);
-                            },
-                            "{signature}"
-                        }
-                        div { 
-                            class: "copy-hint",
-                            "Click to copy"
-                        }
-                    }
-                    
-                    div {
-                        class: "explorer-links",
-                        p { "View transaction in explorer:" }
-                        
-                        div {
-                            class: "explorer-buttons",
-                            a {
-                                class: "button-standard ghost",
-                                href: "{solscan_url}",
-                                target: "_blank",
-                                rel: "noopener noreferrer",
-                                "Solscan"
-                            }
-                            a {
-                                class: "button-standard ghost",
-                                href: "{orb_url}",
-                                target: "_blank",
-                                rel: "noopener noreferrer",
-                                "Orb"
-                            }
-                        }
+                        style: "
+                            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace;
+                            font-size: 12px;
+                            color: #e5e7eb;
+                            word-break: break-all;
+                        ",
+                        onclick: move |_| {
+                            log::info!("Signature copied to clipboard: {}", signature);
+                        },
+                        "{signature}"
                     }
                 }
-                
-                div { class: "modal-buttons",
-                    button {
-                        class: "button-standard primary",
-                        onclick: move |_| onclose.call(()),
-                        "Close"
+
+                div {
+                    style: "display: flex; gap: 8px;",
+                    a {
+                        style: "
+                            flex: 1;
+                            text-decoration: none;
+                            background: #1f2937;
+                            border: 1px solid #374151;
+                            color: #e5e7eb;
+                            padding: 10px 12px;
+                            border-radius: 10px;
+                            text-align: center;
+                            font-size: 13px;
+                            font-weight: 600;
+                        ",
+                        href: "{solscan_url}",
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        "Solscan"
+                    }
+                    a {
+                        style: "
+                            flex: 1;
+                            text-decoration: none;
+                            background: #1f2937;
+                            border: 1px solid #374151;
+                            color: #e5e7eb;
+                            padding: 10px 12px;
+                            border-radius: 10px;
+                            text-align: center;
+                            font-size: 13px;
+                            font-weight: 600;
+                        ",
+                        href: "{orb_url}",
+                        target: "_blank",
+                        rel: "noopener noreferrer",
+                        "Orb"
                     }
                 }
             }
@@ -712,6 +827,7 @@ pub fn SwapModal(
     // State management
     let mut selling_token = use_signal(|| "SOL".to_string());
     let mut buying_token = use_signal(|| "USDC".to_string());
+    let mut buying_token_meta = use_signal(|| None as Option<JupiterTokenMeta>);
     let mut selling_amount = use_signal(|| "".to_string());
     let mut buying_amount = use_signal(|| "0.00".to_string());
     let mut swapping = use_signal(|| false);
@@ -744,6 +860,16 @@ pub fn SwapModal(
     let mut titan_quote = use_signal(|| None as Option<(String, TitanSwapRoute)>); // (provider_name, route)
     let mut fetching_titan = use_signal(|| false);
     let mut selected_provider = use_signal(|| None as Option<String>); // "Jupiter" or "Titan"
+
+    // Buy-side token search (Jupiter strict list)
+    let mut show_buy_token_search = use_signal(|| false);
+    let mut show_sell_token_search = use_signal(|| false);
+    let mut token_search_query = use_signal(|| "".to_string());
+    let mut sell_search_query = use_signal(|| "".to_string());
+    let mut last_buy_search_query = use_signal(|| "".to_string());
+    let mut token_catalog = use_signal(|| Vec::<JupiterTokenMeta>::new());
+    let mut token_catalog_loading = use_signal(|| false);
+    let mut token_catalog_loaded = use_signal(|| false);
     
     // Store hardware wallet address (fetched async)
     let mut hw_address = use_signal(|| None as Option<String>);
@@ -760,6 +886,7 @@ pub fn SwapModal(
     let tokens_clone_price = tokens.clone(); // For provider comparison
     let tokens_clone_exchange_rate = tokens.clone(); // For exchange_rate calculation
     let tokens_clone_selling_usd = tokens.clone(); // For selling_usd_value
+    let tokens_clone_sell_search = tokens.clone(); // For selling token search
     let tokens_clone_buying_usd = tokens.clone(); // For buying_usd_value
 
     // Show transaction success modal if swap completed
@@ -821,6 +948,102 @@ pub fn SwapModal(
                 }
             });
         }
+    });
+
+    // Update buying token selection (owned or search result)
+
+    // Load local token catalog when search opens
+    use_effect(move || {
+        if show_buy_token_search() && !token_catalog_loaded() && !token_catalog_loading() {
+            token_catalog_loading.set(true);
+            let tokens: Vec<JupiterTokenMeta> = get_token_catalog()
+                .iter()
+                .map(|token| JupiterTokenMeta {
+                    address: token.address.clone(),
+                    name: token.name.clone(),
+                    symbol: token.symbol.clone(),
+                    logo_uri: token.logo_uri.clone(),
+                    decimals: token.decimals,
+                })
+                .collect();
+            println!("✅ Loaded {} local token catalog entries", tokens.len());
+            token_catalog.set(tokens);
+            token_catalog_loaded.set(true);
+            token_catalog_loading.set(false);
+        }
+    });
+
+    // Filter token catalog based on search query
+    let token_search_results = use_memo(move || {
+        let query = token_search_query().trim().to_lowercase();
+        if query.is_empty() {
+            return Vec::new();
+        }
+
+        let mut results: Vec<JupiterTokenMeta> = token_catalog()
+            .into_iter()
+            .filter(|token| {
+                token.symbol.to_lowercase().contains(&query)
+                    || token.name.to_lowercase().contains(&query)
+                    || token.address.to_lowercase().contains(&query)
+            })
+            .take(50)
+            .collect();
+
+        results.sort_by_key(|t| {
+            let sym = t.symbol.to_lowercase();
+            if sym == query { 0 } else if sym.starts_with(&query) { 1 } else { 2 }
+        });
+
+        results
+    });
+
+    let sell_search_results = use_memo(move || {
+        let query = sell_search_query().trim().to_lowercase();
+        let catalog = tokens_clone_sell_search.clone();
+
+        if query.is_empty() {
+            return catalog;
+        }
+
+        let mut results: Vec<Token> = catalog
+            .into_iter()
+            .filter(|token| {
+                token.symbol.to_lowercase().contains(&query)
+                    || token.name.to_lowercase().contains(&query)
+                    || token.mint.to_lowercase().contains(&query)
+            })
+            .take(50)
+            .collect();
+
+        results.sort_by_key(|t| {
+            let sym = t.symbol.to_lowercase();
+            if sym == query { 0 } else if sym.starts_with(&query) { 1 } else { 2 }
+        });
+
+        results
+    });
+
+    use_effect(move || {
+        let query = token_search_query().trim().to_string();
+        if query == last_buy_search_query() {
+            return;
+        }
+        last_buy_search_query.set(query.clone());
+
+        if query.is_empty() {
+            return;
+        }
+
+        let results = token_search_results();
+        let preview: Vec<String> = results.iter().take(3).map(|t| t.symbol.clone()).collect();
+        println!(
+            "🔎 Buy search \"{}\": catalog={} results={} preview={:?}",
+            query,
+            token_catalog().len(),
+            results.len(),
+            preview
+        );
     });
     
     // iOS-SAFE: Listen to swap updates channel and update signals on main thread
@@ -1124,6 +1347,86 @@ pub fn SwapModal(
         });
     };
 
+    let update_buying_token = {
+        let tokens_for_update = tokens_clone6.clone();
+        let wallet_for_update = wallet_clone_for_buying_dropdown.clone();
+        let hw_for_update = hw_address.clone();
+        Rc::new(RefCell::new(move |symbol: String, meta: Option<JupiterTokenMeta>| {
+            let mut final_symbol = symbol;
+            let mut final_meta = meta;
+
+            if let Some(meta) = final_meta.clone() {
+                if let Some(owned) = tokens_for_update.iter().find(|t| t.mint == meta.address) {
+                    final_symbol = owned.symbol.clone();
+                    final_meta = None;
+                } else {
+                    final_symbol = meta.symbol.clone();
+                }
+            }
+
+            buying_token.set(final_symbol.clone());
+            buying_token_meta.set(final_meta.clone());
+            show_buy_token_search.set(false);
+            buying_amount.set("0.00".to_string());
+            jupiter_order.set(None);
+            dflow_quote.set(None);
+            titan_quote.set(None);
+            selected_provider.set(None);
+
+            if !selling_amount().is_empty() {
+                if let Ok(amount) = selling_amount().parse::<f64>() {
+                    if amount > 0.0 {
+                        let amount_lamports = to_lamports(amount, &selling_token(), &tokens_for_update);
+                        let input_mint = get_token_mint(&selling_token(), &tokens_for_update).to_string();
+                        let output_mint = get_token_mint_with_meta(&final_symbol, &tokens_for_update, final_meta.as_ref());
+
+                        let user_pubkey_str = if let Some(address) = hw_for_update() {
+                            Some(address)
+                        } else if let Some(wallet_info) = &wallet_for_update {
+                            Some(wallet_info.address.clone())
+                        } else {
+                            None
+                        };
+
+                        if let Some(user_pubkey) = user_pubkey_str {
+                            let input_mint_jup = input_mint.clone();
+                            let output_mint_jup = output_mint.clone();
+                            let user_pubkey_jup = user_pubkey.clone();
+
+                            let input_mint_dflow = input_mint.clone();
+                            let output_mint_dflow = output_mint.clone();
+
+                            let input_mint_titan = input_mint.clone();
+                            let output_mint_titan = output_mint.clone();
+                            let user_pubkey_titan = user_pubkey.clone();
+
+                            spawn(async move {
+                                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                                println!("🔄 Refetching quotes for new buying token...");
+                                fetch_jupiter_order(input_mint_jup, output_mint_jup, amount_lamports, Some(user_pubkey_jup));
+                                fetch_dflow_quote(input_mint_dflow, output_mint_dflow, amount_lamports, 50);
+                                fetch_titan_quotes(input_mint_titan, output_mint_titan, amount_lamports, Some(user_pubkey_titan));
+                            });
+                        }
+                    }
+                }
+            }
+        }))
+    };
+
+    let update_selling_token = {
+        Rc::new(RefCell::new(move |symbol: String| {
+            selling_token.set(symbol);
+            selling_amount.set("".to_string());
+            buying_amount.set("0.00".to_string());
+            jupiter_order.set(None);
+            dflow_quote.set(None);
+            titan_quote.set(None);
+            selected_provider.set(None);
+            show_sell_token_search.set(false);
+        }))
+    };
+
 
 
 
@@ -1183,8 +1486,9 @@ pub fn SwapModal(
                 if amount <= selling_balance && amount > 0.0 {
                     let amount_lamports = to_lamports(amount, &selling_token(), &tokens_clone4);
                     
+                    let buying_meta = buying_token_meta();
                     let input_mint = get_token_mint(&selling_token(), &tokens_clone4).to_string();
-                    let output_mint = get_token_mint(&buying_token(), &tokens_clone4).to_string();
+                    let output_mint = get_token_mint_with_meta(&buying_token(), &tokens_clone4, buying_meta.as_ref());
                     let user_pubkey = get_user_pubkey();
                     
                     // Clone for each async call
@@ -1257,7 +1561,8 @@ pub fn SwapModal(
             selected_provider.set(Some(winner.to_string()));
             
             // Update buying amount with winner's quote
-            let converted_amount = from_lamports(*best_amount, &buying_token(), &tokens_clone5);
+            let buying_meta = buying_token_meta();
+            let converted_amount = from_lamports_with_meta(*best_amount, &buying_token(), &tokens_clone5, buying_meta.as_ref());
             let formatted = if converted_amount < 0.01 && converted_amount > 0.0 {
                 format!("{:.6}", converted_amount)
             } else {
@@ -1844,6 +2149,10 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
     // Handle token swap direction - preserve buying amount and refetch quotes
     let handle_token_swap = move |_| {
         println!("🔄 Token swap direction clicked!");
+        if buying_token_meta().is_some() {
+            error_message.set(Some("Swap direction disabled for external buy tokens".to_string()));
+            return;
+        }
         let current_selling = selling_token();
         let current_buying = buying_token();
         let current_buying_amount = buying_amount();
@@ -2036,7 +2345,7 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                         span { 
                             class: "swap-balance",
                             style: "color: #cbd5e1; font-size: 13px;",
-                            "Balance: {selling_balance():.6} {selling_token()}"
+                            {format!("Balance: {:.6} {}", selling_balance(), selling_token())}
                         }
                     }
                     
@@ -2064,7 +2373,7 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                 src: get_token_icon(&selling_token(), &tokens_clone6),
                                 alt: selling_token()
                             }
-                            select {
+                            button {
                                 class: "swap-token-picker",
                                 style: "
                                     background: #2a2a2a;
@@ -2077,25 +2386,16 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                     outline: none;
                                     padding: 10px 14px;
                                     min-height: 48px;
-                                    -webkit-appearance: none;
-                                    -moz-appearance: none;
-                                    appearance: none;
+                                    display: inline-flex;
+                                    align-items: center;
+                                    gap: 8px;
                                 ",
-                                value: selling_token(),
-                                onchange: move |e| {
-                                    selling_token.set(e.value());
-                                    selling_amount.set("".to_string());
-                                    buying_amount.set("0.00".to_string());
-                                    jupiter_order.set(None);
+                                onclick: move |_| {
+                                    sell_search_query.set("".to_string());
+                                    show_sell_token_search.set(true);
                                 },
-                                
-                                // Dynamically generate options from user's tokens
-                                for token in tokens_clone6.iter() {
-                                    option { 
-                                        value: "{token.symbol}",
-                                        "{token.symbol}"
-                                    }
-                                }
+                                span { "{selling_token()}" }
+                                span { style: "opacity: 0.6; font-size: 14px;", "▾" }
                             }
                         }
                         
@@ -2146,7 +2446,83 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                         }
                     }
                 }
-                
+
+                // Sell token search overlay
+                if show_sell_token_search() {
+                    div {
+                        style: "
+                            position: fixed;
+                            inset: 0;
+                            background: rgba(0, 0, 0, 0.6);
+                            z-index: 9999;
+                            display: flex;
+                            align-items: flex-start;
+                            justify-content: center;
+                        ",
+                        div {
+                            style: "
+                                width: 100%;
+                                max-width: 560px;
+                                background: #121212;
+                                border-bottom-left-radius: 16px;
+                                border-bottom-right-radius: 16px;
+                                padding: 16px;
+                                border: 1px solid #2a2a2a;
+                                margin-top: 0;
+                            ",
+                            div {
+                                style: "display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;",
+                                div { style: "font-size: 16px; font-weight: 700; color: white;", "Sell token" }
+                                button {
+                                    style: "background: transparent; border: none; color: #9ca3af; font-size: 16px;",
+                                    onclick: move |_| show_sell_token_search.set(false),
+                                    "Close"
+                                }
+                            }
+                            input {
+                                style: "
+                                    width: 100%;
+                                    background: #1a1a1a;
+                                    border: 1px solid #333;
+                                    border-radius: 10px;
+                                    padding: 12px 14px;
+                                    color: white;
+                                    font-size: 14px;
+                                    margin-bottom: 12px;
+                                ",
+                                value: sell_search_query(),
+                                placeholder: "Search your tokens",
+                                oninput: move |e| sell_search_query.set(e.value()),
+                            }
+                            div { style: "max-height: 320px; overflow-y: auto;" ,
+                                if sell_search_results().is_empty() {
+                                    div { style: "color: #9ca3af; font-size: 13px; padding: 8px 0;", "No results" }
+                                } else {
+                                    for token in sell_search_results() {
+                                        button {
+                                            style: "width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; color: white; text-align: left;",
+                                            onclick: {
+                                                let update_selling_token = update_selling_token.clone();
+                                                let symbol = token.symbol.clone();
+                                                move |_| {
+                                                    let mut handler = update_selling_token.borrow_mut();
+                                                    handler(symbol.clone());
+                                                }
+                                            },
+                                            img { src: "{token.icon_type}", style: "width: 28px; height: 28px; border-radius: 50%;" }
+                                            div {
+                                                div { style: "font-size: 14px; font-weight: 600;", "{token.symbol}" }
+                                                div { style: "font-size: 11px; color: #9ca3af;", "{token.name}" }
+                                            }
+                                            div { style: "margin-left: auto; font-size: 11px; color: #6b7280;", {format!("{:.4}", token.balance)} }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Swap direction arrow
                 div {
                     class: "swap-arrow-container",
@@ -2204,7 +2580,7 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                         span { 
                             class: "swap-balance",
                             style: "color: #cbd5e1; font-size: 13px;",
-                            "Balance: {buying_balance():.6} {buying_token()}"
+                            {format!("Balance: {:.6} {}", buying_balance(), buying_token())}
                         }
                     }
                     
@@ -2221,17 +2597,17 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                             gap: 16px;
                         ",
                         
-                        // Token selector
+                        // Token selector (buy side search)
                         div {
                             class: "swap-token-side",
                             style: "display: flex; align-items: center; gap: 12px; flex-shrink: 0;",
                             img {
                                 class: "swap-token-icon",
                                 style: "width: 32px; height: 32px; border-radius: 50%;",
-                                src: get_token_icon(&buying_token(), &tokens_clone6),
+                                src: get_token_icon_with_meta(&buying_token(), &tokens_clone6, buying_token_meta().as_ref()),
                                 alt: buying_token()
                             }
-                            select {
+                            button {
                                 class: "swap-token-picker",
                                 style: "
                                     background: #2a2a2a;
@@ -2244,70 +2620,16 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                     outline: none;
                                     padding: 10px 14px;
                                     min-height: 48px;
-                                    -webkit-appearance: none;
-                                    -moz-appearance: none;
-                                    appearance: none;
+                                    display: inline-flex;
+                                    align-items: center;
+                                    gap: 8px;
                                 ",
-                                value: buying_token(),
-                                onchange: move |e| {
-                                    buying_token.set(e.value());
-                                    buying_amount.set("0.00".to_string());
-                                    jupiter_order.set(None);
-                                    dflow_quote.set(None);
-                                    titan_quote.set(None);
-                                    selected_provider.set(None);
-                                    
-                                    // Re-fetch quotes if there's a selling amount
-                                    if !selling_amount().is_empty() {
-                                        if let Ok(amount) = selling_amount().parse::<f64>() {
-                                if amount > 0.0 {
-                                    let amount_lamports = to_lamports(amount, &selling_token(), &tokens_clone6);
-                                    let input_mint = get_token_mint(&selling_token(), &tokens_clone6).to_string();
-                                    let output_mint = get_token_mint(&e.value(), &tokens_clone6).to_string();
-                                                
-                                                // Get user pubkey - prioritize hardware wallet
-                                                let user_pubkey_str = if let Some(address) = hw_address() {
-                                                    Some(address)
-                                                } else if let Some(wallet_info) = &wallet_clone_for_buying_dropdown {
-                                                    Some(wallet_info.address.clone())
-                                                } else {
-                                                    None
-                                                };
-                                                
-                                                if let Some(user_pubkey) = user_pubkey_str {
-                                                    let input_mint_jup = input_mint.clone();
-                                                    let output_mint_jup = output_mint.clone();
-                                                    let user_pubkey_jup = user_pubkey.clone();
-                                                    
-                                                    let input_mint_dflow = input_mint.clone();
-                                                    let output_mint_dflow = output_mint.clone();
-                                                    
-                                                    let input_mint_titan = input_mint.clone();
-                                                    let output_mint_titan = output_mint.clone();
-                                                    let user_pubkey_titan = user_pubkey.clone();
-                                                    
-                                                    spawn(async move {
-                                                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                                                        
-                                                        println!("🔄 Refetching quotes for new buying token...");
-                                                        
-                                                        fetch_jupiter_order(input_mint_jup, output_mint_jup, amount_lamports, Some(user_pubkey_jup));
-                                                        fetch_dflow_quote(input_mint_dflow, output_mint_dflow, amount_lamports, 50);
-                                                        fetch_titan_quotes(input_mint_titan, output_mint_titan, amount_lamports, Some(user_pubkey_titan));
-                                                    });
-                                                }
-                                            }
-                                        }
-                                    }
+                                onclick: move |_| {
+                                    token_search_query.set("".to_string());
+                                    show_buy_token_search.set(true);
                                 },
-                                
-                                // Dynamically generate options from user's tokens
-                                for token in tokens_clone6.iter() {
-                                    option { 
-                                        value: "{token.symbol}",
-                                        "{token.symbol}"
-                                    }
-                                }
+                                span { "{buying_token()}" }
+                                span { style: "opacity: 0.6; font-size: 14px;", "▾" }
                             }
                         }
                         
@@ -2353,6 +2675,114 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                         }
                     }
                 }
+
+                // Buy token search overlay
+                if show_buy_token_search() {
+                    div {
+                        style: "
+                            position: fixed;
+                            inset: 0;
+                            background: rgba(0, 0, 0, 0.6);
+                            z-index: 9999;
+                            display: flex;
+                            align-items: flex-start;
+                            justify-content: center;
+                        ",
+                        div {
+                            style: "
+                                width: 100%;
+                                max-width: 560px;
+                                background: #121212;
+                                border-bottom-left-radius: 16px;
+                                border-bottom-right-radius: 16px;
+                                padding: 16px;
+                                border: 1px solid #2a2a2a;
+                            ",
+                            div {
+                                style: "display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;",
+                                div { style: "font-size: 16px; font-weight: 700; color: white;", "Select token" }
+                                button {
+                                    style: "background: transparent; border: none; color: #9ca3af; font-size: 16px;",
+                                    onclick: move |_| show_buy_token_search.set(false),
+                                    "Close"
+                                }
+                            }
+                            input {
+                                style: "
+                                    width: 100%;
+                                    background: #1a1a1a;
+                                    border: 1px solid #333;
+                                    border-radius: 10px;
+                                    padding: 12px 14px;
+                                    color: white;
+                                    font-size: 14px;
+                                    margin-bottom: 12px;
+                                ",
+                                value: token_search_query(),
+                                placeholder: "Search name, symbol, or mint",
+                                oninput: move |e| token_search_query.set(e.value()),
+                            }
+
+                            if token_catalog_loading() {
+                                div { style: "color: #9ca3af; font-size: 13px; padding: 8px 0;", "Loading token list..." }
+                            }
+
+                            if token_search_query().is_empty() {
+                                div { style: "color: #9ca3af; font-size: 12px; margin-bottom: 8px;", "Your tokens" }
+                                div {
+                                    style: "max-height: 320px; overflow-y: auto;",
+                                    for token in tokens_clone6.iter() {
+                                        button {
+                                            style: "width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; color: white; text-align: left;",
+                                            onclick: {
+                                                let update_buying_token = update_buying_token.clone();
+                                                let symbol = token.symbol.clone();
+                                                move |_| {
+                                                    let mut handler = update_buying_token.borrow_mut();
+                                                    handler(symbol.clone(), None);
+                                                }
+                                            },
+                                            img { src: "{token.icon_type}", style: "width: 28px; height: 28px; border-radius: 50%;" }
+                                            div {
+                                                div { style: "font-size: 14px; font-weight: 600;", "{token.symbol}" }
+                                                div { style: "font-size: 11px; color: #9ca3af;", "{token.name}" }
+                                            }
+                                            div { style: "margin-left: auto; font-size: 11px; color: #6b7280;", {format!("{:.4}", token.balance)} }
+                                        }
+                                    }
+                                }
+                            } else {
+                                div { style: "color: #9ca3af; font-size: 12px; margin-bottom: 8px;", "Search results" }
+                                div {
+                                    style: "max-height: 320px; overflow-y: auto;",
+                                    if token_search_results().is_empty() {
+                                        div { style: "color: #9ca3af; font-size: 13px; padding: 8px 0;", "No results" }
+                                    } else {
+                                        for token in token_search_results() {
+                                            button {
+                                                style: "width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; color: white; text-align: left;",
+                                                onclick: {
+                                                    let update_buying_token = update_buying_token.clone();
+                                                    let token = token.clone();
+                                                    move |_| {
+                                                        let mut handler = update_buying_token.borrow_mut();
+                                                        handler(token.symbol.clone(), Some(token.clone()));
+                                                    }
+                                                },
+                                                img { src: "{token.logo_uri.clone().unwrap_or_else(|| ICON_32.to_string())}", style: "width: 28px; height: 28px; border-radius: 50%;" }
+                                                div {
+                                                    div { style: "font-size: 14px; font-weight: 600;", "{token.symbol}" }
+                                                    div { style: "font-size: 11px; color: #9ca3af;", "{token.name}" }
+                                                }
+                                                div { style: "margin-left: auto; font-size: 10px; color: #6b7280;", "{short_mint(&token.address)}" }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 
                 // Three-provider comparison
                 if !selling_amount().is_empty() && selling_amount() != "0" {
@@ -2380,7 +2810,12 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                     "Jupiter"
                                 }
                                 if fetching_jupiter() { div { style: "height: 18px; width: 90px; background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px;", } }
-                                else if let Some(order) = jupiter_order() { div { style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Jupiter".to_string()) { "#10b981" } else { "#e2e8f0" }), {format!("{:.6} {}", from_lamports(order.out_amount.parse().unwrap_or(0), &buying_token(), &tokens_clone_price), buying_token())} } }
+                                else if let Some(order) = jupiter_order() {
+                                    div {
+                                        style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Jupiter".to_string()) { "#10b981" } else { "#e2e8f0" }),
+                                        {format!("{:.6} {}", from_lamports_with_meta(order.out_amount.parse().unwrap_or(0), &buying_token(), &tokens_clone_price, buying_token_meta().as_ref()), buying_token())}
+                                    }
+                                }
                                 else { div { style: "color: #64748b; font-size: 12px;", "..." } }
                             }
                             div {
@@ -2403,7 +2838,12 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                     "Dflow"
                                 }
                                 if fetching_dflow() { div { style: "height: 18px; width: 90px; background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px;", } }
-                                else if let Some(quote) = dflow_quote() { div { style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Dflow".to_string()) { "#10b981" } else { "#e2e8f0" }), {format!("{:.6} {}", from_lamports(quote.out_amount.parse().unwrap_or(0), &buying_token(), &tokens_clone_price), buying_token())} } }
+                                else if let Some(quote) = dflow_quote() {
+                                    div {
+                                        style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Dflow".to_string()) { "#10b981" } else { "#e2e8f0" }),
+                                        {format!("{:.6} {}", from_lamports_with_meta(quote.out_amount.parse().unwrap_or(0), &buying_token(), &tokens_clone_price, buying_token_meta().as_ref()), buying_token())}
+                                    }
+                                }
                                 else { div { style: "color: #64748b; font-size: 12px;", "..." } }
                             }
                             div {
@@ -2426,7 +2866,12 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                     "Titan"
                                 }
                                 if fetching_titan() { div { style: "height: 18px; width: 90px; background: linear-gradient(90deg, #2a2a2a 25%, #3a3a3a 50%, #2a2a2a 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 4px;", } }
-                                else if let Some((_, route)) = titan_quote() { div { style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Titan".to_string()) { "#10b981" } else { "#e2e8f0" }), {format!("{:.6} {}", from_lamports(route.out_amount, &buying_token(), &tokens_clone_price), buying_token())} } }
+                                else if let Some((_, route)) = titan_quote() {
+                                    div {
+                                        style: format!("color: {}; font-size: 14px; font-weight: 700;", if selected_provider() == Some("Titan".to_string()) { "#10b981" } else { "#e2e8f0" }),
+                                        {format!("{:.6} {}", from_lamports_with_meta(route.out_amount, &buying_token(), &tokens_clone_price, buying_token_meta().as_ref()), buying_token())}
+                                    }
+                                }
                                 else { div { style: "color: #64748b; font-size: 12px;", "..." } }
                             }
                         }

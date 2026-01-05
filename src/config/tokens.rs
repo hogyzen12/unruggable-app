@@ -13,12 +13,27 @@ pub struct VerifiedToken {
     pub tags: Vec<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TokenCatalogEntry {
+    #[serde(rename = "id")]
+    pub address: String,
+    pub name: String,
+    pub symbol: String,
+    #[serde(rename = "icon")]
+    pub logo_uri: Option<String>,
+    pub decimals: u8,
+}
+
 // Embed the local JSON file at compile time (mobile-safe)
 static TOKENS_JSON: &str = include_str!("../../assets/tokens.json");
 
 // Parse JSON only once when first accessed - mobile-friendly!
 static VERIFIED_TOKENS: LazyLock<HashMap<String, VerifiedToken>> = LazyLock::new(|| {
     parse_tokens_from_json(TOKENS_JSON)
+});
+
+static TOKEN_CATALOG: LazyLock<Vec<TokenCatalogEntry>> = LazyLock::new(|| {
+    parse_catalog_from_json(TOKENS_JSON)
 });
 
 /// Parse tokens from JSON string (used by both local and remote loading)
@@ -69,9 +84,58 @@ fn parse_tokens_from_json(json_str: &str) -> HashMap<String, VerifiedToken> {
     }
 }
 
+fn parse_catalog_from_json(json_str: &str) -> Vec<TokenCatalogEntry> {
+    let fallback = vec![
+        TokenCatalogEntry {
+            address: "So11111111111111111111111111111111111111112".to_string(),
+            name: "Wrapped SOL".to_string(),
+            symbol: "SOL".to_string(),
+            logo_uri: Some("https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/So11111111111111111111111111111111111111112/logo.png".to_string()),
+            decimals: 9,
+        },
+        TokenCatalogEntry {
+            address: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
+            name: "USD Coin".to_string(),
+            symbol: "USDC".to_string(),
+            logo_uri: Some("https://raw.githubusercontent.com/solana-labs/token-list/main/assets/mainnet/EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v/logo.png".to_string()),
+            decimals: 6,
+        },
+    ];
+
+    match serde_json::from_str::<Vec<TokenCatalogEntry>>(json_str) {
+        Ok(tokens) => {
+            println!("Successfully loaded {} token catalog entries from JSON", tokens.len());
+            tokens
+        }
+        Err(e) => {
+            eprintln!("Failed to parse token catalog JSON: {}", e);
+            if let Ok(values) = serde_json::from_str::<Vec<serde_json::Value>>(json_str) {
+                let mut tokens = Vec::new();
+                for value in values {
+                    match serde_json::from_value::<TokenCatalogEntry>(value) {
+                        Ok(token) => tokens.push(token),
+                        Err(err) => {
+                            eprintln!("Skipping token catalog entry: {}", err);
+                        }
+                    }
+                }
+                if !tokens.is_empty() {
+                    println!("Recovered {} token catalog entries from JSON", tokens.len());
+                    return tokens;
+                }
+            }
+            fallback
+        }
+    }
+}
+
 /// Get reference to the verified tokens HashMap (mobile-safe)
 pub fn get_verified_tokens() -> &'static HashMap<String, VerifiedToken> {
     &VERIFIED_TOKENS
+}
+
+pub fn get_token_catalog() -> &'static Vec<TokenCatalogEntry> {
+    &TOKEN_CATALOG
 }
 
 /// Get a cloned copy of the verified tokens HashMap

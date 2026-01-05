@@ -593,6 +593,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "bonk-staking-rewards-v3"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3db4a6fb91455908049f6709fc41fd190857fe5182fb5fa608847938dbdca4ec"
+dependencies = [
+ "base64 0.22.1",
+ "bincode",
+ "borsh",
+ "bs58",
+ "log",
+ "serde",
+ "serde_json",
+ "solana-client",
+ "solana-commitment-config",
+ "solana-sdk",
+ "solana-sdk-ids 3.1.0",
+ "spl-associated-token-account",
+ "spl-token",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
 name = "borsh"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -734,6 +757,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd1ddba47aba30b6a889298ad0109c3b8dcb0e8fc993b459daa7067d46f865e0"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "carrot-sdk-v3"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a23eea1a25a26d3879442cf58856feaf8a20c0275376e29d4247121d43e40ddb"
+dependencies = [
+ "anyhow",
+ "borsh",
+ "solana-client",
+ "solana-commitment-config",
+ "solana-sdk",
+ "solana-sdk-ids 3.1.0",
+ "spl-associated-token-account",
+ "spl-token",
+ "spl-token-2022-interface",
+ "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -8666,6 +8707,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "squads-v4-client-v3"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8de57f9b37b7bd11a976ded20d22333a3908552ef74639260331eb7eda0f64eb"
+dependencies = [
+ "borsh",
+ "serde",
+ "solana-client",
+ "solana-commitment-config",
+ "solana-program",
+ "solana-sdk",
+ "solana-sdk-ids 3.1.0",
+ "thiserror 2.0.17",
+]
+
+[[package]]
 name = "stable_deref_trait"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9628,8 +9685,10 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bincode",
+ "bonk-staking-rewards-v3",
  "borsh",
  "bs58",
+ "carrot-sdk-v3",
  "chrono",
  "dioxus",
  "dioxus-desktop",
@@ -9668,6 +9727,7 @@ dependencies = [
  "solana-winternitz",
  "spl-associated-token-account",
  "spl-token",
+ "squads-v4-client-v3",
  "tokio",
  "tokio-serial",
  "tokio-tungstenite 0.20.1",
