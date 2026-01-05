@@ -4,8 +4,8 @@ use solana_sdk::{
     transaction::VersionedTransaction,
     message::VersionedMessage,
     instruction::Instruction,
-    system_instruction,
 };
+use solana_system_interface::instruction as system_instruction;
 use std::error::Error as StdError;
 use std::str::FromStr;
 use serde_json::{json, Value};

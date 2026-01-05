@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
 
 // Re-export core Squads types
-pub use squads_v4_client::types::{Member, Permissions, ProposalStatus};
-pub use squads_v4_client::accounts::{Multisig, Proposal};
+pub use squads_v4_client_v3::types::{Member, Permissions, ProposalStatus};
+pub use squads_v4_client_v3::accounts::{Multisig, Proposal};
 
 // API Response types for Squads V4 API
 #[derive(Debug, Clone, Deserialize)]

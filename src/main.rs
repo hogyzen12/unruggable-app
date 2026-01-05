@@ -21,9 +21,9 @@ mod config;
 mod token_utils;
 mod privacycash;
 // Temporarily disabled for Solana 3.x testing (these depend on Solana 2.x SDKs)
-// mod squads;
-// mod carrot;
-// mod bonk_staking;
+mod squads;
+mod carrot;
+mod bonk_staking;
 mod titan;
 mod pin;
 mod timeout;

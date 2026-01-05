@@ -12,6 +12,7 @@ pub struct StakeResult {
 /// Represents an active stake position
 #[derive(Debug, Clone)]
 pub struct StakePosition {
+    pub receipt_address: String,
     pub amount: f64,
     pub duration_days: u64,
     pub unlock_time: String,

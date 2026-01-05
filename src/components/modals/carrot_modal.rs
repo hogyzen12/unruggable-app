@@ -577,6 +577,8 @@ pub fn CarrotModal(
                                         let asset_mint = get_asset_mint();
                                         
                                         spawn(async move {
+                                            let is_hardware = hw_clone.is_some();
+
                                             // Create signer
                                             let signer: Box<dyn TransactionSigner> = if let Some(hw) = hw_clone {
                                                 show_hardware_approval.set(true);
@@ -600,7 +602,6 @@ pub fn CarrotModal(
                                             
                                             // Create client
                                             let client = CarrotClient::new(rpc_clone.as_deref());
-                                            let is_hardware = hw_clone.is_some();
                                             
                                             // Execute operation
                                             let result = if operation == "deposit" {

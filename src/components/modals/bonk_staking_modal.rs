@@ -90,6 +90,8 @@ pub fn BonkStakingModal(
     let mut active_stakes = use_signal(|| Vec::<StakePosition>::new());
     let mut fetching_balance = use_signal(|| false);
     let mut fetching_stakes = use_signal(|| false);
+    let mut balance_loaded = use_signal(|| false);
+    let mut stakes_loaded = use_signal(|| false);
     
     // Success modal
     let mut show_success_modal = use_signal(|| false);
@@ -101,7 +103,7 @@ pub fn BonkStakingModal(
     let custom_rpc_for_effect = custom_rpc.clone();
     use_effect(move || {
         if let Some(address) = wallet_address() {
-            if !fetching_balance() && bonk_balance() == 0.0 {
+            if !fetching_balance() && !balance_loaded() {
                 fetching_balance.set(true);
                 
                 let rpc_url = custom_rpc_for_effect.clone();
@@ -120,6 +122,7 @@ pub fn BonkStakingModal(
                     }
                     
                     fetching_balance.set(false);
+                    balance_loaded.set(true);
                 });
             }
         }
@@ -129,7 +132,7 @@ pub fn BonkStakingModal(
     let custom_rpc_for_stakes = custom_rpc.clone();
     use_effect(move || {
         if let Some(address) = wallet_address() {
-            if active_stakes().is_empty() && !fetching_stakes() {
+            if !fetching_stakes() && !stakes_loaded() {
                 fetching_stakes.set(true);
                 
                 let rpc_url = custom_rpc_for_stakes.clone();
@@ -142,6 +145,7 @@ pub fn BonkStakingModal(
                     }
                     
                     fetching_stakes.set(false);
+                    stakes_loaded.set(true);
                 });
             }
         }
@@ -259,31 +263,16 @@ pub fn BonkStakingModal(
                             div {
                                 // Summary cards
                                 div {
-                                    style: "display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;",
+                                    style: "display: grid; grid-template-columns: 1fr; gap: 10px; margin-bottom: 12px;",
                                     div {
-                                        style: "background: #1a1a1a; border: 1.5px solid #4a4a4a; border-radius: 12px; padding: 16px;",
+                                        style: "background: #141414; border: 1px solid #353535; border-radius: 12px; padding: 12px;",
                                         div { style: "font-size: 11px; color: #9ca3af; margin-bottom: 4px;", "Total Locked" }
-                                        div { style: "font-size: 20px; font-weight: 600; color: white;", "{total_locked:.2} BONK" }
+                                        div { style: "font-size: 18px; font-weight: 600; color: white;", "{total_locked:.2} BONK" }
                                     }
                                     div {
-                                        style: "background: #1a1a1a; border: 1.5px solid #4a4a4a; border-radius: 12px; padding: 16px;",
+                                        style: "background: #141414; border: 1px solid #353535; border-radius: 12px; padding: 12px;",
                                         div { style: "font-size: 11px; color: #9ca3af; margin-bottom: 4px;", "Claimable" }
-                                        div { style: "font-size: 20px; font-weight: 600; color: white;", "{total_claimable:.2} BONK" }
-                                    }
-                                }
-                                
-                                // Claim all button
-                                if total_claimable > 0.0 {
-                                    button {
-                                        class: "button-standard primary",
-                                        style: "width: 100%; margin-bottom: 20px; background: white; color: #1a1a1a; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; border-radius: 12px; padding: 14px 24px;",
-                                        disabled: processing(),
-                                        onclick: move |_| {
-                                            processing.set(true);
-                                            error_message.set(Some("Claim all functionality coming soon".to_string()));
-                                            processing.set(false);
-                                        },
-                                        if processing() { "Claiming..." } else { "Claim All Unlocked" }
+                                        div { style: "font-size: 18px; font-weight: 600; color: white;", "{total_claimable:.2} BONK" }
                                     }
                                 }
                                 
@@ -299,29 +288,22 @@ pub fn BonkStakingModal(
                                     } else {
                                         for stake in active_stakes() {
                                             div {
-                                                key: "{stake.unlock_time}",
-                                                style: "background: #1a1a1a; border: 1.5px solid #4a4a4a; border-radius: 12px; padding: 16px; margin-bottom: 12px;",
+                                                key: "{stake.receipt_address}",
+                                                style: "background: #141414; border: 1px solid #353535; border-radius: 12px; padding: 12px; margin-bottom: 10px;",
                                                 div {
-                                                    style: "display: flex; justify-content: space-between; align-items: start; margin-bottom: 12px;",
+                                                    style: "display: flex; justify-content: space-between; align-items: center;",
                                                     div {
-                                                        div { style: "font-size: 18px; font-weight: 600; color: white;", "{stake.amount:.2} BONK" }
-                                                        div { style: "font-size: 11px; color: #9ca3af; margin-top: 2px;", "{stake.duration_days} days" }
+                                                        div { style: "font-size: 16px; font-weight: 600; color: white;", "{stake.amount:.2} BONK" }
+                                                        div { style: "font-size: 11px; color: #9ca3af; margin-top: 2px;", "{stake.duration_days} days • {stake.multiplier}x" }
                                                     }
                                                     div {
-                                                        style: if stake.is_unlocked { "background: #3a3a3a; color: white; padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: 600; border: 1px solid #5a5a5a;" } else { "background: #2a2a2a; padding: 6px 12px; border-radius: 8px; font-size: 11px; border: 1px solid #4a4a4a;" },
+                                                        style: if stake.is_unlocked { "background: #2f2f2f; color: white; padding: 4px 10px; border-radius: 999px; font-size: 10px; font-weight: 600; border: 1px solid #4a4a4a;" } else { "background: #1f1f1f; color: #d1d5db; padding: 4px 10px; border-radius: 999px; font-size: 10px; border: 1px solid #353535;" },
                                                         if stake.is_unlocked { "Unlocked" } else { "Locked" }
                                                     }
                                                 }
                                                 div {
-                                                    style: "display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px;",
-                                                    div {
-                                                        div { style: "color: #9ca3af; margin-bottom: 2px;", "Multiplier" }
-                                                        div { style: "font-weight: 600; color: white;", "{stake.multiplier}x" }
-                                                    }
-                                                    div {
-                                                        div { style: "color: #9ca3af; margin-bottom: 2px;", "Unlock Time" }
-                                                        div { style: "font-weight: 600; color: white;", "{stake.unlock_time}" }
-                                                    }
+                                                    style: "margin-top: 8px; font-size: 11px; color: #9ca3af;",
+                                                    "Unlocks: {stake.unlock_time}"
                                                 }
                                             }
                                         }
@@ -449,6 +431,8 @@ pub fn BonkStakingModal(
                                             let rpc_clone = rpc_c.clone();
                                             
                                             spawn(async move {
+                                                let is_hardware = hw_clone.is_some();
+
                                                 let signer: Box<dyn TransactionSigner> = if let Some(hw) = hw_clone {
                                                     Box::new(crate::signing::hardware::HardwareSigner::from_wallet(hw))
                                                 } else if let Some(w) = wallet_clone {
@@ -467,8 +451,7 @@ pub fn BonkStakingModal(
                                                 };
                                                 
                                                 let client = BonkStakingClient::new(rpc_clone.as_deref());
-                                                let amount_lamports = (amt_f64 * 1_000_000_000.0) as u64;
-                                                let is_hardware = hw_clone.is_some();
+                                                let amount_lamports = (amt_f64 * 100_000.0) as u64;
                                                 
                                                 match client.stake_bonk_with_signer(&*signer, amount_lamports, duration, is_hardware).await {
                                                     Ok(result) => {

@@ -1,13 +1,15 @@
 // src/bonk_staking/client.rs
 //! BONK staking client implementation
 
+use borsh::BorshDeserialize;
+use chrono::{NaiveDateTime, Utc};
 use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature as SolanaSignature,
     transaction::VersionedTransaction,
     message::VersionedMessage,
-    system_instruction,
 };
+use solana_system_interface::instruction as system_instruction;
 use std::error::Error as StdError;
 use std::str::FromStr;
 use serde_json::{json, Value};
@@ -18,6 +20,86 @@ use crate::bonk_staking::types::StakeResult;
 use crate::storage::get_current_jito_settings;
 
 type Result<T> = std::result::Result<T, Box<dyn StdError>>;
+
+const BONK_DECIMALS: f64 = 100_000.0;
+
+#[derive(BorshDeserialize, Debug, Clone)]
+struct StakeDepositReceipt {
+    pub payer: Pubkey,
+    pub stake_pool: Pubkey,
+    pub lock_up_duration: u64,
+    pub deposit_timestamp: i64,
+    pub stake_mint_claimed: u64,
+    pub vault_claimed: u64,
+    pub effective_stake: u128,
+    pub effective_stake_pda_bump: u8,
+}
+
+fn deserialize_receipt(data: &[u8]) -> Option<StakeDepositReceipt> {
+    let mut cursor = data;
+    StakeDepositReceipt::deserialize(&mut cursor).ok()
+}
+
+fn read_u64(data: &[u8], offset: usize) -> Option<u64> {
+    if offset + 8 > data.len() {
+        return None;
+    }
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&data[offset..offset + 8]);
+    Some(u64::from_le_bytes(buf))
+}
+
+fn read_i64(data: &[u8], offset: usize) -> Option<i64> {
+    if offset + 8 > data.len() {
+        return None;
+    }
+    let mut buf = [0u8; 8];
+    buf.copy_from_slice(&data[offset..offset + 8]);
+    Some(i64::from_le_bytes(buf))
+}
+
+fn read_u128(data: &[u8], offset: usize) -> Option<u128> {
+    if offset + 16 > data.len() {
+        return None;
+    }
+    let mut buf = [0u8; 16];
+    buf.copy_from_slice(&data[offset..offset + 16]);
+    Some(u128::from_le_bytes(buf))
+}
+
+fn find_pubkey_offset(data: &[u8], target: &Pubkey) -> Option<usize> {
+    let needle = target.to_bytes();
+    data.windows(needle.len())
+        .position(|window| window == needle.as_slice())
+}
+
+fn decode_receipt_with_offsets(
+    data: &[u8],
+    owner: &Pubkey,
+    stake_pool: &Pubkey,
+) -> Option<StakeDepositReceipt> {
+    let owner_offset = find_pubkey_offset(data, owner)?;
+    let stake_pool_offset = find_pubkey_offset(data, stake_pool)?;
+
+    let base = if owner_offset + 32 == stake_pool_offset {
+        owner_offset + 64
+    } else if stake_pool_offset + 32 == owner_offset {
+        stake_pool_offset + 64
+    } else {
+        return None;
+    };
+
+    Some(StakeDepositReceipt {
+        payer: *owner,
+        stake_pool: *stake_pool,
+        lock_up_duration: read_u64(data, base)?,
+        deposit_timestamp: read_i64(data, base + 8)?,
+        stake_mint_claimed: read_u64(data, base + 16)?,
+        vault_claimed: read_u64(data, base + 24)?,
+        effective_stake: read_u128(data, base + 32)?,
+        effective_stake_pda_bump: data.get(base + 48).copied().unwrap_or(0),
+    })
+}
 
 /// Wrapper around bonk-staking-rewards for app integration
 pub struct BonkStakingClient {
@@ -39,7 +121,7 @@ impl BonkStakingClient {
 
     /// Get BONK balance for a wallet (returns as f64 for UI display)
     pub async fn get_bonk_balance(&self, wallet_pubkey: &Pubkey) -> Result<f64> {
-        let bonk_mint = bonk_staking_rewards::BONK_MINT;
+        let bonk_mint = bonk_staking_rewards_v3::BONK_MINT;
         let ata = spl_associated_token_account::get_associated_token_address(
             wallet_pubkey,
             &bonk_mint,
@@ -62,7 +144,7 @@ impl BonkStakingClient {
 
         if let Some(amount_str) = json["result"]["value"]["amount"].as_str() {
             let lamports = amount_str.parse::<u64>()?;
-            Ok(lamports as f64 / 1_000_000_000.0) // Convert to BONK
+            Ok(lamports as f64 / BONK_DECIMALS) // Convert to BONK (5 decimals)
         } else {
             Ok(0.0)
         }
@@ -97,7 +179,7 @@ impl BonkStakingClient {
 
         // Check BONK balance
         let bonk_balance = self.get_bonk_balance(&user_pubkey).await?;
-        let amount_bonk = amount as f64 / 1_000_000_000.0; // Convert lamports to BONK
+        let amount_bonk = amount as f64 / BONK_DECIMALS; // Convert lamports to BONK (5 decimals)
         if bonk_balance < amount_bonk {
             return Err(format!("Insufficient BONK balance: have {:.2}, need {:.2}", bonk_balance, amount_bonk).into());
         }
@@ -106,20 +188,20 @@ impl BonkStakingClient {
         let mut instructions = Vec::new();
 
         // Add compute budget
-        let compute_budget_ix = bonk_staking_rewards::instructions::build_compute_budget_price_instruction(5045);
+        let compute_budget_ix = bonk_staking_rewards_v3::instructions::build_compute_budget_price_instruction(5045);
         instructions.push(compute_budget_ix);
 
         // Create stake token ATA if needed
         let create_stake_ata_ix = spl_associated_token_account::instruction::create_associated_token_account_idempotent(
             &user_pubkey,
             &user_pubkey,
-            &bonk_staking_rewards::BONK_STAKE_MINT,
+            &bonk_staking_rewards_v3::BONK_STAKE_MINT,
             &spl_token::id(),
         );
         instructions.push(create_stake_ata_ix);
 
         // Build stake instruction
-        let stake_ix = bonk_staking_rewards::instructions::build_stake_instruction(
+        let stake_ix = bonk_staking_rewards_v3::instructions::build_stake_instruction(
             &user_pubkey,
             amount,
             lock_duration_seconds,
@@ -175,9 +257,9 @@ impl BonkStakingClient {
     /// Find the next available nonce for a user
     async fn find_available_nonce(&self, user: &Pubkey) -> Result<u32> {
         for nonce in 0..100 {
-            let (receipt_pda, _) = bonk_staking_rewards::pda::derive_stake_deposit_receipt(
+            let (receipt_pda, _) = bonk_staking_rewards_v3::pda::derive_stake_deposit_receipt(
                 user,
-                &bonk_staking_rewards::BONK_STAKE_POOL,
+                &bonk_staking_rewards_v3::BONK_STAKE_POOL,
                 nonce,
             );
 
@@ -285,10 +367,114 @@ impl BonkStakingClient {
     }
 
     /// Get user's active stakes (placeholder - real implementation would query blockchain)
-    pub async fn get_user_stakes(&self, _wallet_address: &str) -> Result<Vec<crate::bonk_staking::types::StakePosition>> {
-        // TODO: Implement actual stake fetching from blockchain
-        // For now, return empty vec - user will need to stake to see positions
-        Ok(Vec::new())
+    pub async fn get_user_stakes(&self, wallet_address: &str) -> Result<Vec<crate::bonk_staking::types::StakePosition>> {
+        let owner = Pubkey::from_str(wallet_address)?;
+        let mut stakes = Vec::new();
+        let mut scanned = 0;
+        let mut found_accounts = 0;
+        let mut decoded = 0;
+
+        for nonce in 0..100 {
+            let (receipt_pda, _) = bonk_staking_rewards_v3::pda::derive_stake_deposit_receipt(
+                &owner,
+                &bonk_staking_rewards_v3::BONK_STAKE_POOL,
+                nonce,
+            );
+            scanned += 1;
+
+            let data = match self.get_account(&receipt_pda).await {
+                Ok(data) => data,
+                Err(_) => continue,
+            };
+            found_accounts += 1;
+            println!(
+                "[BONK] Found receipt account: {} (nonce {}, {} bytes)",
+                receipt_pda,
+                nonce,
+                data.len()
+            );
+
+            if data.len() <= 8 {
+                println!("[BONK] Receipt data too short for decoding: {}", receipt_pda);
+                continue;
+            }
+
+            let owner_offset = find_pubkey_offset(&data, &owner);
+            let pool_offset = find_pubkey_offset(&data, &bonk_staking_rewards_v3::BONK_STAKE_POOL);
+            println!(
+                "[BONK] Receipt offsets: pda={} owner_offset={:?} stake_pool_offset={:?}",
+                receipt_pda, owner_offset, pool_offset
+            );
+
+            let receipt = match decode_receipt_with_offsets(&data, &owner, &bonk_staking_rewards_v3::BONK_STAKE_POOL) {
+                Some(receipt) => receipt,
+                None => match deserialize_receipt(&data[8..]) {
+                    Some(receipt) => receipt,
+                    None => {
+                        println!(
+                            "[BONK] Failed to decode receipt for {}",
+                            receipt_pda
+                        );
+                        continue;
+                    }
+                },
+            };
+            decoded += 1;
+
+            let amount = receipt.vault_claimed as f64 / BONK_DECIMALS;
+            let duration_seconds = if receipt.lock_up_duration < 10_000 {
+                receipt.lock_up_duration * 86_400
+            } else {
+                receipt.lock_up_duration
+            };
+            let duration_days = duration_seconds / 86_400;
+            let deposit_ts = if receipt.deposit_timestamp > 1_000_000_000_000 {
+                receipt.deposit_timestamp / 1000
+            } else {
+                receipt.deposit_timestamp
+            };
+            let unlock_ts = deposit_ts + duration_seconds as i64;
+            let unlock_time = NaiveDateTime::from_timestamp_opt(unlock_ts, 0)
+                .map(|dt| dt.format("%Y-%m-%d").to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let is_unlocked = Utc::now().timestamp() >= unlock_ts;
+            let multiplier = match duration_seconds {
+                d if d <= 2_592_000 => 1.0,
+                d if d <= 7_776_000 => 1.5,
+                d if d <= 15_552_000 => 2.0,
+                _ => 3.2,
+            };
+
+            println!(
+                "[BONK] Receipt decoded: pda={} amount={} lock_up_duration={} duration_seconds={} deposit_ts={} unlock_ts={} unlocked={}",
+                receipt_pda,
+                amount,
+                receipt.lock_up_duration,
+                duration_seconds,
+                deposit_ts,
+                unlock_ts,
+                is_unlocked
+            );
+
+            stakes.push(crate::bonk_staking::types::StakePosition {
+                receipt_address: receipt_pda.to_string(),
+                amount,
+                duration_days,
+                unlock_time,
+                multiplier,
+                is_unlocked,
+            });
+        }
+
+        println!(
+            "[BONK] Stake scan summary: scanned={}, found_accounts={}, decoded={}, positions={}",
+            scanned,
+            found_accounts,
+            decoded,
+            stakes.len()
+        );
+
+        Ok(stakes)
     }
 
     /// Alias for stake_with_signer to match modal's expected method name

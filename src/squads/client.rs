@@ -9,7 +9,7 @@ use solana_sdk::{
     transaction::VersionedTransaction,
     message::VersionedMessage,
 };
-use squads_v4_client::{
+use squads_v4_client_v3::{
     accounts::{Multisig, Proposal},
     instructions::{self, ProposalVoteArgs},
     pda,
@@ -375,11 +375,21 @@ impl SquadsClient {
         println!("[Execute] Transaction data size: {} bytes", transaction_data.len());
         
         println!("[Execute] Deserializing VaultTransaction...");
-        let vault_tx = squads_v4_client::accounts::VaultTransaction::try_from_slice(&transaction_data)?;
+        let vault_tx = squads_v4_client_v3::accounts::VaultTransaction::try_from_slice(&transaction_data)?;
         println!("[Execute] VaultTransaction deserialized successfully");
         println!("[Execute] Vault index: {}", vault_tx.vault_index);
         println!("[Execute] Account keys count: {}", vault_tx.message.account_keys.len());
         println!("[Execute] Instructions count: {}", vault_tx.message.instructions.len());
+        println!(
+            "[Execute] Message header: num_signers={}, num_writable_signers={}, num_writable_non_signers={}",
+            vault_tx.message.num_signers,
+            vault_tx.message.num_writable_signers,
+            vault_tx.message.num_writable_non_signers
+        );
+        println!(
+            "[Execute] Address table lookups: {}",
+            vault_tx.message.address_table_lookups.len()
+        );
 
         // Build the remaining accounts from the transaction message
         println!("[Execute] Building remaining accounts...");
@@ -392,15 +402,23 @@ impl SquadsClient {
         // NOTE: The transaction message already includes the vault PDA and all other required accounts
         for (i, account_key) in vault_tx.message.account_keys.iter().enumerate() {
             let is_writable = vault_tx.message.is_static_writable_index(i);
+            let is_signer = i < vault_tx.message.num_signers as usize;
             
-            println!("[Execute] Account {}: {} (writable: {})", i, account_key, is_writable);
+            println!(
+                "[Execute] Account {}: {} (writable: {}, signer: {})",
+                i, account_key, is_writable, is_signer
+            );
             
-            // Always set is_signer to false for remaining accounts
-            // The vault PDA and other accounts will sign within the program, not in this transaction
             if is_writable {
-                remaining_accounts.push(solana_sdk::instruction::AccountMeta::new(*account_key, false));
+                remaining_accounts.push(solana_sdk::instruction::AccountMeta::new(
+                    *account_key,
+                    is_signer,
+                ));
             } else {
-                remaining_accounts.push(solana_sdk::instruction::AccountMeta::new_readonly(*account_key, false));
+                remaining_accounts.push(solana_sdk::instruction::AccountMeta::new_readonly(
+                    *account_key,
+                    is_signer,
+                ));
             }
         }
         println!("[Execute] Total remaining accounts: {}", remaining_accounts.len());
