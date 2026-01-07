@@ -164,4 +164,8 @@ impl TransactionSigner for HardwareSigner {
     async fn is_available(&self) -> bool {
         self.wallet.is_connected().await
     }
+
+    fn is_hardware(&self) -> bool {
+        true
+    }
 }

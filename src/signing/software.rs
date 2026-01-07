@@ -33,4 +33,8 @@ impl TransactionSigner for SoftwareSigner {
     async fn is_available(&self) -> bool {
         true // Software wallet is always available
     }
+
+    fn is_hardware(&self) -> bool {
+        false
+    }
 }

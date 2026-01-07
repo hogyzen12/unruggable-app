@@ -9,6 +9,10 @@ use solana_sdk::{
     signature::Signature,
     transaction::VersionedTransaction,
 };
+use solana_offchain_message::OffchainMessage;
+use once_cell::sync::Lazy;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, Notify};
 
 use crate::signing::TransactionSigner;
 
@@ -16,6 +20,31 @@ const PRIVACY_CASH_API_URL: &str = "https://api3.privacycash.org";
 const SIGN_MESSAGE: &str = "Privacy Money account sign in";
 const PRIVACY_WASM_PATH: &str = "/assets/transaction2.wasm";
 const PRIVACY_ZKEY_PATH: &str = "/assets/transaction2.zkey";
+const AUTH_SIGNATURE_TTL_SECS: u64 = 60;
+
+struct AuthSignatureState {
+    pubkey: Option<String>,
+    signature: Option<String>,
+    expires_at: Option<Instant>,
+    in_flight: bool,
+    is_hardware: bool,
+}
+
+struct AuthSignatureCache {
+    state: Mutex<AuthSignatureState>,
+    notify: Notify,
+}
+
+static AUTH_SIGNATURE_CACHE: Lazy<AuthSignatureCache> = Lazy::new(|| AuthSignatureCache {
+    state: Mutex::new(AuthSignatureState {
+        pubkey: None,
+        signature: None,
+        expires_at: None,
+        in_flight: false,
+        is_hardware: false,
+    }),
+    notify: Notify::new(),
+});
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct DepositRequest {
@@ -93,8 +122,63 @@ pub struct WithdrawRequest {
 pub async fn sign_auth_message(
     signer: &dyn TransactionSigner,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    let signature_bytes = signer.sign_message(SIGN_MESSAGE.as_bytes()).await?;
-    Ok(bs58::encode(signature_bytes).into_string())
+    let pubkey = signer.get_public_key().await?;
+    let is_hardware = signer.is_hardware();
+    loop {
+        {
+            let mut state = AUTH_SIGNATURE_CACHE.state.lock().await;
+            let valid = state.pubkey.as_ref() == Some(&pubkey)
+                && state.is_hardware == is_hardware
+                && state
+                    .expires_at
+                    .map(|expiry| expiry > Instant::now())
+                    .unwrap_or(false);
+            if valid {
+                if let Some(signature) = state.signature.clone() {
+                    return Ok(signature);
+                }
+            }
+
+            if state.in_flight {
+                let notified = AUTH_SIGNATURE_CACHE.notify.notified();
+                drop(state);
+                notified.await;
+                continue;
+            }
+
+            state.in_flight = true;
+        }
+
+        let message_bytes = if is_hardware {
+            let offchain = OffchainMessage::new(0, SIGN_MESSAGE.as_bytes())
+                .map_err(|e| format!("Invalid offchain message: {e}"))?;
+            offchain
+                .serialize()
+                .map_err(|e| format!("Failed to serialize offchain message: {e}"))?
+        } else {
+            SIGN_MESSAGE.as_bytes().to_vec()
+        };
+
+        let signature_bytes = match signer.sign_message(&message_bytes).await {
+            Ok(bytes) => bytes,
+            Err(err) => {
+                let mut state = AUTH_SIGNATURE_CACHE.state.lock().await;
+                state.in_flight = false;
+                AUTH_SIGNATURE_CACHE.notify.notify_waiters();
+                return Err(err);
+            }
+        };
+        let signature = bs58::encode(signature_bytes).into_string();
+
+        let mut state = AUTH_SIGNATURE_CACHE.state.lock().await;
+        state.pubkey = Some(pubkey.clone());
+        state.signature = Some(signature.clone());
+        state.expires_at = Some(Instant::now() + Duration::from_secs(AUTH_SIGNATURE_TTL_SECS));
+        state.in_flight = false;
+        state.is_hardware = is_hardware;
+        AUTH_SIGNATURE_CACHE.notify.notify_waiters();
+        return Ok(signature);
+    }
 }
 
 pub async fn build_deposit_tx(

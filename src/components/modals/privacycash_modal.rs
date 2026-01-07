@@ -3,8 +3,11 @@ use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use crate::privacycash;
+use crate::hardware::HardwareWallet;
+use crate::signing::hardware::HardwareSigner;
 use crate::signing::{SignerType, TransactionSigner};
 use crate::transaction::TransactionClient;
 use crate::wallet::{Wallet, WalletInfo};
@@ -46,6 +49,7 @@ const PRIVACY_TOKENS: &[PrivacyToken] = &[
 #[component]
 pub fn PrivacyCashModal(
     wallet: Option<WalletInfo>,
+    hardware_wallet: Option<Arc<HardwareWallet>>,
     custom_rpc: Option<String>,
     onclose: EventHandler<()>,
 ) -> Element {
@@ -57,43 +61,69 @@ pub fn PrivacyCashModal(
     let mut private_balance = use_signal(|| None as Option<u64>);
     let mut balance_loading = use_signal(|| false);
     let mut selected_token = use_signal(|| 0usize);
+    let mut auth_signature = use_signal(|| None as Option<String>);
+    let mut auth_pubkey = use_signal(|| None as Option<String>);
 
     let wallet_info = wallet.clone();
+    let hw_wallet_for_refresh = hardware_wallet.clone();
     let rpc_url = custom_rpc.clone();
 
     let on_refresh_balance = move |_| {
         let wallet_info = wallet_info.clone();
+        let hw_wallet = hw_wallet_for_refresh.clone();
         let rpc_url = rpc_url.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
         let token_index = selected_token();
         let token = &PRIVACY_TOKENS[token_index];
+        let mut auth_signature = auth_signature.clone();
+        let mut auth_pubkey = auth_pubkey.clone();
         error.set(None);
         status.set(None);
         balance_loading.set(true);
 
         spawn(async move {
-            let Some(wallet_info) = wallet_info else {
-                error.set(Some("No wallet selected".to_string()));
-                balance_loading.set(false);
-                return;
-            };
+            let signer = if let Some(hw) = hw_wallet {
+                SignerType::Hardware(HardwareSigner::from_wallet(hw))
+            } else {
+                let Some(wallet_info) = wallet_info else {
+                    error.set(Some("No wallet selected".to_string()));
+                    balance_loading.set(false);
+                    return;
+                };
 
-            let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
-                error.set(Some("Failed to load wallet".to_string()));
-                balance_loading.set(false);
-                return;
-            };
+                let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                    error.set(Some("Failed to load wallet".to_string()));
+                    balance_loading.set(false);
+                    return;
+                };
 
-            let signer = SignerType::from_wallet(wallet);
+                SignerType::from_wallet(wallet)
+            };
             let Ok(authority) = signer.get_public_key().await else {
                 error.set(Some("Failed to get public key".to_string()));
                 balance_loading.set(false);
                 return;
             };
 
-            let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
-                error.set(Some("Failed to sign auth message".to_string()));
-                balance_loading.set(false);
-                return;
+            let signature = if auth_pubkey() == Some(authority.clone()) {
+                auth_signature().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let signature = if !signature.is_empty() {
+                signature
+            } else {
+                match privacycash::sign_auth_message(&signer).await {
+                    Ok(signature) => {
+                        auth_signature.set(Some(signature.clone()));
+                        auth_pubkey.set(Some(authority.clone()));
+                        signature
+                    }
+                    Err(err) => {
+                        error.set(Some(format!("Failed to sign auth message: {err}")));
+                        balance_loading.set(false);
+                        return;
+                    }
+                }
             };
 
             println!(
@@ -129,29 +159,21 @@ pub fn PrivacyCashModal(
 
     let wallet_for_deposit = wallet.clone();
     let rpc_for_deposit = custom_rpc.clone();
+    let hw_wallet_for_deposit = hardware_wallet.clone();
     let on_deposit = move |_| {
         let wallet_info = wallet_for_deposit.clone();
+        let hw_wallet = hw_wallet_for_deposit.clone();
         let rpc_url = rpc_for_deposit.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
         let amount_value = amount();
         let token_index = selected_token();
         let token = &PRIVACY_TOKENS[token_index];
+        let mut auth_signature = auth_signature.clone();
+        let mut auth_pubkey = auth_pubkey.clone();
         error.set(None);
         status.set(None);
         busy.set(true);
 
         spawn(async move {
-            let Some(wallet_info) = wallet_info else {
-                error.set(Some("No wallet selected".to_string()));
-                busy.set(false);
-                return;
-            };
-
-            let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
-                error.set(Some("Failed to load wallet".to_string()));
-                busy.set(false);
-                return;
-            };
-
             let amount_f64 = match amount_value.parse::<f64>() {
                 Ok(value) if value > 0.0 => value,
                 _ => {
@@ -160,18 +182,49 @@ pub fn PrivacyCashModal(
                     return;
                 }
             };
+            let signer = if let Some(hw) = hw_wallet {
+                SignerType::Hardware(HardwareSigner::from_wallet(hw))
+            } else {
+                let Some(wallet_info) = wallet_info else {
+                    error.set(Some("No wallet selected".to_string()));
+                    busy.set(false);
+                    return;
+                };
 
-            let signer = SignerType::from_wallet(wallet);
+                let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                    error.set(Some("Failed to load wallet".to_string()));
+                    busy.set(false);
+                    return;
+                };
+
+                SignerType::from_wallet(wallet)
+            };
             let Ok(authority) = signer.get_public_key().await else {
                 error.set(Some("Failed to get public key".to_string()));
                 busy.set(false);
                 return;
             };
 
-            let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
-                error.set(Some("Failed to sign auth message".to_string()));
-                busy.set(false);
-                return;
+            let signature = if auth_pubkey() == Some(authority.clone()) {
+                auth_signature().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let signature = if !signature.is_empty() {
+                signature
+            } else {
+                match privacycash::sign_auth_message(&signer).await {
+                    Ok(signature) => {
+                        auth_signature.set(Some(signature.clone()));
+                        auth_pubkey.set(Some(authority.clone()));
+                        signature
+                    }
+                    Err(err) => {
+                        error.set(Some(format!("Failed to sign auth message: {err}")));
+                        busy.set(false);
+                        return;
+                    }
+                }
             };
 
             let scale = 10_f64.powi(token.decimals as i32);
@@ -241,31 +294,23 @@ pub fn PrivacyCashModal(
 
     let wallet_for_withdraw = wallet.clone();
     let rpc_for_withdraw = custom_rpc.clone();
+    let hw_wallet_for_withdraw = hardware_wallet.clone();
     let selected_token_for_withdraw = selected_token.clone();
     let on_withdraw: Rc<RefCell<dyn FnMut(Option<String>)>> = Rc::new(RefCell::new(
         move |recipient_override: Option<String>| {
         let wallet_info = wallet_for_withdraw.clone();
+        let hw_wallet = hw_wallet_for_withdraw.clone();
         let amount_value = amount();
         let recipient_value = recipient();
         let rpc_url = rpc_for_withdraw.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
         let token = &PRIVACY_TOKENS[selected_token_for_withdraw()];
+        let mut auth_signature = auth_signature.clone();
+        let mut auth_pubkey = auth_pubkey.clone();
             error.set(None);
             status.set(None);
             busy.set(true);
 
         spawn(async move {
-            let Some(wallet_info) = wallet_info else {
-                error.set(Some("No wallet selected".to_string()));
-                busy.set(false);
-                return;
-            };
-
-            let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
-                error.set(Some("Failed to load wallet".to_string()));
-                busy.set(false);
-                return;
-            };
-
             let amount_f64 = match amount_value.parse::<f64>() {
                 Ok(value) if value > 0.0 => value,
                 _ => {
@@ -274,8 +319,23 @@ pub fn PrivacyCashModal(
                     return;
                 }
             };
+            let signer = if let Some(hw) = hw_wallet {
+                SignerType::Hardware(HardwareSigner::from_wallet(hw))
+            } else {
+                let Some(wallet_info) = wallet_info else {
+                    error.set(Some("No wallet selected".to_string()));
+                    busy.set(false);
+                    return;
+                };
 
-            let signer = SignerType::from_wallet(wallet);
+                let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                    error.set(Some("Failed to load wallet".to_string()));
+                    busy.set(false);
+                    return;
+                };
+
+                SignerType::from_wallet(wallet)
+            };
             let Ok(authority) = signer.get_public_key().await else {
                 error.set(Some("Failed to get public key".to_string()));
                 busy.set(false);
@@ -295,10 +355,26 @@ pub fn PrivacyCashModal(
                 return;
             }
 
-            let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
-                error.set(Some("Failed to sign auth message".to_string()));
-                busy.set(false);
-                return;
+            let signature = if auth_pubkey() == Some(authority.clone()) {
+                auth_signature().unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let signature = if !signature.is_empty() {
+                signature
+            } else {
+                match privacycash::sign_auth_message(&signer).await {
+                    Ok(signature) => {
+                        auth_signature.set(Some(signature.clone()));
+                        auth_pubkey.set(Some(authority.clone()));
+                        signature
+                    }
+                    Err(err) => {
+                        error.set(Some(format!("Failed to sign auth message: {err}")));
+                        busy.set(false);
+                        return;
+                    }
+                }
             };
 
             let scale = 10_f64.powi(token.decimals as i32);
@@ -370,6 +446,8 @@ pub fn PrivacyCashModal(
     let selected = &PRIVACY_TOKENS[selected_index];
     let selected_symbol = selected.symbol;
     let selected_decimals = selected.decimals;
+
+    let hw_wallet_for_render = hardware_wallet.clone();
 
     rsx! {
         div {
@@ -454,6 +532,13 @@ pub fn PrivacyCashModal(
 
                 if let Some(msg) = status() {
                     div { class: "success-message", "{msg}" }
+                }
+
+                if hw_wallet_for_render.is_some() {
+                    div {
+                        class: "info-message",
+                        "Your hardware wallet will prompt you to approve Privacy Cash actions"
+                    }
                 }
 
                 div { class: "modal-buttons",

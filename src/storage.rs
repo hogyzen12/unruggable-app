@@ -1,4 +1,5 @@
 use crate::wallet::{Wallet, WalletInfo};
+use crate::quantum_vault::StoredVault;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -227,6 +228,16 @@ fn get_rpc_file_path() -> String {
 fn get_jito_settings_file_path() -> String {
     let storage_dir = get_storage_dir_simple();
     format!("{storage_dir}/jito_settings.json")
+}
+
+fn get_bridge_settings_file_path() -> String {
+    let storage_dir = get_storage_dir_simple();
+    format!("{storage_dir}/bridge_settings.json")
+}
+
+fn get_quantum_vaults_file_path() -> String {
+    let storage_dir = get_storage_dir_simple();
+    format!("{storage_dir}/quantum_vaults.json")
 }
 
 // Ensure storage directory exists with logging
@@ -659,6 +670,261 @@ pub fn load_jito_settings_from_storage() -> JitoSettings {
 
 pub fn get_current_jito_settings() -> JitoSettings {
     load_jito_settings_from_storage()
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct BridgeSettings {
+    pub enabled: bool,
+}
+
+impl Default for BridgeSettings {
+    fn default() -> Self {
+        Self { enabled: false }
+    }
+}
+
+pub fn save_bridge_settings_to_storage(settings: &BridgeSettings) {
+    log::info!("🔄 Saving bridge settings to storage");
+
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(settings).unwrap();
+        storage.set_item("bridge_settings", &serialized).unwrap();
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        if let Ok(_) = ensure_storage_dir() {
+            let settings_file = get_bridge_settings_file_path();
+            match serde_json::to_string_pretty(settings) {
+                Ok(serialized) => {
+                    match std::fs::write(&settings_file, serialized) {
+                        Ok(_) => log::info!("✅ Bridge settings saved to: {}", settings_file),
+                        Err(e) => log::error!("❌ Failed to write bridge settings to {}: {}", settings_file, e),
+                    }
+                }
+                Err(e) => log::error!("❌ Failed to serialize bridge settings: {}", e),
+            }
+        }
+    }
+}
+
+pub fn load_bridge_settings_from_storage() -> BridgeSettings {
+    log::info!("🔄 Loading bridge settings from storage");
+
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        storage
+            .get_item("bridge_settings")
+            .unwrap()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default()
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        let settings_file = get_bridge_settings_file_path();
+        match std::fs::read_to_string(&settings_file) {
+            Ok(data) => {
+                match serde_json::from_str(&data) {
+                    Ok(settings) => {
+                        log::info!("✅ Bridge settings loaded from storage");
+                        settings
+                    }
+                    Err(e) => {
+                        log::error!("❌ Failed to parse bridge settings from {}: {}", settings_file, e);
+                        BridgeSettings::default()
+                    }
+                }
+            }
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    log::error!("❌ Failed to read bridge settings from {}: {}", settings_file, e);
+                }
+                BridgeSettings::default()
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Quantum Vault Storage Functions
+// ══════════════════════════════════════════════════════════════════════════════
+
+/// Save a quantum vault to storage
+pub fn save_quantum_vault_to_storage(vault: &StoredVault) {
+    log::info!("🔐 Attempting to save quantum vault: {}", vault.name);
+
+    let mut vaults = load_quantum_vaults_from_storage();
+    vaults.push(vault.clone());
+
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(&vaults).unwrap();
+        storage.set_item("quantum_vaults", &serialized).unwrap();
+        log::info!("✅ Quantum vault saved to web storage");
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        match ensure_storage_dir() {
+            Ok(_) => {
+                let vault_file = get_quantum_vaults_file_path();
+                match serde_json::to_string_pretty(&vaults) {
+                    Ok(serialized) => {
+                        match std::fs::write(&vault_file, &serialized) {
+                            Ok(_) => {
+                                log::info!("✅ Quantum vault successfully saved to: {}", vault_file);
+                                log::info!("📊 Saved {} quantum vaults total", vaults.len());
+                            }
+                            Err(e) => {
+                                log::error!("❌ Failed to write quantum vaults to {}: {}", vault_file, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("❌ Failed to serialize quantum vaults: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("❌ Failed to ensure storage directory: {}", e);
+            }
+        }
+    }
+}
+
+/// Load all quantum vaults from storage
+pub fn load_quantum_vaults_from_storage() -> Vec<StoredVault> {
+    log::info!("🔐 Attempting to load quantum vaults from storage");
+
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let result = storage.get_item("quantum_vaults")
+            .unwrap()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default();
+        log::info!("📱 Loaded {} quantum vaults from web storage", result.len());
+        result
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        let vault_file = get_quantum_vaults_file_path();
+
+        if let Err(e) = ensure_storage_dir() {
+            log::error!("❌ Storage directory error: {}", e);
+            return Vec::new();
+        }
+
+        if !Path::new(&vault_file).exists() {
+            log::info!("ℹ️ No existing quantum vault file found");
+            return Vec::new();
+        }
+
+        match std::fs::read_to_string(&vault_file) {
+            Ok(data) => {
+                match serde_json::from_str::<Vec<StoredVault>>(&data) {
+                    Ok(vaults) => vaults,
+                    Err(e) => {
+                        log::error!("❌ Failed to parse quantum vaults: {}", e);
+                        Vec::new()
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("❌ Failed to read quantum vaults: {}", e);
+                Vec::new()
+            }
+        }
+    }
+}
+
+/// Mark a quantum vault as used after splitting
+pub fn mark_quantum_vault_as_used(vault_address: &str) {
+    log::info!("🔐 Marking quantum vault as used: {}", vault_address);
+
+    let mut vaults = load_quantum_vaults_from_storage();
+
+    if let Some(vault) = vaults.iter_mut().find(|v| v.address == vault_address) {
+        vault.used = true;
+        save_quantum_vaults_to_storage(&vaults);
+        log::info!("✅ Quantum vault marked as used");
+    } else {
+        log::warn!("⚠️ Quantum vault not found: {}", vault_address);
+    }
+}
+
+/// Delete a quantum vault from storage
+pub fn delete_quantum_vault_from_storage(vault_address: &str) {
+    log::info!("🔐 Attempting to delete quantum vault: {}", vault_address);
+
+    let mut vaults = load_quantum_vaults_from_storage();
+    let original_count = vaults.len();
+
+    vaults.retain(|vault| vault.address != vault_address);
+
+    if vaults.len() < original_count {
+        log::info!("✅ Quantum vault {} removed from memory", vault_address);
+        save_quantum_vaults_to_storage(&vaults);
+        log::info!("✅ Quantum vault deletion completed. {} vaults remaining.", vaults.len());
+    } else {
+        log::warn!("⚠️ Quantum vault {} not found in storage", vault_address);
+    }
+}
+
+/// Save quantum vaults list to storage
+pub fn save_quantum_vaults_to_storage(vaults: &Vec<StoredVault>) {
+    log::info!("🔐 Saving {} quantum vaults to storage", vaults.len());
+
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(vaults).unwrap();
+        storage.set_item("quantum_vaults", &serialized).unwrap();
+        log::info!("✅ Quantum vaults saved to web storage");
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        match ensure_storage_dir() {
+            Ok(_) => {
+                let vault_file = get_quantum_vaults_file_path();
+                match serde_json::to_string_pretty(vaults) {
+                    Ok(serialized) => {
+                        match std::fs::write(&vault_file, &serialized) {
+                            Ok(_) => {
+                                log::info!("✅ Quantum vaults successfully saved to: {}", vault_file);
+                            }
+                            Err(e) => {
+                                log::error!("❌ Failed to write quantum vaults to {}: {}", vault_file, e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("❌ Failed to serialize quantum vaults: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("❌ Failed to ensure storage directory: {}", e);
+            }
+        }
+    }
 }
 
 /// Delete a wallet by address from storage

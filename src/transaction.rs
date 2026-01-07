@@ -729,8 +729,7 @@ impl TransactionClient {
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
-            // Note: send_sol currently doesn't support hardware wallets, defaulting to false
-            self.apply_jito_modifications(&from_pubkey, &mut instructions, false)?;
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, signer.is_hardware())?;
         }
         
         // Create a message with all instructions
@@ -884,8 +883,7 @@ impl TransactionClient {
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
-            // Note: send_spl_token currently doesn't support hardware wallets, defaulting to false
-            self.apply_jito_modifications(&from_pubkey, &mut instructions, false)?;
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, signer.is_hardware())?;
         }
         
         // Create a message with all instructions

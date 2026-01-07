@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Messages sent from browser extension to desktop app
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(tag = "method")]
 pub enum BridgeRequest {
     /// Connect request from a dApp
@@ -11,6 +11,12 @@ pub enum BridgeRequest {
 
     /// Request to sign a transaction
     SignTransaction {
+        transaction: String, // Base58 encoded transaction
+        origin: String
+    },
+
+    /// Request to sign AND send a transaction
+    SignAndSendTransaction {
         transaction: String, // Base58 encoded transaction
         origin: String
     },

@@ -23,6 +23,11 @@ pub trait TransactionSigner: Send + Sync {
     
     /// Check if the signer is available/connected
     async fn is_available(&self) -> bool;
+
+    /// Whether this signer is backed by hardware
+    fn is_hardware(&self) -> bool {
+        false
+    }
 }
 
 /// Enum to hold different signer types
@@ -72,6 +77,13 @@ impl TransactionSigner for SignerType {
         match self {
             SignerType::Software(s) => s.is_available().await,
             SignerType::Hardware(h) => h.is_available().await,
+        }
+    }
+
+    fn is_hardware(&self) -> bool {
+        match self {
+            SignerType::Software(s) => s.is_hardware(),
+            SignerType::Hardware(h) => h.is_hardware(),
         }
     }
 }

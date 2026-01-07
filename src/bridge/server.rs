@@ -3,12 +3,12 @@ use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Mutex;
 use tokio_tungstenite::{accept_async, tungstenite::Message};
-use futures_util::{StreamExt, SinkExt};
+use futures_util::{StreamExt, SinkExt, future::BoxFuture};
 use serde_json;
 
 use crate::bridge::protocol::{BridgeRequest, BridgeResponse};
 
-pub type RequestCallback = Arc<dyn Fn(BridgeRequest) -> BridgeResponse + Send + Sync>;
+pub type RequestCallback = Arc<dyn Fn(BridgeRequest) -> BoxFuture<'static, BridgeResponse> + Send + Sync>;
 
 pub struct BridgeServer {
     port: u16,
@@ -81,7 +81,7 @@ impl BridgeServer {
                     };
 
                     let response = if let Some(cb) = callback {
-                        cb(request)
+                        cb(request).await
                     } else {
                         BridgeResponse::Error {
                             message: "Desktop wallet not ready".to_string(),

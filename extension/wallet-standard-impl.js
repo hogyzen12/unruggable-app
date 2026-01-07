@@ -176,7 +176,7 @@
       async #signTransaction(input) {
         try {
           console.log('🔏 Wallet Standard: Signing transaction');
-          console.log('🎯 IMPORTANT: Desktop app will SIGN and SEND this transaction!');
+          console.log('🎯 Desktop app will SIGN this transaction');
           console.log('📥 Input:', {
             transaction: input.transaction,
             txLength: input.transaction?.length,
@@ -201,8 +201,7 @@
           console.log('📨 Response from desktop:', response);
 
           if (response.type === 'TransactionSigned') {
-            console.log('✅ Transaction signed AND SENT by desktop app');
-            console.log('🔗 On-chain signature:', response.signature);
+            console.log('✅ Transaction signed by desktop app');
             console.log('📦 Signed transaction received');
 
             // Desktop app has already signed AND sent the transaction
@@ -219,7 +218,7 @@
               signedTransaction: signedTx  // For buggy adapters
             };
             console.log('✅ Returning signed transaction to dApp');
-            console.log('🎉 Transaction already on-chain with signature:', response.signature);
+            console.log('🎉 Transaction signed and ready to send');
 
             return result;
           } else if (response.type === 'Rejected') {
@@ -281,24 +280,26 @@
       async #signAndSendTransaction(input) {
         try {
           console.log('📤 Wallet Standard: Sign and send transaction');
-          console.log('📤 Note: Desktop app handles both signing AND sending');
+          console.log('📤 Desktop app handles both signing AND sending');
 
-          // The #signTransaction method already signs AND sends via desktop app
-          // So we just need to call it and extract the signature
-          const signResult = await this.#signTransaction(input);
+          const txBase58 = bs58Encode(input.transaction);
+          const response = await this._sendToDesktop({
+            method: 'SignAndSendTransaction',
+            transaction: txBase58,
+            origin: window.location.origin
+          });
 
-          console.log('✅ Transaction was signed and sent by desktop app');
+          if (response.type === 'TransactionSigned') {
+            console.log('✅ Transaction was signed and sent by desktop app');
+            console.log('🔗 On-chain signature:', response.signature);
+            return {
+              signature: this._decodeBase58(response.signature)
+            };
+          } else if (response.type === 'Rejected') {
+            throw new Error('Transaction rejected: ' + response.reason);
+          }
 
-          // Extract the signature from the signed transaction
-          // Signature is at bytes 1-65 (after the signature count byte)
-          const signedTx = signResult.signedTransaction;
-          const signatureBytes = signedTx.slice(1, 65);
-
-          console.log('📤 Returning signature:', bs58Encode(signatureBytes));
-
-          return {
-            signature: signatureBytes
-          };
+          throw new Error(response.message || 'Sign and send failed');
         } catch (error) {
           console.error('❌ signAndSendTransaction error:', error);
           throw new Error(`Sign and send failed: ${error.message}`);

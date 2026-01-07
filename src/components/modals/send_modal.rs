@@ -236,25 +236,26 @@ pub fn SendModalWithHardware(
         let mut private_balance = private_balance.clone();
         let mut private_balance_loading = private_balance_loading.clone();
         Rc::new(RefCell::new(move || {
-            if hw_for_refresh.is_some() {
-                private_balance.set(None);
-                return;
-            }
             private_balance_loading.set(true);
             let rpc_url = rpc_url.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
             let wallet_info = wallet_info.clone();
+            let hw_for_refresh = hw_for_refresh.clone();
             let mut private_balance = private_balance.clone();
             let mut private_balance_loading = private_balance_loading.clone();
             spawn(async move {
-                let Some(wallet_info) = wallet_info else {
-                    private_balance_loading.set(false);
-                    return;
+                let signer = if let Some(hw) = hw_for_refresh {
+                    SignerType::Hardware(HardwareSigner::from_wallet(hw))
+                } else {
+                    let Some(wallet_info) = wallet_info else {
+                        private_balance_loading.set(false);
+                        return;
+                    };
+                    let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                        private_balance_loading.set(false);
+                        return;
+                    };
+                    SignerType::from_wallet(wallet)
                 };
-                let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
-                    private_balance_loading.set(false);
-                    return;
-                };
-                let signer = SignerType::from_wallet(wallet);
                 let Ok(authority) = signer.get_public_key().await else {
                     private_balance_loading.set(false);
                     return;
@@ -477,10 +478,29 @@ pub fn SendModalWithHardware(
                     if let Some(progress) = privacy_progress() {
                         div { class: "privacy-hint", "{progress}" }
                     }
-                    if hardware_wallet.is_some() {
-                        div { class: "privacy-hint", "Private send is only supported for software wallets right now." }
-                    } else {
-                        div { class: "privacy-hint", "If needed, we will top-up privately then send (2 txs)." }
+                    {
+                        let amount_value = amount().parse::<f64>().ok();
+                        let private_balance_value = private_balance().unwrap_or(0);
+                        if let Some(amount_value) = amount_value {
+                            let lamports = (amount_value * 1_000_000_000.0) as u64;
+                            if private_balance().is_some() {
+                                if private_balance_value >= lamports {
+                                    rsx! { div { class: "privacy-hint", "Balance already revealed; no additional hardware approval is needed to send." } }
+                                } else if hardware_wallet.is_some() {
+                                    rsx! { div { class: "privacy-hint", "We will top up privately (2 txs). Your hardware wallet will prompt you to approve the deposit." } }
+                                } else {
+                                    rsx! { div { class: "privacy-hint", "We will top up privately (2 txs). You'll sign a deposit before the private send." } }
+                                }
+                            } else {
+                                if hardware_wallet.is_some() {
+                                    rsx! { div { class: "privacy-hint", "We'll reveal your private balance (one approval). If a top up is needed, you'll approve a deposit." } }
+                                } else {
+                                    rsx! { div { class: "privacy-hint", "We will check your private balance; if a top up is needed, you'll be asked to approve a deposit." } }
+                                }
+                            }
+                        } else {
+                            rsx! { div { class: "privacy-hint", "If needed, we will top up privately then send (2 txs)." } }
+                        }
                     }
                 }
                 }
@@ -552,35 +572,39 @@ pub fn SendModalWithHardware(
 
                                 // Use hardware wallet if available, otherwise use software wallet
                                 if privacy_enabled() {
-                                    if hardware_wallet_clone.is_some() {
-                                        error_message.set(Some("Private send is not supported with hardware wallets yet".to_string()));
-                                        sending.set(false);
-                                        show_hardware_approval.set(false);
-                                        return;
-                                    }
+                                    let signer = if let Some(hw) = hardware_wallet_clone.clone() {
+                                        SignerType::Hardware(HardwareSigner::from_wallet(hw))
+                                    } else {
+                                        let Some(wallet_info) = wallet_info else {
+                                            error_message.set(Some("No wallet available".to_string()));
+                                            sending.set(false);
+                                            return;
+                                        };
 
-                                    let Some(wallet_info) = wallet_info else {
-                                        error_message.set(Some("No wallet available".to_string()));
-                                        sending.set(false);
-                                        return;
+                                        let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                                            error_message.set(Some("Failed to load wallet".to_string()));
+                                            sending.set(false);
+                                            return;
+                                        };
+
+                                        SignerType::from_wallet(wallet)
                                     };
-
-                                    let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
-                                        error_message.set(Some("Failed to load wallet".to_string()));
-                                        sending.set(false);
-                                        return;
-                                    };
-
-                                    let signer = SignerType::from_wallet(wallet);
+                                    let should_clear_hw = signer.is_hardware();
                                     let Ok(authority) = signer.get_public_key().await else {
                                         error_message.set(Some("Failed to get public key".to_string()));
                                         sending.set(false);
+                                        if should_clear_hw {
+                                            show_hardware_approval.set(false);
+                                        }
                                         return;
                                     };
 
                                     let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
                                         error_message.set(Some("Failed to sign auth message".to_string()));
                                         sending.set(false);
+                                        if should_clear_hw {
+                                            show_hardware_approval.set(false);
+                                        }
                                         return;
                                     };
 
@@ -605,6 +629,9 @@ pub fn SendModalWithHardware(
                                             Err(err) => {
                                                 error_message.set(Some(format!("Failed to build deposit tx: {err}")));
                                                 sending.set(false);
+                                                if should_clear_hw {
+                                                    show_hardware_approval.set(false);
+                                                }
                                                 return;
                                             }
                                         };
@@ -615,6 +642,9 @@ pub fn SendModalWithHardware(
                                             Err(err) => {
                                                 error_message.set(Some(format!("Failed to get blockhash: {err}")));
                                                 sending.set(false);
+                                                if should_clear_hw {
+                                                    show_hardware_approval.set(false);
+                                                }
                                                 return;
                                             }
                                         };
@@ -622,12 +652,18 @@ pub fn SendModalWithHardware(
                                         if let Err(err) = privacycash::sign_transaction(&signer, &mut tx, recent_blockhash).await {
                                             error_message.set(Some(format!("Failed to sign deposit tx: {err}")));
                                             sending.set(false);
+                                            if should_clear_hw {
+                                                show_hardware_approval.set(false);
+                                            }
                                             return;
                                         }
 
                                         if let Err(err) = privacycash::submit_deposit(&authority, &tx).await {
                                             error_message.set(Some(format!("Deposit failed: {err}")));
                                             sending.set(false);
+                                            if should_clear_hw {
+                                                show_hardware_approval.set(false);
+                                            }
                                             return;
                                         }
 
@@ -659,6 +695,9 @@ pub fn SendModalWithHardware(
                                         Err(err) => {
                                             error_message.set(Some(format!("Failed to build withdraw request: {err}")));
                                             sending.set(false);
+                                            if should_clear_hw {
+                                                show_hardware_approval.set(false);
+                                            }
                                             return;
                                         }
                                     };
@@ -668,6 +707,9 @@ pub fn SendModalWithHardware(
                                             privacy_progress.set(None);
                                             transaction_signature.set(signature);
                                             sending.set(false);
+                                            if should_clear_hw {
+                                                show_hardware_approval.set(false);
+                                            }
                                             show_success_modal.set(true);
                                             on_privacy_refresh.call(());
                                         }
@@ -675,6 +717,9 @@ pub fn SendModalWithHardware(
                                             privacy_progress.set(None);
                                             error_message.set(Some(format!("Withdraw failed: {err}")));
                                             sending.set(false);
+                                            if should_clear_hw {
+                                                show_hardware_approval.set(false);
+                                            }
                                         }
                                     }
                                 } else if let Some(hw) = hardware_wallet_clone {

@@ -9,7 +9,10 @@ use crate::storage::{
     load_jito_settings_from_storage,
     save_jito_settings_to_storage,
     delete_wallet_from_storage,
-    JitoSettings
+    load_bridge_settings_from_storage,
+    save_bridge_settings_to_storage,
+    JitoSettings,
+    BridgeSettings
 };
 use crate::currency::{
     SELECTED_CURRENCY, 
@@ -33,7 +36,9 @@ use crate::components::{LiquidMetalButton, LiquidMetalStatus};
 use crate::privacycash;
 use crate::signing::{SignerType, TransactionSigner};
 // Temporarily disabled integrations for Solana 3.x testing
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, PrivacyCashModal, CarrotModal, BonkStakingModal, SquadsModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, PrivacyCashModal, CarrotModal, BonkStakingModal, SquadsModal, QuantumVaultModal};
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+use crate::components::modals::BridgeSignModal;
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::token_utils::process_tokens_for_display;
 use crate::components::common::TokenDisplayData;
@@ -50,6 +55,7 @@ use std::sync::Arc;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::collections::HashMap;
+use std::time::Duration;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
 use crate::bridge::BridgeHandler;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -98,6 +104,7 @@ const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_SQUADS: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/squadsLogo.svg";
 const ICON_CARROT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/CARROT.svg";
 const ICON_BONK_STAKE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/BONK.svg";
+const ICON_QUANTUM: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/32x32.png";
 const ICON_WALLET: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/WALLETS.svg";
 const ICON_CREATE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ADD_wallet.svg";
 const ICON_IMPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/IMPORT_wallet.svg";
@@ -468,6 +475,7 @@ pub fn WalletView() -> Element {
     let mut show_squads_modal = use_signal(|| false);
     let mut show_carrot_modal = use_signal(|| false);
     let mut show_bonk_staking_modal = use_signal(|| false);
+    let mut show_quantum_vault_modal = use_signal(|| false);
     
     // Integrations collapse/expand state
     let mut show_integrations = use_signal(|| false);
@@ -482,6 +490,9 @@ pub fn WalletView() -> Element {
     // Bridge handler (desktop only)
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
     let bridge_handler = use_context::<Arc<BridgeHandler>>();
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    let mut pending_bridge_requests = use_signal(|| Vec::<crate::bridge::PendingBridgeRequest>::new());
+    let mut bridge_settings = use_signal(|| load_bridge_settings_from_storage());
 
     // RPC management
     let mut custom_rpc = use_signal(|| load_rpc_from_storage());
@@ -577,6 +588,20 @@ pub fn WalletView() -> Element {
     let mut hardware_device_type = use_signal(|| None as Option<HardwareDeviceType>);
     let mut refresh_trigger = use_signal(|| 0u32);
     let mut is_refreshing = use_signal(|| false);
+
+    let update_bridge_settings = {
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+        let handler = bridge_handler.clone();
+        move |enabled: bool| {
+            let new_settings = BridgeSettings { enabled };
+            bridge_settings.set(new_settings);
+            save_bridge_settings_to_storage(&new_settings);
+            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+            {
+                handler.set_enabled(enabled);
+            }
+        }
+    };
     
     // Load wallets from storage on component mount
     use_effect(move || {
@@ -590,6 +615,125 @@ pub fn WalletView() -> Element {
             wallets.set(stored_wallets);
         }
     });
+
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    {
+        let handler = bridge_handler.clone();
+        use_effect({
+            let handler = handler.clone();
+            move || {
+                let handler = handler.clone();
+                spawn(async move {
+                    loop {
+                        if bridge_settings().enabled {
+                            pending_bridge_requests.set(handler.pending_requests());
+                        } else {
+                            pending_bridge_requests.set(Vec::new());
+                        }
+                        tokio::time::sleep(Duration::from_millis(300)).await;
+                    }
+                });
+            }
+        });
+    }
+
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+    {
+        let handler = bridge_handler.clone();
+        use_effect({
+            let handler = handler.clone();
+            move || {
+                if bridge_settings().enabled {
+                    if let Some(wallet_info) = wallets.read().get(current_wallet_index()) {
+                        if let Ok(wallet) = Wallet::from_wallet_info(wallet_info) {
+                            handler.update_wallet(wallet);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    let bridge_modal: Option<Element> = {
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+        {
+            if bridge_settings().enabled {
+                if let Some(request) = pending_bridge_requests().first().cloned() {
+                    let handler_for_approve = bridge_handler.clone();
+                    let handler_for_reject = bridge_handler.clone();
+                    Some(rsx!(
+                        BridgeSignModal {
+                            request: request.clone(),
+                            onapprove: move |id| {
+                                let handler = handler_for_approve.clone();
+                                spawn(async move {
+                                    if let Err(err) = handler.approve_request(id).await {
+                                        log::error!("Bridge approve failed: {}", err);
+                                    }
+                                });
+                            },
+                            onreject: move |id| {
+                                let handler = handler_for_reject.clone();
+                                spawn(async move {
+                                    if let Err(err) = handler.reject_request(id, "User rejected".to_string()).await {
+                                        log::error!("Bridge reject failed: {}", err);
+                                    }
+                                });
+                            }
+                        }
+                    ))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+        #[cfg(not(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios"))))]
+        {
+            None
+        }
+    };
+
+    let bridge_settings_row: Option<Element> = {
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+        {
+            let mut toggle_click = update_bridge_settings.clone();
+            let mut toggle_change = update_bridge_settings.clone();
+            Some(rsx!(
+                button {
+                    class: "dropdown-item",
+                    onclick: move |_| {
+                        let enabled = !bridge_settings().enabled;
+                        toggle_click(enabled);
+                    },
+                    div {
+                        class: "dropdown-icon action-icon",
+                        "🧩"
+                    }
+                    div {
+                        style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                        span { "Browser Extension" }
+                        label {
+                            class: "toggle-switch",
+                            input {
+                                r#type: "checkbox",
+                                checked: bridge_settings().enabled,
+                                onchange: move |e| {
+                                    toggle_change(e.checked());
+                                },
+                            }
+                            span { class: "toggle-slider" }
+                        }
+                    }
+                }
+            ))
+        }
+        #[cfg(not(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios"))))]
+        {
+            None
+        }
+    };
 
     // Monitor hardware wallet presence - check every 2 seconds
     use_effect(move || {
@@ -1137,6 +1281,10 @@ pub fn WalletView() -> Element {
                 private_balance_usdc.set(None);
                 private_balance_usdt.set(None);
                 private_balance_ore.set(None);
+                private_balance_loading.set(false);
+                private_balance_usdc_loading.set(false);
+                private_balance_usdt_loading.set(false);
+                private_balance_ore_loading.set(false);
                 return;
             }
             private_balance_loading.set(true);
@@ -1694,6 +1842,10 @@ pub fn WalletView() -> Element {
                             }
                             "RPC Settings"
                         }
+
+                        if let Some(row) = bridge_settings_row {
+                            {row}
+                        }
                 
                         //button {
                         //    class: "dropdown-item",
@@ -1807,6 +1959,10 @@ pub fn WalletView() -> Element {
                     },
                     onclose: move |_| show_delete_confirmation.set(false)
                 }
+            }
+
+            if let Some(modal) = bridge_modal {
+                {modal}
             }
             
             if show_rpc_modal() {
@@ -1945,6 +2101,7 @@ pub fn WalletView() -> Element {
             if show_privacycash_modal() {
                 PrivacyCashModal {
                     wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
                     custom_rpc: custom_rpc(),
                     onclose: move |_| {
                         show_privacycash_modal.set(false);
@@ -2214,6 +2371,15 @@ pub fn WalletView() -> Element {
                         // Trigger wallet refresh
                         refresh_trigger.set(refresh_trigger() + 1);
                     },
+                }
+            }
+
+            if show_quantum_vault_modal() {
+                QuantumVaultModal {
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| show_quantum_vault_modal.set(false),
                 }
             }
             
@@ -2547,6 +2713,27 @@ pub fn WalletView() -> Element {
                             button {
                                 class: "action-button-segmented",
                                 onclick: move |_| {
+                                    println!("Quantum Vault button clicked!");
+                                    show_quantum_vault_modal.set(true);
+                                },
+
+                                div {
+                                    class: "action-icon-segmented",
+                                    img {
+                                        src: "{ICON_QUANTUM}",
+                                        alt: "Quantum Vault"
+                                    }
+                                }
+
+                                div {
+                                    class: "action-label-segmented",
+                                    "Quantum"
+                                }
+                            }
+
+                            button {
+                                class: "action-button-segmented",
+                                onclick: move |_| {
                                     if eject_mode() {
                                         // Exit eject mode
                                         eject_mode.set(false);
@@ -2809,7 +2996,7 @@ pub fn WalletView() -> Element {
                                                             class: "token-send-button",
                                                             onclick: move |e| {
                                                                 e.stop_propagation();
-                                                                send_modal_private.set(true);
+                                                                send_modal_private.set(false);
                                                                 show_send_modal.set(true);
                                                             },
                                                             title: "Private Send SOL",

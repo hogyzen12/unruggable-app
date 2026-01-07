@@ -2,6 +2,7 @@ use dioxus::document::eval;
 use dioxus::prelude::*;
 use std::sync::Arc;
 use serde_json::Value;
+use std::sync::OnceLock;
 
 mod wallet;
 mod rpc;
@@ -25,6 +26,7 @@ mod squads;
 mod carrot;
 mod bonk_staking;
 mod titan;
+mod quantum_vault;
 mod pin;
 mod timeout;
 
@@ -44,15 +46,15 @@ enum Route {
 // Android does. For apple builds use hosted resources.
 
 // For iOS/macOS builds, uncomment the remote URLs and comment out the asset! macros
-//const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/main.css";
-//const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/pin-premium.css";
-const PRIVACY_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/privacy.js";
-const PRIVACY_WASM_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/transaction2.wasm";
-const PRIVACY_ZKEY_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/transaction2.zkey";
+const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/main.css";
+const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/pin-premium.css";
+const PRIVACY_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/privacy.js";
+const PRIVACY_WASM_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/transaction2.wasm";
+const PRIVACY_ZKEY_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/transaction2.zkey";
 
 // For local/Android builds, use the asset! macro
-const MAIN_CSS: Asset = asset!("/assets/main.css");
-const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
+//const MAIN_CSS: Asset = asset!("/assets/main.css");
+//const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
 
 // ── DESKTOP (macOS/Windows/Linux) ─────────────────────────────────────────────
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
@@ -79,13 +81,19 @@ fn start_browser_bridge() -> Arc<bridge::BridgeHandler> {
 
     let handler = Arc::new(BridgeHandler::new());
     let handler_clone = Arc::clone(&handler);
+    let bridge_enabled = storage::load_bridge_settings_from_storage().enabled;
+    handler.set_enabled(bridge_enabled);
 
+    println!("🌉 Starting browser bridge server...");
     std::thread::spawn(move || {
         let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
 
         rt.block_on(async {
             let server = Arc::new(BridgeServer::new(7777));
-            let callback = Arc::new(move |request| handler_clone.handle_request(request));
+            let callback: bridge::RequestCallback = Arc::new(move |request| {
+                let handler = handler_clone.clone();
+                Box::pin(async move { handler.handle_request(request).await })
+            });
 
             server.set_callback(callback);
 
@@ -98,6 +106,12 @@ fn start_browser_bridge() -> Arc<bridge::BridgeHandler> {
     handler
 }
 
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+fn init_bridge_handler() -> Arc<bridge::BridgeHandler> {
+    static BRIDGE_HANDLER: OnceLock<Arc<bridge::BridgeHandler>> = OnceLock::new();
+    BRIDGE_HANDLER.get_or_init(start_browser_bridge).clone()
+}
+
 // Web & Mobile keep the generic launcher:
 #[cfg(any(target_arch = "wasm32", target_os = "android", target_os = "ios"))]
 fn main() {
@@ -107,7 +121,11 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    let (privacy_js_src, wasm_url, zkey_url) = if cfg!(any(target_os = "wasm")) {
+    let (privacy_js_src, wasm_url, zkey_url) = if cfg!(any(
+        target_arch = "wasm32",
+        target_os = "macos",
+        target_os = "ios"
+    )) {
         (
             PRIVACY_JS_URL.to_string(),
             PRIVACY_WASM_URL.to_string(),
@@ -166,7 +184,7 @@ fn App() -> Element {
     // Start browser bridge on desktop only
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
     let bridge_handler = {
-        let handler = use_context_provider(|| start_browser_bridge());
+        let handler = use_context_provider(|| init_bridge_handler());
         handler
     };
     
@@ -175,12 +193,12 @@ fn App() -> Element {
     rsx! {
         // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
         document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        //document::Link { rel: "stylesheet", href: PIN_CSS_URL }
+        document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
+        document::Link { rel: "stylesheet", href: PIN_CSS_URL }
         
         // For local/Android builds, use these lines (comment out for iOS/macOS)
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: PIN_CSS }
+        //document::Link { rel: "stylesheet", href: MAIN_CSS }
+        //document::Link { rel: "stylesheet", href: PIN_CSS }
 
         document::Script { src: privacy_js_src.clone(), defer: true }
         

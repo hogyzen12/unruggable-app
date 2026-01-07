@@ -1,19 +1,36 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use tokio::sync::oneshot;
 use crate::bridge::protocol::{BridgeRequest, BridgeResponse};
 use crate::wallet::Wallet;
 use crate::storage;
 use solana_client::rpc_client::RpcClient;
+use solana_sdk::transaction::VersionedTransaction;
 use std::str::FromStr;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingBridgeRequest {
+    pub id: u64,
+    pub origin: String,
+    pub request: BridgeRequest,
+}
 
 /// Shared state for the bridge handler
 pub struct BridgeHandler {
     current_wallet: Arc<Mutex<Option<Wallet>>>,
+    pending_requests: Arc<Mutex<Vec<PendingBridgeRequest>>>,
+    pending_waiters: Arc<Mutex<HashMap<u64, oneshot::Sender<BridgeResponse>>>>,
+    enabled: Arc<AtomicBool>,
 }
 
 impl BridgeHandler {
     pub fn new() -> Self {
         Self {
             current_wallet: Arc::new(Mutex::new(None)),
+            pending_requests: Arc::new(Mutex::new(Vec::new())),
+            pending_waiters: Arc::new(Mutex::new(HashMap::new())),
+            enabled: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -64,6 +81,15 @@ impl BridgeHandler {
         println!("✅ BridgeHandler: Wallet updated successfully");
     }
 
+    pub fn set_enabled(&self, enabled: bool) {
+        self.enabled.store(enabled, Ordering::Relaxed);
+        println!("🔌 BridgeHandler: Enabled set to {}", enabled);
+    }
+
+    pub fn is_enabled(&self) -> bool {
+        self.enabled.load(Ordering::Relaxed)
+    }
+
     /// Get current wallet public key (for checking if wallet changed)
     pub fn get_current_pubkey(&self) -> Option<String> {
         let wallet = self.current_wallet.lock().unwrap();
@@ -91,8 +117,62 @@ impl BridgeHandler {
         Ok(())
     }
 
+    pub fn pending_requests(&self) -> Vec<PendingBridgeRequest> {
+        let pending = self.pending_requests.lock().unwrap();
+        pending.clone()
+    }
+
+    pub async fn approve_request(&self, id: u64) -> Result<(), String> {
+        let request = {
+            let pending = self.pending_requests.lock().unwrap();
+            pending.iter().find(|req| req.id == id).cloned()
+        };
+
+        let request = request.ok_or_else(|| "Request not found".to_string())?;
+
+        let response = match request.request {
+            BridgeRequest::SignTransaction { transaction, .. } => {
+                self.sign_transaction(&transaction).await
+            }
+            BridgeRequest::SignAndSendTransaction { transaction, .. } => {
+                self.sign_and_send_transaction(&transaction).await
+            }
+            BridgeRequest::SignMessage { message, .. } => {
+                self.sign_message(&message).await
+            }
+            _ => BridgeResponse::Error {
+                message: "Unsupported request".to_string(),
+            },
+        };
+
+        self.resolve_request(id, response)
+    }
+
+    pub async fn reject_request(&self, id: u64, reason: String) -> Result<(), String> {
+        self.resolve_request(id, BridgeResponse::Rejected { reason })
+    }
+
+    fn resolve_request(&self, id: u64, response: BridgeResponse) -> Result<(), String> {
+        {
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.retain(|req| req.id != id);
+        }
+
+        let sender = {
+            let mut waiters = self.pending_waiters.lock().unwrap();
+            waiters.remove(&id)
+        };
+
+        if let Some(sender) = sender {
+            let _ = sender.send(response);
+            Ok(())
+        } else {
+            Err("Pending request channel missing".to_string())
+        }
+    }
+
     /// Handle incoming bridge requests
-    pub fn handle_request(&self, request: BridgeRequest) -> BridgeResponse {
+    pub async fn handle_request(&self, request: BridgeRequest) -> BridgeResponse {
         match request {
             BridgeRequest::Ping => {
                 println!("📡 Bridge: Received ping");
@@ -100,6 +180,11 @@ impl BridgeHandler {
             },
 
             BridgeRequest::Connect { origin } => {
+                if !self.is_enabled() {
+                    return BridgeResponse::Error {
+                        message: "Browser extension is disabled in settings.".to_string(),
+                    };
+                }
                 println!("🔗 Bridge: Connect request from {}", origin);
 
                 // Check if wallet is loaded
@@ -127,140 +212,56 @@ impl BridgeHandler {
             },
 
             BridgeRequest::SignTransaction { origin, transaction } => {
-                println!("✍️  Bridge: Sign and send transaction request from {}", origin);
-
-                let wallet = self.current_wallet.lock().unwrap();
-
-                match wallet.as_ref() {
-                    Some(w) => {
-                        // Decode base58 transaction
-                        match bs58::decode(&transaction).into_vec() {
-                            Ok(mut tx_bytes) => {
-                                // Sign the transaction message
-                                let signature_base58 = w.sign_transaction(&tx_bytes);
-                                println!("✅ Bridge: Transaction signed with signature: {}...", &signature_base58[..20]);
-
-                                // Decode the signature from base58
-                                let signature_bytes = match bs58::decode(&signature_base58).into_vec() {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => {
-                                        return BridgeResponse::Error {
-                                            message: format!("Failed to decode signature: {}", e)
-                                        };
-                                    }
-                                };
-
-                                if signature_bytes.len() != 64 {
-                                    return BridgeResponse::Error {
-                                        message: format!("Invalid signature length: {} (expected 64)", signature_bytes.len())
-                                    };
-                                }
-
-                                // Insert the signature into the transaction at position 1
-                                if tx_bytes.len() < 65 {
-                                    return BridgeResponse::Error {
-                                        message: "Transaction too short".to_string()
-                                    };
-                                }
-
-                                // Copy signature into the transaction (at byte 1, after the signature count)
-                                tx_bytes[1..65].copy_from_slice(&signature_bytes[..64]);
-                                println!("✅ Bridge: Signature inserted into transaction");
-
-                                // Get RPC URL from storage or use default
-                                let rpc_url = storage::load_rpc_from_storage()
-                                    .unwrap_or_else(|| "https://api.mainnet-beta.solana.com".to_string());
-                                println!("🌐 Bridge: Using RPC: {}", rpc_url);
-
-                                // Create RPC client and send transaction
-                                let client = RpcClient::new(rpc_url);
-
-                                // Create a versioned transaction from the bytes
-                                use solana_sdk::transaction::VersionedTransaction;
-                                let versioned_tx = match bincode::deserialize::<VersionedTransaction>(&tx_bytes) {
-                                    Ok(tx) => tx,
-                                    Err(e) => {
-                                        return BridgeResponse::Error {
-                                            message: format!("Failed to deserialize transaction: {}", e)
-                                        };
-                                    }
-                                };
-
-                                // Send the transaction
-                                match client.send_transaction(&versioned_tx) {
-                                    Ok(sig) => {
-                                        let sig_string = sig.to_string();
-                                        println!("✅ Bridge: Transaction sent successfully!");
-                                        println!("🔗 On-chain Signature: {}", sig_string);
-
-                                        // Also encode the full signed transaction for the extension
-                                        let signed_tx_base58 = bs58::encode(&tx_bytes).into_string();
-                                        println!("📦 Signed transaction encoded (length: {})", tx_bytes.len());
-
-                                        BridgeResponse::TransactionSigned {
-                                            signature: sig_string,
-                                            signed_transaction: signed_tx_base58,
-                                        }
-                                    },
-                                    Err(e) => {
-                                        println!("❌ Bridge: Failed to send transaction: {}", e);
-                                        BridgeResponse::Error {
-                                            message: format!("Transaction send failed: {}", e)
-                                        }
-                                    }
-                                }
-                            },
-                            Err(e) => {
-                                BridgeResponse::Error {
-                                    message: format!("Invalid transaction encoding: {}", e)
-                                }
-                            }
-                        }
-                    },
-                    None => {
-                        BridgeResponse::Error {
-                            message: "No wallet loaded. Please unlock your desktop wallet first.".to_string()
-                        }
-                    }
+                if !self.is_enabled() {
+                    return BridgeResponse::Error {
+                        message: "Browser extension is disabled in settings.".to_string(),
+                    };
                 }
+                println!("✍️  Bridge: Sign transaction request from {}", origin);
+                if !self.is_wallet_loaded() {
+                    return BridgeResponse::Error {
+                        message: "No wallet loaded. Please unlock your desktop wallet first.".to_string(),
+                    };
+                }
+                self.enqueue_pending_request(BridgeRequest::SignTransaction { origin, transaction }).await
+            },
+
+            BridgeRequest::SignAndSendTransaction { origin, transaction } => {
+                if !self.is_enabled() {
+                    return BridgeResponse::Error {
+                        message: "Browser extension is disabled in settings.".to_string(),
+                    };
+                }
+                println!("✍️  Bridge: Sign and send transaction request from {}", origin);
+                if !self.is_wallet_loaded() {
+                    return BridgeResponse::Error {
+                        message: "No wallet loaded. Please unlock your desktop wallet first.".to_string(),
+                    };
+                }
+                self.enqueue_pending_request(BridgeRequest::SignAndSendTransaction { origin, transaction }).await
             },
 
             BridgeRequest::SignMessage { origin, message } => {
-                println!("✍️  Bridge: Sign message request from {}", origin);
-
-                let wallet = self.current_wallet.lock().unwrap();
-
-                match wallet.as_ref() {
-                    Some(w) => {
-                        // Decode base58 message
-                        match bs58::decode(&message).into_vec() {
-                            Ok(msg_bytes) => {
-                                // Sign the message
-                                let signature = w.sign_message(&msg_bytes);
-                                let sig_bytes = signature.to_bytes();
-                                let sig_base58 = bs58::encode(&sig_bytes).into_string();
-
-                                println!("✅ Bridge: Message signed");
-                                BridgeResponse::MessageSigned {
-                                    signature: sig_base58
-                                }
-                            },
-                            Err(e) => {
-                                BridgeResponse::Error {
-                                    message: format!("Invalid message encoding: {}", e)
-                                }
-                            }
-                        }
-                    },
-                    None => {
-                        BridgeResponse::Error {
-                            message: "No wallet loaded. Please unlock your desktop wallet first.".to_string()
-                        }
-                    }
+                if !self.is_enabled() {
+                    return BridgeResponse::Error {
+                        message: "Browser extension is disabled in settings.".to_string(),
+                    };
                 }
+                println!("✍️  Bridge: Sign message request from {}", origin);
+                if !self.is_wallet_loaded() {
+                    return BridgeResponse::Error {
+                        message: "No wallet loaded. Please unlock your desktop wallet first.".to_string(),
+                    };
+                }
+                self.enqueue_pending_request(BridgeRequest::SignMessage { origin, message }).await
             },
 
             BridgeRequest::Disconnect { origin } => {
+                if !self.is_enabled() {
+                    return BridgeResponse::Error {
+                        message: "Browser extension is disabled in settings.".to_string(),
+                    };
+                }
                 println!("👋 Bridge: Disconnect request from {}", origin);
                 // Just acknowledge, we don't actually disconnect the wallet
                 BridgeResponse::Error {
@@ -269,6 +270,11 @@ impl BridgeHandler {
             },
 
             BridgeRequest::GetPublicKey => {
+                if !self.is_enabled() {
+                    return BridgeResponse::Error {
+                        message: "Browser extension is disabled in settings.".to_string(),
+                    };
+                }
                 println!("🔑 Bridge: Get public key request");
 
                 let wallet = self.current_wallet.lock().unwrap();
@@ -293,6 +299,11 @@ impl BridgeHandler {
             },
 
             BridgeRequest::GetBalance => {
+                if !self.is_enabled() {
+                    return BridgeResponse::Error {
+                        message: "Browser extension is disabled in settings.".to_string(),
+                    };
+                }
                 println!("💰 Bridge: Get balance request");
 
                 let wallet = self.current_wallet.lock().unwrap();
@@ -304,7 +315,7 @@ impl BridgeHandler {
 
                         // Get RPC URL from storage or use default
                         let rpc_url = storage::load_rpc_from_storage()
-                            .unwrap_or_else(|| "https://api.mainnet-beta.solana.com".to_string());
+                            .unwrap_or_else(|| "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string());
 
                         // Create RPC client and fetch balance
                         let client = RpcClient::new(rpc_url);
@@ -339,6 +350,195 @@ impl BridgeHandler {
                         }
                     }
                 }
+            },
+        }
+    }
+
+    async fn enqueue_pending_request(&self, request: BridgeRequest) -> BridgeResponse {
+        static REQUEST_COUNTER: AtomicU64 = AtomicU64::new(1);
+        let id = REQUEST_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let origin = match &request {
+            BridgeRequest::SignTransaction { origin, .. } => origin.clone(),
+            BridgeRequest::SignAndSendTransaction { origin, .. } => origin.clone(),
+            BridgeRequest::SignMessage { origin, .. } => origin.clone(),
+            _ => "unknown".to_string(),
+        };
+
+        let (tx, rx) = oneshot::channel();
+
+        {
+            let mut pending = self.pending_requests.lock().unwrap();
+            pending.push(PendingBridgeRequest { id, origin, request: request.clone() });
+        }
+        {
+            let mut waiters = self.pending_waiters.lock().unwrap();
+            waiters.insert(id, tx);
+        }
+
+        match rx.await {
+            Ok(response) => response,
+            Err(_) => BridgeResponse::Error {
+                message: "Signing request cancelled".to_string(),
+            },
+        }
+    }
+
+    async fn sign_transaction(&self, transaction: &str) -> BridgeResponse {
+        let wallet_guard = self.current_wallet.lock().unwrap();
+        let wallet = match wallet_guard.as_ref() {
+            Some(w) => w,
+            None => {
+                return BridgeResponse::Error {
+                    message: "No wallet loaded. Please unlock your desktop wallet first.".to_string(),
+                };
+            }
+        };
+
+        let tx_bytes = match bs58::decode(transaction).into_vec() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return BridgeResponse::Error {
+                    message: format!("Invalid transaction encoding: {}", e),
+                };
+            }
+        };
+
+        use solana_sdk::{pubkey::Pubkey, signature::Signature, transaction::VersionedTransaction};
+        let mut versioned_tx = match bincode::deserialize::<VersionedTransaction>(&tx_bytes) {
+            Ok(tx) => tx,
+            Err(e) => {
+                return BridgeResponse::Error {
+                    message: format!("Failed to deserialize transaction: {}", e),
+                };
+            }
+        };
+
+        let message_bytes = versioned_tx.message.serialize();
+        let signature = wallet.sign_message(&message_bytes);
+        let signature_bytes = signature.to_bytes();
+        let signature_preview = bs58::encode(&signature_bytes).into_string();
+        println!("✅ Bridge: Transaction signed with signature: {}...", &signature_preview[..20]);
+
+        let signer_pubkey = match Pubkey::from_str(&wallet.get_public_key()) {
+            Ok(key) => key,
+            Err(e) => {
+                return BridgeResponse::Error {
+                    message: format!("Invalid wallet pubkey: {}", e),
+                };
+            }
+        };
+
+        let required_signers = versioned_tx.message.header().num_required_signatures as usize;
+        let signer_index = versioned_tx.message.static_account_keys()
+            .iter()
+            .take(required_signers)
+            .position(|key| key == &signer_pubkey);
+
+        let signer_index = match signer_index {
+            Some(index) => index,
+            None => {
+                return BridgeResponse::Error {
+                    message: "Wallet pubkey not found among required signers.".to_string(),
+                };
+            }
+        };
+
+        if versioned_tx.signatures.len() != required_signers {
+            versioned_tx.signatures = vec![Signature::default(); required_signers];
+        }
+
+        versioned_tx.signatures[signer_index] = Signature::from(signature_bytes);
+        println!("✅ Bridge: Signature inserted into transaction");
+
+        let signed_tx_bytes = match bincode::serialize(&versioned_tx) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return BridgeResponse::Error {
+                    message: format!("Failed to serialize signed transaction: {}", e),
+                };
+            }
+        };
+        let signed_tx_base58 = bs58::encode(&signed_tx_bytes).into_string();
+        println!("📦 Signed transaction encoded (length: {})", signed_tx_bytes.len());
+
+        BridgeResponse::TransactionSigned {
+            signature: signature_preview,
+            signed_transaction: signed_tx_base58,
+        }
+    }
+
+    async fn sign_and_send_transaction(&self, transaction: &str) -> BridgeResponse {
+        let signed_response = match self.sign_transaction(transaction).await {
+            BridgeResponse::TransactionSigned { signed_transaction, .. } => signed_transaction,
+            other => return other,
+        };
+
+        let signed_tx_bytes = match bs58::decode(&signed_response).into_vec() {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                return BridgeResponse::Error {
+                    message: format!("Failed to decode signed transaction: {}", e),
+                };
+            }
+        };
+
+        let versioned_tx: VersionedTransaction = match bincode::deserialize(&signed_tx_bytes) {
+            Ok(tx) => tx,
+            Err(e) => {
+                return BridgeResponse::Error {
+                    message: format!("Failed to deserialize signed transaction: {}", e),
+                };
+            }
+        };
+
+        let rpc_url = storage::load_rpc_from_storage()
+            .unwrap_or_else(|| "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string());
+        println!("🌐 Bridge: Using RPC: {}", rpc_url);
+
+        let client = RpcClient::new(rpc_url);
+
+        match client.send_transaction(&versioned_tx) {
+            Ok(sig) => {
+                let sig_string = sig.to_string();
+                println!("✅ Bridge: Transaction sent successfully!");
+                println!("🔗 On-chain Signature: {}", sig_string);
+
+                BridgeResponse::TransactionSigned {
+                    signature: sig_string,
+                    signed_transaction: signed_response,
+                }
+            }
+            Err(e) => {
+                println!("❌ Bridge: Failed to send transaction: {}", e);
+                BridgeResponse::Error {
+                    message: format!("Transaction send failed: {}", e),
+                }
+            }
+        }
+    }
+
+    async fn sign_message(&self, message: &str) -> BridgeResponse {
+        let wallet = self.current_wallet.lock().unwrap();
+        let wallet = match wallet.as_ref() {
+            Some(w) => w,
+            None => {
+                return BridgeResponse::Error {
+                    message: "No wallet loaded. Please unlock your desktop wallet first.".to_string(),
+                };
+            }
+        };
+
+        match bs58::decode(message).into_vec() {
+            Ok(msg_bytes) => {
+                let signature = wallet.sign_message(&msg_bytes);
+                let sig_bytes = signature.to_bytes();
+                let sig_base58 = bs58::encode(&sig_bytes).into_string();
+
+                println!("✅ Bridge: Message signed");
+                BridgeResponse::MessageSigned { signature: sig_base58 }
+            }
+            Err(e) => BridgeResponse::Error {
+                message: format!("Invalid message encoding: {}", e),
             },
         }
     }

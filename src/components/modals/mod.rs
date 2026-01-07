@@ -16,6 +16,9 @@ pub mod lend_modal;
 pub mod export_wallet_modal;
 pub mod delete_wallet_modal;
 pub mod privacycash_modal;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+pub mod bridge_sign_modal;
+pub mod quantum_vault_modal;
 // Temporarily disabled for Solana 3.x testing (these depend on Solana 2.x SDKs)
 pub mod squads_modal;
 pub mod carrot_modal;
@@ -39,6 +42,9 @@ pub use lend_modal::LendModal;
 pub use export_wallet_modal::ExportWalletModal;
 pub use delete_wallet_modal::DeleteWalletModal;
 pub use privacycash_modal::PrivacyCashModal;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+pub use bridge_sign_modal::BridgeSignModal;
+pub use quantum_vault_modal::QuantumVaultModal;
 // Temporarily disabled for Solana 3.x testing (these depend on Solana 2.x SDKs)
 pub use carrot_modal::CarrotModal;
 pub use squads_modal::SquadsModal;
