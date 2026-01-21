@@ -6,6 +6,7 @@ use crate::signing::hardware::HardwareSigner;
 use crate::signing::{SignerType, TransactionSigner};
 use crate::privacycash;
 use crate::rpc;
+use crate::storage::{get_address_book_label, get_send_count, increment_send_count};
 use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
 use solana_sdk::pubkey::Pubkey; // ← ADD THIS IMPORT
 use std::cell::RefCell;
@@ -189,6 +190,13 @@ pub fn SendModalWithHardware(
     let mut error_message = use_signal(|| None as Option<String>);
     let mut recipient_balance = use_signal(|| None as Option<f64>);
     let mut checking_balance = use_signal(|| false);
+    let mut recipient_label = use_signal(|| None as Option<String>);
+    let mut recipient_send_count = use_signal(|| None as Option<u64>);
+    let mut delayed_execution = use_signal(|| false);
+    let mut show_delay_modal = use_signal(|| false);
+    let mut delay_seconds = use_signal(|| 20u32);
+    let mut delay_run = use_signal(|| 0u64);
+    let mut pending_send = use_signal(|| false);
     let mut privacy_enabled = use_signal(|| initial_privacy_enabled);
     let mut private_balance = use_signal(|| None as Option<u64>);
     let mut private_balance_loading = use_signal(|| false);
@@ -201,6 +209,318 @@ pub fn SendModalWithHardware(
     
     // Add state for hardware wallet approval overlay - always declared
     let mut show_hardware_approval = use_signal(|| false);
+
+    let execute_send: Rc<RefCell<dyn FnMut()>> = Rc::new(RefCell::new({
+        let hardware_wallet = hardware_wallet.clone();
+        let wallet = wallet.clone();
+        let custom_rpc = custom_rpc.clone();
+        let delayed_execution = delayed_execution.clone();
+        let mut recipient_send_count = recipient_send_count.clone();
+        let mut show_hardware_approval = show_hardware_approval.clone();
+        let mut was_hardware_transaction = was_hardware_transaction.clone();
+        let mut error_message = error_message.clone();
+        let mut sending = sending.clone();
+        let resolved_recipient = resolved_recipient.clone();
+        let amount = amount.clone();
+        let mut transaction_signature = transaction_signature.clone();
+        let mut show_success_modal = show_success_modal.clone();
+        let mut private_balance = private_balance.clone();
+        let mut privacy_progress = privacy_progress.clone();
+        let mut private_balance_loading = private_balance_loading.clone();
+        let on_privacy_refresh = on_privacy_refresh.clone();
+        let privacy_enabled = privacy_enabled.clone();
+        move || {
+            let recipient_pubkey = match resolved_recipient.read().as_ref() {
+                Some(pubkey) => *pubkey,
+                None => {
+                    error_message.set(Some("Please enter a valid recipient address or domain".to_string()));
+                    return;
+                }
+            };
+
+            error_message.set(None);
+            sending.set(true);
+
+            if hardware_wallet.is_some() {
+                show_hardware_approval.set(true);
+                was_hardware_transaction.set(true);
+            } else {
+                was_hardware_transaction.set(false);
+            }
+
+            let hardware_wallet_clone = hardware_wallet.clone();
+            let wallet_info = wallet.clone();
+            let recipient_address = recipient_pubkey.to_string();
+            let amount_str = amount();
+            let rpc_url = custom_rpc.clone();
+            let use_no_timeout = delayed_execution();
+            let mut recipient_send_count = recipient_send_count.clone();
+
+            spawn(async move {
+                let amount_value = match amount_str.parse::<f64>() {
+                    Ok(amt) if amt > 0.0 => amt,
+                    _ => {
+                        error_message.set(Some("Invalid amount".to_string()));
+                        sending.set(false);
+                        show_hardware_approval.set(false);
+                        return;
+                    }
+                };
+
+                if amount_value > current_balance {
+                    error_message.set(Some("Insufficient balance".to_string()));
+                    sending.set(false);
+                    show_hardware_approval.set(false);
+                    return;
+                }
+
+                let client = TransactionClient::new(rpc_url.as_deref());
+
+                if privacy_enabled() {
+                    let signer = if let Some(hw) = hardware_wallet_clone.clone() {
+                        SignerType::Hardware(HardwareSigner::from_wallet(hw))
+                    } else {
+                        let Some(wallet_info) = wallet_info else {
+                            error_message.set(Some("No wallet available".to_string()));
+                            sending.set(false);
+                            return;
+                        };
+
+                        let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
+                            error_message.set(Some("Failed to load wallet".to_string()));
+                            sending.set(false);
+                            return;
+                        };
+
+                        SignerType::from_wallet(wallet)
+                    };
+                    let should_clear_hw = signer.is_hardware();
+                    let Ok(authority) = signer.get_public_key().await else {
+                        error_message.set(Some("Failed to get public key".to_string()));
+                        sending.set(false);
+                        if should_clear_hw {
+                            show_hardware_approval.set(false);
+                        }
+                        return;
+                    };
+
+                    let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
+                        error_message.set(Some("Failed to sign auth message".to_string()));
+                        sending.set(false);
+                        if should_clear_hw {
+                            show_hardware_approval.set(false);
+                        }
+                        return;
+                    };
+
+                    let rpc_url = rpc_url.unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
+                    let lamports = (amount_value * 1_000_000_000.0) as u64;
+                    let mut private_balance_value = private_balance().unwrap_or(0);
+                    privacy_progress.set(Some("Preparing private send…".to_string()));
+
+                    if private_balance_value < lamports {
+                        let topup = lamports - private_balance_value;
+                        let topup_sol = topup as f64 / 1_000_000_000.0;
+                        privacy_progress.set(Some("Step 1/2: Depositing to private balance…".to_string()));
+                        let mut tx = match privacycash::build_deposit_tx(
+                            &authority,
+                            &signature,
+                            topup,
+                            Some(rpc_url.as_str()),
+                        )
+                        .await
+                        {
+                            Ok(tx) => tx,
+                            Err(err) => {
+                                error_message.set(Some(format!("Failed to build deposit tx: {err}")));
+                                sending.set(false);
+                                if should_clear_hw {
+                                    show_hardware_approval.set(false);
+                                }
+                                return;
+                            }
+                        };
+
+                        let tx_client = TransactionClient::new(Some(rpc_url.as_str()));
+                        let recent_blockhash = match tx_client.get_recent_blockhash().await {
+                            Ok(hash) => hash,
+                            Err(err) => {
+                                error_message.set(Some(format!("Failed to get blockhash: {err}")));
+                                sending.set(false);
+                                if should_clear_hw {
+                                    show_hardware_approval.set(false);
+                                }
+                                return;
+                            }
+                        };
+
+                        if let Err(err) = privacycash::sign_transaction(&signer, &mut tx, recent_blockhash).await {
+                            error_message.set(Some(format!("Failed to sign deposit tx: {err}")));
+                            sending.set(false);
+                            if should_clear_hw {
+                                show_hardware_approval.set(false);
+                            }
+                            return;
+                        }
+
+                        if let Err(err) = privacycash::submit_deposit(&authority, &tx).await {
+                            error_message.set(Some(format!("Deposit failed: {err}")));
+                            sending.set(false);
+                            if should_clear_hw {
+                                show_hardware_approval.set(false);
+                            }
+                            return;
+                        }
+
+                        sleep(Duration::from_secs(4)).await;
+                        if let Ok(balance) = privacycash::get_private_balance(
+                            &authority,
+                            &signature,
+                            Some(rpc_url.as_str()),
+                        )
+                        .await
+                        {
+                            private_balance_value = balance;
+                            private_balance.set(Some(balance));
+                        }
+                        privacy_progress.set(Some(format!("Step 1/2 complete: Deposited {:.4} SOL", topup_sol)));
+                    }
+
+                    privacy_progress.set(Some("Step 2/2: Sending privately…".to_string()));
+                    let req = match privacycash::build_withdraw_request(
+                        &authority,
+                        &signature,
+                        lamports,
+                        &recipient_address,
+                        Some(rpc_url.as_str()),
+                    )
+                    .await
+                    {
+                        Ok(req) => req,
+                        Err(err) => {
+                            error_message.set(Some(format!("Failed to build withdraw request: {err}")));
+                            sending.set(false);
+                            if should_clear_hw {
+                                show_hardware_approval.set(false);
+                            }
+                            return;
+                        }
+                    };
+
+                    match privacycash::submit_withdraw(&req).await {
+                        Ok(signature) => {
+                            privacy_progress.set(None);
+                            transaction_signature.set(signature);
+                            let new_count = increment_send_count(&recipient_address);
+                            recipient_send_count.set(Some(new_count));
+                            sending.set(false);
+                            if should_clear_hw {
+                                show_hardware_approval.set(false);
+                            }
+                            show_success_modal.set(true);
+                            on_privacy_refresh.call(());
+                        }
+                        Err(err) => {
+                            privacy_progress.set(None);
+                            error_message.set(Some(format!("Withdraw failed: {err}")));
+                            sending.set(false);
+                            if should_clear_hw {
+                                show_hardware_approval.set(false);
+                            }
+                        }
+                    }
+                } else if let Some(hw) = hardware_wallet_clone {
+                    let hw_signer = HardwareSigner::from_wallet(hw.clone());
+                    let send_result = if use_no_timeout {
+                        client.send_sol_with_signer_no_timeout(&hw_signer, &recipient_address, amount_value).await
+                    } else {
+                        client.send_sol_with_signer(&hw_signer, &recipient_address, amount_value).await
+                    };
+                    match send_result {
+                        Ok(signature) => {
+                            println!("Transaction sent with hardware wallet: {}", signature);
+                            show_hardware_approval.set(false);
+                            transaction_signature.set(signature);
+                            let new_count = increment_send_count(&recipient_address);
+                            recipient_send_count.set(Some(new_count));
+                            sending.set(false);
+                            show_success_modal.set(true);
+                        }
+                        Err(e) => {
+                            error_message.set(Some(format!("Transaction failed: {}", e)));
+                            sending.set(false);
+                            show_hardware_approval.set(false);
+                        }
+                    }
+                } else if let Some(wallet_info) = wallet_info {
+                    match Wallet::from_wallet_info(&wallet_info) {
+                        Ok(wallet) => {
+                            let send_result = if use_no_timeout {
+                                client.send_sol_no_timeout(&wallet, &recipient_address, amount_value).await
+                            } else {
+                                client.send_sol(&wallet, &recipient_address, amount_value).await
+                            };
+                            match send_result {
+                                Ok(signature) => {
+                                    println!("Transaction sent: {}", signature);
+                                    transaction_signature.set(signature);
+                                    let new_count = increment_send_count(&recipient_address);
+                                    recipient_send_count.set(Some(new_count));
+                                    sending.set(false);
+                                    show_success_modal.set(true);
+                                }
+                                Err(e) => {
+                                    error_message.set(Some(format!("Transaction failed: {}", e)));
+                                    sending.set(false);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error_message.set(Some(format!("Failed to load wallet: {}", e)));
+                            sending.set(false);
+                        }
+                    }
+                } else {
+                    error_message.set(Some("No wallet available".to_string()));
+                    sending.set(false);
+                    show_hardware_approval.set(false);
+                }
+
+            });
+        }
+    }));
+
+    let execute_send_for_delay = Rc::clone(&execute_send);
+    use_effect(move || {
+        let run_id = delay_run();
+        if !show_delay_modal() {
+            return;
+        }
+        let execute_send = Rc::clone(&execute_send_for_delay);
+        spawn(async move {
+            loop {
+                if !show_delay_modal() || delay_run() != run_id {
+                    break;
+                }
+                let remaining = delay_seconds();
+                if remaining == 0 {
+                    if pending_send() {
+                        show_delay_modal.set(false);
+                        pending_send.set(false);
+                            execute_send.borrow_mut()();
+                        }
+                    break;
+                }
+                sleep(Duration::from_secs(1)).await;
+                if show_delay_modal() && delay_run() == run_id {
+                    let remaining_now = delay_seconds();
+                    if remaining_now > 0 {
+                        delay_seconds.set(remaining_now - 1);
+                    }
+                }
+            }
+        });
+    });
 
     // Update the recipient balance checking effect to use resolved recipient
     let custom_rpc_for_effect = custom_rpc.clone();
@@ -226,6 +546,22 @@ pub fn SendModalWithHardware(
         } else {
             recipient_balance.set(None);
             checking_balance.set(false);
+        }
+    });
+
+    use_effect(move || {
+        if let Some(resolved_pubkey) = *resolved_recipient.read() {
+            let address = resolved_pubkey.to_string();
+            recipient_label.set(get_address_book_label(&address));
+            let count = get_send_count(&address);
+            if count > 0 {
+                recipient_send_count.set(Some(count));
+            } else {
+                recipient_send_count.set(None);
+            }
+        } else {
+            recipient_label.set(None);
+            recipient_send_count.set(None);
         }
     });
 
@@ -411,7 +747,8 @@ pub fn SendModalWithHardware(
                         on_change: move |val| recipient.set(val),
                         on_resolved: move |pubkey| resolved_recipient.set(pubkey),
                         label: "Send to:",
-                        placeholder: "Enter address or domain (e.g., kvty.sol)"
+                        placeholder: "Enter address or domain (e.g., kvty.sol)",
+                        show_address_book: Some(true)
                     }
                     
                     // Keep the recipient balance display
@@ -426,6 +763,18 @@ pub fn SendModalWithHardware(
                             "Balance: {balance:.4} SOL"
                         }
                     }
+                    if let Some(label) = recipient_label() {
+                        div {
+                            class: "recipient-balance",
+                            "Tag: {label}"
+                        }
+                    }
+                    if let Some(count) = recipient_send_count() {
+                        div {
+                            class: "recipient-balance",
+                            "Sent {count} times"
+                        }
+                    }
                 }
 
                 div {
@@ -438,6 +787,27 @@ pub fn SendModalWithHardware(
                         placeholder: "0.0",
                         step: "0.0001",
                         min: "0"
+                    }
+                }
+
+                div {
+                    class: "wallet-field privacy-field",
+                    div {
+                        class: "privacy-row",
+                        div {
+                            class: "privacy-label",
+                            span { "Delayed execution" }
+                            span { class: "privacy-subtitle", "Show a 20s confirmation screen before sending" }
+                        }
+                        label {
+                            class: "privacy-toggle",
+                            input {
+                                r#type: "checkbox",
+                                checked: delayed_execution(),
+                                oninput: move |_| delayed_execution.set(!delayed_execution()),
+                            }
+                            span { class: "toggle-slider" }
+                        }
                     }
                 }
 
@@ -512,11 +882,83 @@ pub fn SendModalWithHardware(
                     }
                 }
 
+                if show_delay_modal() {
+                    div {
+                        class: "modal-backdrop",
+                        onclick: move |_| {},
+                        div {
+                            class: "modal-content",
+                            onclick: move |e| e.stop_propagation(),
+                            style: "
+                                max-width: 420px;
+                                margin: 0 auto;
+                                text-align: center;
+                            ",
+                            div { class: "tx-icon-container",
+                                div { class: "tx-success-icon", "✓" }
+                            }
+                            h2 { class: "modal-title", "Confirm Transfer" }
+                            div { class: "success-message",
+                                "Sending {amount()} SOL"
+                            }
+                            if let Some(recipient_pubkey) = *resolved_recipient.read() {
+                                div { class: "transaction-details",
+                                    div { class: "wallet-field",
+                                        label { "Recipient" }
+                                        div { class: "address-display", "{recipient_pubkey}" }
+                                    }
+                                    if let Some(label) = recipient_label() {
+                                        div { class: "wallet-field",
+                                            label { "Saved tag" }
+                                            div { class: "recipient-balance", "{label}" }
+                                        }
+                                    }
+                                    if let Some(count) = recipient_send_count() {
+                                        div { class: "wallet-field",
+                                            label { "Sent count" }
+                                            div { class: "recipient-balance", "{count} times" }
+                                        }
+                                    }
+                                    if checking_balance() {
+                                        div { class: "wallet-field",
+                                            label { "Recipient balance" }
+                                            div { class: "recipient-balance checking", "Checking balance..." }
+                                        }
+                                    } else if let Some(balance) = recipient_balance() {
+                                        div { class: "wallet-field",
+                                            label { "Recipient balance" }
+                                            div { class: "recipient-balance", "{balance:.4} SOL" }
+                                        }
+                                    }
+                                }
+                            }
+                            div { class: "recipient-balance", "Sending in {delay_seconds()}s" }
+                            div { class: "modal-buttons",
+                                button {
+                                    class: "modal-button cancel",
+                                    onclick: move |_| {
+                                        show_delay_modal.set(false);
+                                        pending_send.set(false);
+                                        delay_seconds.set(20);
+                                    },
+                                    "Cancel"
+                                }
+                                button {
+                                    class: "modal-button primary",
+                                    onclick: move |_| {
+                                        delay_seconds.set(0);
+                                    },
+                                    "Send now"
+                                }
+                            }
+                        }
+                    }
+                }
+
                 div { class: "modal-buttons",
                     button {
                         class: "modal-button primary",
                         onclick: move |_| {
-                            // ← VALIDATE RESOLVED RECIPIENT FIRST
                             let recipient_pubkey = match resolved_recipient.read().as_ref() {
                                 Some(pubkey) => *pubkey,
                                 None => {
@@ -526,253 +968,29 @@ pub fn SendModalWithHardware(
                             };
 
                             error_message.set(None);
-                            sending.set(true);
-
-                            // Show hardware approval overlay if using hardware wallet
-                            if hardware_wallet.is_some() {
-                                show_hardware_approval.set(true);
-                                was_hardware_transaction.set(true);
-                            } else {
-                                was_hardware_transaction.set(false);
-                            }
-
-                            // IMPORTANT: Clone these values to use in the async task
-                            // but don't move hardware_wallet itself - we want to keep the reference
-                            let hardware_wallet_clone = hardware_wallet.clone();
-                            let wallet_info = wallet.clone();
-                            let recipient_address = recipient_pubkey.to_string(); // ← USE RESOLVED PUBKEY
-                            let amount_str = amount();
-                            let rpc_url = custom_rpc.clone();
-
-                            // Clone the onhardware event handler for use in async block
-                            let onhardware_handler = onhardware.clone();
-
-                            spawn(async move {
-                                // Validate inputs
-                                let amount_value = match amount_str.parse::<f64>() {
+                            if delayed_execution() {
+                                let amount_value = match amount().parse::<f64>() {
                                     Ok(amt) if amt > 0.0 => amt,
                                     _ => {
                                         error_message.set(Some("Invalid amount".to_string()));
-                                        sending.set(false);
-                                        show_hardware_approval.set(false);
                                         return;
                                     }
                                 };
 
                                 if amount_value > current_balance {
                                     error_message.set(Some("Insufficient balance".to_string()));
-                                    sending.set(false);
-                                    show_hardware_approval.set(false);
                                     return;
                                 }
 
-                                // ← NO NEED TO VALIDATE recipient_address anymore since it's already a valid pubkey!
+                                delay_seconds.set(20);
+                                delay_run.set(delay_run() + 1);
+                                pending_send.set(true);
+                                show_delay_modal.set(true);
+                                return;
+                            }
 
-                                let client = TransactionClient::new(rpc_url.as_deref());
-
-                                // Use hardware wallet if available, otherwise use software wallet
-                                if privacy_enabled() {
-                                    let signer = if let Some(hw) = hardware_wallet_clone.clone() {
-                                        SignerType::Hardware(HardwareSigner::from_wallet(hw))
-                                    } else {
-                                        let Some(wallet_info) = wallet_info else {
-                                            error_message.set(Some("No wallet available".to_string()));
-                                            sending.set(false);
-                                            return;
-                                        };
-
-                                        let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
-                                            error_message.set(Some("Failed to load wallet".to_string()));
-                                            sending.set(false);
-                                            return;
-                                        };
-
-                                        SignerType::from_wallet(wallet)
-                                    };
-                                    let should_clear_hw = signer.is_hardware();
-                                    let Ok(authority) = signer.get_public_key().await else {
-                                        error_message.set(Some("Failed to get public key".to_string()));
-                                        sending.set(false);
-                                        if should_clear_hw {
-                                            show_hardware_approval.set(false);
-                                        }
-                                        return;
-                                    };
-
-                                    let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
-                                        error_message.set(Some("Failed to sign auth message".to_string()));
-                                        sending.set(false);
-                                        if should_clear_hw {
-                                            show_hardware_approval.set(false);
-                                        }
-                                        return;
-                                    };
-
-                                    let rpc_url = rpc_url.unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
-                                    let lamports = (amount_value * 1_000_000_000.0) as u64;
-                                    let mut private_balance_value = private_balance().unwrap_or(0);
-                                    privacy_progress.set(Some("Preparing private send…".to_string()));
-
-                                    if private_balance_value < lamports {
-                                        let topup = lamports - private_balance_value;
-                                        let topup_sol = topup as f64 / 1_000_000_000.0;
-                                        privacy_progress.set(Some("Step 1/2: Depositing to private balance…".to_string()));
-                                        let mut tx = match privacycash::build_deposit_tx(
-                                            &authority,
-                                            &signature,
-                                            topup,
-                                            Some(rpc_url.as_str()),
-                                        )
-                                        .await
-                                        {
-                                            Ok(tx) => tx,
-                                            Err(err) => {
-                                                error_message.set(Some(format!("Failed to build deposit tx: {err}")));
-                                                sending.set(false);
-                                                if should_clear_hw {
-                                                    show_hardware_approval.set(false);
-                                                }
-                                                return;
-                                            }
-                                        };
-
-                                        let tx_client = TransactionClient::new(Some(rpc_url.as_str()));
-                                        let recent_blockhash = match tx_client.get_recent_blockhash().await {
-                                            Ok(hash) => hash,
-                                            Err(err) => {
-                                                error_message.set(Some(format!("Failed to get blockhash: {err}")));
-                                                sending.set(false);
-                                                if should_clear_hw {
-                                                    show_hardware_approval.set(false);
-                                                }
-                                                return;
-                                            }
-                                        };
-
-                                        if let Err(err) = privacycash::sign_transaction(&signer, &mut tx, recent_blockhash).await {
-                                            error_message.set(Some(format!("Failed to sign deposit tx: {err}")));
-                                            sending.set(false);
-                                            if should_clear_hw {
-                                                show_hardware_approval.set(false);
-                                            }
-                                            return;
-                                        }
-
-                                        if let Err(err) = privacycash::submit_deposit(&authority, &tx).await {
-                                            error_message.set(Some(format!("Deposit failed: {err}")));
-                                            sending.set(false);
-                                            if should_clear_hw {
-                                                show_hardware_approval.set(false);
-                                            }
-                                            return;
-                                        }
-
-                                        sleep(Duration::from_secs(4)).await;
-                                        if let Ok(balance) = privacycash::get_private_balance(
-                                            &authority,
-                                            &signature,
-                                            Some(rpc_url.as_str()),
-                                        )
-                                        .await
-                                        {
-                                            private_balance_value = balance;
-                                            private_balance.set(Some(balance));
-                                        }
-                                        privacy_progress.set(Some(format!("Step 1/2 complete: Deposited {:.4} SOL", topup_sol)));
-                                    }
-
-                                    privacy_progress.set(Some("Step 2/2: Sending privately…".to_string()));
-                                    let req = match privacycash::build_withdraw_request(
-                                        &authority,
-                                        &signature,
-                                        lamports,
-                                        &recipient_address,
-                                        Some(rpc_url.as_str()),
-                                    )
-                                    .await
-                                    {
-                                        Ok(req) => req,
-                                        Err(err) => {
-                                            error_message.set(Some(format!("Failed to build withdraw request: {err}")));
-                                            sending.set(false);
-                                            if should_clear_hw {
-                                                show_hardware_approval.set(false);
-                                            }
-                                            return;
-                                        }
-                                    };
-
-                                    match privacycash::submit_withdraw(&req).await {
-                                        Ok(signature) => {
-                                            privacy_progress.set(None);
-                                            transaction_signature.set(signature);
-                                            sending.set(false);
-                                            if should_clear_hw {
-                                                show_hardware_approval.set(false);
-                                            }
-                                            show_success_modal.set(true);
-                                            on_privacy_refresh.call(());
-                                        }
-                                        Err(err) => {
-                                            privacy_progress.set(None);
-                                            error_message.set(Some(format!("Withdraw failed: {err}")));
-                                            sending.set(false);
-                                            if should_clear_hw {
-                                                show_hardware_approval.set(false);
-                                            }
-                                        }
-                                    }
-                                } else if let Some(hw) = hardware_wallet_clone {
-                                    let hw_signer = HardwareSigner::from_wallet(hw.clone());
-                                    match client.send_sol_with_signer(&hw_signer, &recipient_address, amount_value).await {
-                                        Ok(signature) => {
-                                            println!("Transaction sent with hardware wallet: {}", signature);
-
-                                            // Hide hardware approval overlay
-                                            show_hardware_approval.set(false);
-
-                                            // Set the transaction signature and show success modal
-                                            transaction_signature.set(signature);
-                                            sending.set(false);
-                                            show_success_modal.set(true);
-                                        }
-                                        Err(e) => {
-                                            error_message.set(Some(format!("Transaction failed: {}", e)));
-                                            sending.set(false);
-                                            show_hardware_approval.set(false);
-                                        }
-                                    }
-                                } else if let Some(wallet_info) = wallet_info {
-                                    // Load wallet from wallet info
-                                    match Wallet::from_wallet_info(&wallet_info) {
-                                        Ok(wallet) => {
-                                            // Send transaction with amount in SOL
-                                            match client.send_sol(&wallet, &recipient_address, amount_value).await {
-                                                Ok(signature) => {
-                                                    println!("Transaction sent: {}", signature);
-                                                    
-                                                    // Set the transaction signature and show success modal
-                                                    transaction_signature.set(signature);
-                                                    sending.set(false);
-                                                    show_success_modal.set(true);
-                                                }
-                                                Err(e) => {
-                                                    error_message.set(Some(format!("Transaction failed: {}", e)));
-                                                    sending.set(false);
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            error_message.set(Some(format!("Failed to load wallet: {}", e)));
-                                            sending.set(false);
-                                        }
-                                    }
-                                } else {
-                                    error_message.set(Some("No wallet available".to_string()));
-                                    sending.set(false);
-                                    show_hardware_approval.set(false);
-                                }
-                            });
+                            let _ = recipient_pubkey;
+                            execute_send.borrow_mut()();
                         },
                         disabled: sending() || resolved_recipient.read().is_none() || amount().is_empty(), // ← UPDATED VALIDATION
                         if sending() && !show_hardware_approval() { "Sending..." } else { "Send" }

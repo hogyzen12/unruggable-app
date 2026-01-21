@@ -681,6 +681,17 @@ impl TransactionClient {
         let signer = SignerType::from_wallet(from_wallet.clone());
         self.send_sol_with_signer(&signer, to_address, amount_sol).await
     }
+
+    /// Send SOL without timeout instruction (used for delayed execution flow)
+    pub async fn send_sol_no_timeout(
+        &self,
+        from_wallet: &Wallet,
+        to_address: &str,
+        amount_sol: f64,
+    ) -> Result<String, Box<dyn Error>> {
+        let signer = SignerType::from_wallet(from_wallet.clone());
+        self.send_sol_with_signer_no_timeout(&signer, to_address, amount_sol).await
+    }
     
     /// Send SOL using any signer type
     pub async fn send_sol_with_signer(
@@ -772,6 +783,53 @@ impl TransactionClient {
         println!("Serialized transaction: {} bytes", encoded_transaction.len());
         
         // Send the transaction
+        self.send_transaction(&encoded_transaction).await
+    }
+
+    /// Send SOL using any signer type without timeout instruction
+    pub async fn send_sol_with_signer_no_timeout(
+        &self,
+        signer: &dyn TransactionSigner,
+        to_address: &str,
+        amount_sol: f64,
+    ) -> Result<String, Box<dyn Error>> {
+        let jito_settings = get_current_jito_settings();
+        let from_pubkey_str = signer.get_public_key().await?;
+        let from_pubkey = Pubkey::from_str(&from_pubkey_str)?;
+        let to_pubkey = Pubkey::from_str(to_address)?;
+        let amount_lamports = (amount_sol * 1_000_000_000.0) as u64;
+
+        let recent_blockhash = self.get_recent_blockhash().await?;
+        let transfer_instruction = system_instruction::transfer(
+            &from_pubkey,
+            &to_pubkey,
+            amount_lamports,
+        );
+        let mut instructions = vec![transfer_instruction];
+
+        if jito_settings.jito_tx {
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, signer.is_hardware())?;
+        }
+
+        let mut message = Message::new(&instructions, Some(&from_pubkey));
+        message.recent_blockhash = recent_blockhash;
+
+        let mut transaction = VersionedTransaction {
+            signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+            message: VersionedMessage::Legacy(message),
+        };
+
+        let message_bytes = transaction.message.serialize();
+        let signature_bytes = signer.sign_message(&message_bytes).await?;
+        if signature_bytes.len() != 64 {
+            return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()).into());
+        }
+        let mut sig_array = [0u8; 64];
+        sig_array.copy_from_slice(&signature_bytes);
+        transaction.signatures[0] = SolanaSignature::from(sig_array);
+
+        let serialized_transaction = bincode::serialize(&transaction)?;
+        let encoded_transaction = bs58::encode(serialized_transaction).into_string();
         self.send_transaction(&encoded_transaction).await
     }
 

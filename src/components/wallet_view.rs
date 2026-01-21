@@ -11,8 +11,11 @@ use crate::storage::{
     delete_wallet_from_storage,
     load_bridge_settings_from_storage,
     save_bridge_settings_to_storage,
+    load_integration_settings_from_storage,
+    save_integration_settings_to_storage,
     JitoSettings,
-    BridgeSettings
+    BridgeSettings,
+    IntegrationSettings
 };
 use crate::currency::{
     SELECTED_CURRENCY, 
@@ -36,7 +39,7 @@ use crate::components::{LiquidMetalButton, LiquidMetalStatus};
 use crate::privacycash;
 use crate::signing::{SignerType, TransactionSigner};
 // Temporarily disabled integrations for Solana 3.x testing
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, PrivacyCashModal, CarrotModal, BonkStakingModal, SquadsModal, QuantumVaultModal};
+use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, RetireModal, RetireResult, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, PrivacyCashModal, CarrotModal, BonkStakingModal, SquadsModal, QuantumVaultModal};
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
 use crate::components::modals::BridgeSignModal;
 use crate::components::modals::send_modal::HardwareWalletEvent;
@@ -109,6 +112,7 @@ const ICON_WALLET: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@
 const ICON_CREATE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ADD_wallet.svg";
 const ICON_IMPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/IMPORT_wallet.svg";
 const ICON_EXPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/EXPORT_wallet.svg";
+const ICON_RETIRE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/DELETE_wallet.svg";
 const ICON_DELETE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/DELETE_wallet.svg";
 const ICON_RPC: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/RPC.svg";
 const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
@@ -479,6 +483,8 @@ pub fn WalletView() -> Element {
     
     // Integrations collapse/expand state
     let mut show_integrations = use_signal(|| false);
+    let mut integration_settings = use_signal(|| load_integration_settings_from_storage());
+    let integration_settings_value = integration_settings();
 
     // Hardware wallet state
     let mut hardware_wallet = use_signal(|| None as Option<Arc<HardwareWallet>>);
@@ -567,6 +573,7 @@ pub fn WalletView() -> Element {
     // Eject mode state management (separate from bulk send)
     let mut eject_mode = use_signal(|| false);
     let mut show_eject_modal = use_signal(|| false);
+    let mut show_retire_modal = use_signal(|| false);
 
     let mut multi_timeframe_data = use_signal(|| HashMap::<String, prices::MultiTimeframePriceData>::new());
     let mut expanded_tokens = use_signal(|| HashSet::<String>::new());
@@ -600,6 +607,14 @@ pub fn WalletView() -> Element {
             {
                 handler.set_enabled(enabled);
             }
+        }
+    };
+
+    let update_integration_settings = {
+        let mut integration_settings = integration_settings.clone();
+        move |new_settings: IntegrationSettings| {
+            integration_settings.set(new_settings);
+            save_integration_settings_to_storage(&new_settings);
         }
     };
     
@@ -733,6 +748,318 @@ pub fn WalletView() -> Element {
         {
             None
         }
+    };
+
+    let integration_settings_menu = {
+        let mut lend_click = update_integration_settings.clone();
+        let mut lend_change = update_integration_settings.clone();
+        let mut lend_click_settings = integration_settings.clone();
+        let mut lend_change_settings = integration_settings.clone();
+
+        let mut squads_click = update_integration_settings.clone();
+        let mut squads_change = update_integration_settings.clone();
+        let mut squads_click_settings = integration_settings.clone();
+        let mut squads_change_settings = integration_settings.clone();
+
+        let mut carrot_click = update_integration_settings.clone();
+        let mut carrot_change = update_integration_settings.clone();
+        let mut carrot_click_settings = integration_settings.clone();
+        let mut carrot_change_settings = integration_settings.clone();
+
+        let mut bonk_click = update_integration_settings.clone();
+        let mut bonk_change = update_integration_settings.clone();
+        let mut bonk_click_settings = integration_settings.clone();
+        let mut bonk_change_settings = integration_settings.clone();
+
+        let mut quantum_click = update_integration_settings.clone();
+        let mut quantum_change = update_integration_settings.clone();
+        let mut quantum_click_settings = integration_settings.clone();
+        let mut quantum_change_settings = integration_settings.clone();
+
+        let mut eject_click = update_integration_settings.clone();
+        let mut eject_change = update_integration_settings.clone();
+        let mut eject_click_settings = integration_settings.clone();
+        let mut eject_change_settings = integration_settings.clone();
+
+        let mut privacy_click = update_integration_settings.clone();
+        let mut privacy_change = update_integration_settings.clone();
+        let mut privacy_click_settings = integration_settings.clone();
+        let mut privacy_change_settings = integration_settings.clone();
+
+        let mut retire_click = update_integration_settings.clone();
+        let mut retire_change = update_integration_settings.clone();
+        let mut retire_click_settings = integration_settings.clone();
+        let mut retire_change_settings = integration_settings.clone();
+
+        rsx!(
+            button {
+                class: "dropdown-item",
+                onclick: move |_| {
+                    let mut settings = lend_click_settings();
+                    settings.lend = !settings.lend;
+                    lend_click(settings);
+                },
+                div {
+                    class: "dropdown-icon action-icon",
+                    img {
+                        src: "{ICON_LEND}",
+                        alt: "Lend",
+                        style: "width: 20px; height: 20px;"
+                    }
+                }
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                    span { "Lend" }
+                    label {
+                        class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: integration_settings().lend,
+                            onchange: move |e| {
+                                let mut settings = lend_change_settings();
+                                settings.lend = e.checked();
+                                lend_change(settings);
+                            },
+                        }
+                        span { class: "toggle-slider" }
+                    }
+                }
+            }
+
+            button {
+                class: "dropdown-item",
+                onclick: move |_| {
+                    let mut settings = squads_click_settings();
+                    settings.squads = !settings.squads;
+                    squads_click(settings);
+                },
+                div {
+                    class: "dropdown-icon action-icon",
+                    img {
+                        src: "{ICON_SQUADS}",
+                        alt: "Squads",
+                        style: "width: 20px; height: 20px;"
+                    }
+                }
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                    span { "Squads" }
+                    label {
+                        class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: integration_settings().squads,
+                            onchange: move |e| {
+                                let mut settings = squads_change_settings();
+                                settings.squads = e.checked();
+                                squads_change(settings);
+                            },
+                        }
+                        span { class: "toggle-slider" }
+                    }
+                }
+            }
+
+            button {
+                class: "dropdown-item",
+                onclick: move |_| {
+                    let mut settings = carrot_click_settings();
+                    settings.carrot = !settings.carrot;
+                    carrot_click(settings);
+                },
+                div {
+                    class: "dropdown-icon action-icon",
+                    img {
+                        src: "{ICON_CARROT}",
+                        alt: "Carrot",
+                        style: "width: 20px; height: 20px;"
+                    }
+                }
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                    span { "Carrot" }
+                    label {
+                        class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: integration_settings().carrot,
+                            onchange: move |e| {
+                                let mut settings = carrot_change_settings();
+                                settings.carrot = e.checked();
+                                carrot_change(settings);
+                            },
+                        }
+                        span { class: "toggle-slider" }
+                    }
+                }
+            }
+
+            button {
+                class: "dropdown-item",
+                onclick: move |_| {
+                    let mut settings = bonk_click_settings();
+                    settings.bonk_stake = !settings.bonk_stake;
+                    bonk_click(settings);
+                },
+                div {
+                    class: "dropdown-icon action-icon",
+                    img {
+                        src: "{ICON_BONK_STAKE}",
+                        alt: "BONK Stake",
+                        style: "width: 20px; height: 20px;"
+                    }
+                }
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                    span { "BONK Stake" }
+                    label {
+                        class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: integration_settings().bonk_stake,
+                            onchange: move |e| {
+                                let mut settings = bonk_change_settings();
+                                settings.bonk_stake = e.checked();
+                                bonk_change(settings);
+                            },
+                        }
+                        span { class: "toggle-slider" }
+                    }
+                }
+            }
+
+            button {
+                class: "dropdown-item",
+                onclick: move |_| {
+                    let mut settings = quantum_click_settings();
+                    settings.quantum = !settings.quantum;
+                    quantum_click(settings);
+                },
+                div {
+                    class: "dropdown-icon action-icon",
+                    img {
+                        src: "{ICON_QUANTUM}",
+                        alt: "Quantum Vault",
+                        style: "width: 20px; height: 20px;"
+                    }
+                }
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                    span { "Quantum" }
+                    label {
+                        class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: integration_settings().quantum,
+                            onchange: move |e| {
+                                let mut settings = quantum_change_settings();
+                                settings.quantum = e.checked();
+                                quantum_change(settings);
+                            },
+                        }
+                        span { class: "toggle-slider" }
+                    }
+                }
+            }
+
+            button {
+                class: "dropdown-item",
+                onclick: move |_| {
+                    let mut settings = eject_click_settings();
+                    settings.eject = !settings.eject;
+                    eject_click(settings);
+                },
+                div {
+                    class: "dropdown-icon action-icon",
+                    img {
+                        src: "{ICON_EXPORT}",
+                        alt: "EJECT",
+                        style: "width: 20px; height: 20px;"
+                    }
+                }
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                    span { "EJECT" }
+                    label {
+                        class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: integration_settings().eject,
+                            onchange: move |e| {
+                                let mut settings = eject_change_settings();
+                                settings.eject = e.checked();
+                                eject_change(settings);
+                            },
+                        }
+                        span { class: "toggle-slider" }
+                    }
+                }
+            }
+
+            button {
+                class: "dropdown-item",
+                onclick: move |_| {
+                    let mut settings = privacy_click_settings();
+                    settings.privacy = !settings.privacy;
+                    privacy_click(settings);
+                },
+                div {
+                    class: "dropdown-icon action-icon",
+                    span { "🔒" }
+                }
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                    span { "Privacy" }
+                    label {
+                        class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: integration_settings().privacy,
+                            onchange: move |e| {
+                                let mut settings = privacy_change_settings();
+                                settings.privacy = e.checked();
+                                privacy_change(settings);
+                            },
+                        }
+                        span { class: "toggle-slider" }
+                    }
+                }
+            }
+
+            button {
+                class: "dropdown-item",
+                onclick: move |_| {
+                    let mut settings = retire_click_settings();
+                    settings.retire = !settings.retire;
+                    retire_click(settings);
+                },
+                div {
+                    class: "dropdown-icon action-icon",
+                    img {
+                        src: "{ICON_RETIRE}",
+                        alt: "RETIRE",
+                        style: "width: 20px; height: 20px;"
+                    }
+                }
+                div {
+                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
+                    span { "RETIRE" }
+                    label {
+                        class: "toggle-switch",
+                        input {
+                            r#type: "checkbox",
+                            checked: integration_settings().retire,
+                            onchange: move |e| {
+                                let mut settings = retire_change_settings();
+                                settings.retire = e.checked();
+                                retire_change(settings);
+                            },
+                        }
+                        span { class: "toggle-slider" }
+                    }
+                }
+            }
+        )
     };
 
     // Monitor hardware wallet presence - check every 2 seconds
@@ -1732,6 +2059,10 @@ pub fn WalletView() -> Element {
                         }
                         
                         div { class: "dropdown-divider" }
+
+                        {integration_settings_menu}
+
+                        div { class: "dropdown-divider" }
                         
                         // Existing action buttons (unchanged)
                         button {
@@ -2252,6 +2583,59 @@ pub fn WalletView() -> Element {
                 }
             }
 
+            if show_retire_modal() {
+                RetireModal {
+                    all_tokens: tokens(),
+                    wallet: current_wallet.clone(),
+                    hardware_wallet: hardware_wallet(),
+                    current_balance: balance(),
+                    sol_price: sol_price(),
+                    custom_rpc: custom_rpc(),
+                    onclose: move |_| show_retire_modal.set(false),
+                    onsuccess: move |result: RetireResult| {
+                        show_retire_modal.set(false);
+                        println!("RETIRE completed: {}", result.signature);
+                        println!("RETIRE residual balance: {:.8} SOL", result.residual_balance);
+
+                        if result.remove_from_storage {
+                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                            let handler_for_delete = bridge_handler.clone();
+
+                            let current_index = current_wallet_index();
+                            let wallet_address_to_delete = {
+                                wallets.read().get(current_index).map(|w| w.address.clone())
+                            };
+
+                            if let Some(wallet_address) = wallet_address_to_delete {
+                                delete_wallet_from_storage(&wallet_address);
+                                wallets.set(load_wallets_from_storage());
+
+                                let wallet_count = wallets.read().len();
+                                if wallet_count == 0 {
+                                    current_wallet_index.set(0);
+                                } else if current_index >= wallet_count {
+                                    current_wallet_index.set(wallet_count - 1);
+                                }
+
+                                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+                                {
+                                    let new_index = current_wallet_index();
+                                    if let Some(wallet_info) = wallets.read().get(new_index) {
+                                        if let Ok(wallet) = Wallet::from_wallet_info(wallet_info) {
+                                            handler_for_delete.update_wallet(wallet);
+                                        }
+                                    }
+                                }
+
+                                balance.set(0.0);
+                            }
+                        } else {
+                            refresh_trigger.set(refresh_trigger() + 1);
+                        }
+                    }
+                }
+            }
+
             if show_receive_modal() {
                 ReceiveModal {
                     wallet: current_wallet.clone(),
@@ -2625,162 +3009,194 @@ pub fn WalletView() -> Element {
                         div {
                             class: "integrations-row",
                             
-                            button {
-                                class: "action-button-segmented",
-                                onclick: move |_| {
-                                    println!("Lend button clicked!");
-                                    show_lend_modal.set(true);
-                                },
-                                
-                                div {
-                                    class: "action-icon-segmented",
-                                    img { 
-                                        src: "{ICON_LEND}",
-                                        alt: "Lend"
+                            if integration_settings_value.lend {
+                                button {
+                                    class: "action-button-segmented",
+                                    onclick: move |_| {
+                                        println!("Lend button clicked!");
+                                        show_lend_modal.set(true);
+                                    },
+                                    
+                                    div {
+                                        class: "action-icon-segmented",
+                                        img { 
+                                            src: "{ICON_LEND}",
+                                            alt: "Lend"
+                                        }
                                     }
-                                }
-                                
-                                div {
-                                    class: "action-label-segmented",
-                                    "Lend"
+                                    
+                                    div {
+                                        class: "action-label-segmented",
+                                        "Lend"
+                                    }
                                 }
                             }
                             
                             // Temporarily disabled for Solana 3.x testing
-                            button {
-                                class: "action-button-segmented",
-                                onclick: move |_| {
-                                    println!("Squads button clicked!");
-                                    show_squads_modal.set(true);
-                                },
-                                
-                                div {
-                                    class: "action-icon-segmented",
-                                    img { 
-                                        src: "{ICON_SQUADS}",
-                                        alt: "Squads"
-                                    }
-                                }
-                                
-                                div {
-                                    class: "action-label-segmented",
-                                    "Squads"
-                                }
-                            }
-                            // 
-                            button {
-                                class: "action-button-segmented",
-                                onclick: move |_| {
-                                    println!("Carrot button clicked!");
-                                    show_carrot_modal.set(true);
-                                },
-                                
-                                div {
-                                    class: "action-icon-segmented",
-                                    img { 
-                                        src: "{ICON_CARROT}",
-                                        alt: "Carrot"
-                                    }
-                                }
-                                
-                                div {
-                                    class: "action-label-segmented",
-                                    "Carrot"
-                                }
-                            }
-                            // 
-                            button {
-                                class: "action-button-segmented",
-                                onclick: move |_| {
-                                    println!("BONK Stake button clicked!");
-                                    show_bonk_staking_modal.set(true);
-                                },
-
-                                div {
-                                    class: "action-icon-segmented",
-                                    img {
-                                        src: "{ICON_BONK_STAKE}",
-                                        alt: "BONK Stake"
-                                    }
-                                }
-
-                                div {
-                                    class: "action-label-segmented",
-                                    "BONK Stake"
-                                }
-                            }
-
-                            button {
-                                class: "action-button-segmented",
-                                onclick: move |_| {
-                                    println!("Quantum Vault button clicked!");
-                                    show_quantum_vault_modal.set(true);
-                                },
-
-                                div {
-                                    class: "action-icon-segmented",
-                                    img {
-                                        src: "{ICON_QUANTUM}",
-                                        alt: "Quantum Vault"
-                                    }
-                                }
-
-                                div {
-                                    class: "action-label-segmented",
-                                    "Quantum"
-                                }
-                            }
-
-                            button {
-                                class: "action-button-segmented",
-                                onclick: move |_| {
-                                    if eject_mode() {
-                                        // Exit eject mode
-                                        eject_mode.set(false);
-                                        selected_tokens.set(HashSet::new());
-                                    } else {
-                                        // Enter eject mode
-                                        eject_mode.set(true);
-                                        bulk_send_mode.set(false); // Ensure bulk send is off
-                                        selected_tokens.set(HashSet::new()); // Clear previous selections
-                                    }
-                                },
-
-                                div {
-                                    class: "action-icon-segmented",
-                                    if eject_mode() {
-                                        div {
-                                            style: "font-size: 24px; color: white;",
-                                            "✕"
+                            if integration_settings_value.squads {
+                                button {
+                                    class: "action-button-segmented",
+                                    onclick: move |_| {
+                                        println!("Squads button clicked!");
+                                        show_squads_modal.set(true);
+                                    },
+                                    
+                                    div {
+                                        class: "action-icon-segmented",
+                                        img { 
+                                            src: "{ICON_SQUADS}",
+                                            alt: "Squads"
                                         }
-                                    } else {
+                                    }
+                                    
+                                    div {
+                                        class: "action-label-segmented",
+                                        "Squads"
+                                    }
+                                }
+                            }
+                            // 
+                            if integration_settings_value.carrot {
+                                button {
+                                    class: "action-button-segmented",
+                                    onclick: move |_| {
+                                        println!("Carrot button clicked!");
+                                        show_carrot_modal.set(true);
+                                    },
+                                    
+                                    div {
+                                        class: "action-icon-segmented",
+                                        img { 
+                                            src: "{ICON_CARROT}",
+                                            alt: "Carrot"
+                                        }
+                                    }
+                                    
+                                    div {
+                                        class: "action-label-segmented",
+                                        "Carrot"
+                                    }
+                                }
+                            }
+                            // 
+                            if integration_settings_value.bonk_stake {
+                                button {
+                                    class: "action-button-segmented",
+                                    onclick: move |_| {
+                                        println!("BONK Stake button clicked!");
+                                        show_bonk_staking_modal.set(true);
+                                    },
+
+                                    div {
+                                        class: "action-icon-segmented",
                                         img {
-                                            src: "{ICON_EXPORT}",
-                                            alt: "EJECT"
+                                            src: "{ICON_BONK_STAKE}",
+                                            alt: "BONK Stake"
                                         }
                                     }
-                                }
 
-                                div {
-                                    class: "action-label-segmented",
-                                    if eject_mode() {
-                                        "Cancel"
-                                    } else {
-                                        "EJECT"
+                                    div {
+                                        class: "action-label-segmented",
+                                        "BONK Stake"
                                     }
                                 }
                             }
 
-                            button {
-                                class: "action-button-segmented",
-                                onclick: move |_| show_privacycash_modal.set(true),
-                                div {
-                                    class: "action-icon-segmented",
-                                    span { "🔒" }
+                            if integration_settings_value.quantum {
+                                button {
+                                    class: "action-button-segmented",
+                                    onclick: move |_| {
+                                        println!("Quantum Vault button clicked!");
+                                        show_quantum_vault_modal.set(true);
+                                    },
+
+                                    div {
+                                        class: "action-icon-segmented",
+                                        img {
+                                            src: "{ICON_QUANTUM}",
+                                            alt: "Quantum Vault"
+                                        }
+                                    }
+
+                                    div {
+                                        class: "action-label-segmented",
+                                        "Quantum"
+                                    }
                                 }
-                                div {
-                                    class: "action-label-segmented",
-                                    "Privacy"
+                            }
+
+                            if integration_settings_value.eject {
+                                button {
+                                    class: "action-button-segmented",
+                                    onclick: move |_| {
+                                        if eject_mode() {
+                                            // Exit eject mode
+                                            eject_mode.set(false);
+                                            selected_tokens.set(HashSet::new());
+                                        } else {
+                                            // Enter eject mode
+                                            eject_mode.set(true);
+                                            bulk_send_mode.set(false); // Ensure bulk send is off
+                                            selected_tokens.set(HashSet::new()); // Clear previous selections
+                                        }
+                                    },
+
+                                    div {
+                                        class: "action-icon-segmented",
+                                        if eject_mode() {
+                                            div {
+                                                style: "font-size: 24px; color: white;",
+                                                "✕"
+                                            }
+                                        } else {
+                                            img {
+                                                src: "{ICON_EXPORT}",
+                                                alt: "EJECT"
+                                            }
+                                        }
+                                    }
+
+                                    div {
+                                        class: "action-label-segmented",
+                                        if eject_mode() {
+                                            "Cancel"
+                                        } else {
+                                            "EJECT"
+                                        }
+                                    }
+                                }
+                            }
+
+                            if integration_settings_value.privacy {
+                                button {
+                                    class: "action-button-segmented",
+                                    onclick: move |_| show_privacycash_modal.set(true),
+                                    div {
+                                        class: "action-icon-segmented",
+                                        span { "🔒" }
+                                    }
+                                    div {
+                                        class: "action-label-segmented",
+                                        "Privacy"
+                                    }
+                                }
+                            }
+
+                            if integration_settings_value.retire {
+                                button {
+                                    class: "action-button-segmented",
+                                    onclick: move |_| show_retire_modal.set(true),
+                                    div {
+                                        class: "action-icon-segmented",
+                                        img {
+                                            src: "{ICON_RETIRE}",
+                                            alt: "RETIRE"
+                                        }
+                                    }
+                                    div {
+                                        class: "action-label-segmented",
+                                        "RETIRE"
+                                    }
                                 }
                             }
                         }

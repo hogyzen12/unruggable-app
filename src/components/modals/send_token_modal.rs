@@ -7,6 +7,7 @@ use crate::signing::hardware::HardwareSigner;
 use crate::signing::{SignerType, TransactionSigner};
 use crate::privacycash;
 use crate::rpc;
+use crate::storage::{get_address_book_label, get_send_count, increment_send_count};
 use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
 use solana_sdk::pubkey::Pubkey; // ← ADD THIS IMPORT
 use std::cell::RefCell;
@@ -193,6 +194,8 @@ pub fn SendTokenModal(
     let mut error_message = use_signal(|| None as Option<String>);
     let mut recipient_balance = use_signal(|| None as Option<f64>);
     let mut checking_balance = use_signal(|| false);
+    let mut recipient_label = use_signal(|| None as Option<String>);
+    let mut recipient_send_count = use_signal(|| None as Option<u64>);
     let privacy_supported = matches!(token_symbol.as_str(), "USDC" | "USDT" | "ORE");
     let mut privacy_enabled = use_signal(|| false);
     let mut private_balance = use_signal(|| None as Option<u64>);
@@ -235,6 +238,22 @@ pub fn SendTokenModal(
         } else {
             recipient_balance.set(None);
             checking_balance.set(false);
+        }
+    });
+
+    use_effect(move || {
+        if let Some(resolved_pubkey) = *resolved_recipient.read() {
+            let address = resolved_pubkey.to_string();
+            recipient_label.set(get_address_book_label(&address));
+            let count = get_send_count(&address);
+            if count > 0 {
+                recipient_send_count.set(Some(count));
+            } else {
+                recipient_send_count.set(None);
+            }
+        } else {
+            recipient_label.set(None);
+            recipient_send_count.set(None);
         }
     });
 
@@ -443,7 +462,8 @@ pub fn SendTokenModal(
                         on_change: move |val| recipient.set(val),
                         on_resolved: move |pubkey| resolved_recipient.set(pubkey),
                         label: "Send to:",
-                        placeholder: "Enter address or domain (e.g., recipient.sol)"
+                        placeholder: "Enter address or domain (e.g., recipient.sol)",
+                        show_address_book: Some(true)
                     }
                     
                     // Keep the recipient balance display
@@ -456,6 +476,18 @@ pub fn SendTokenModal(
                         div {
                             class: "recipient-balance",
                             "Recipient SOL balance: {balance:.4} SOL"
+                        }
+                    }
+                    if let Some(label) = recipient_label() {
+                        div {
+                            class: "recipient-balance",
+                            "Tag: {label}"
+                        }
+                    }
+                    if let Some(count) = recipient_send_count() {
+                        div {
+                            class: "recipient-balance",
+                            "Sent {count} times"
                         }
                     }
                 }
@@ -590,6 +622,7 @@ pub fn SendTokenModal(
                             let rpc_url = custom_rpc.clone();
                             let token_mint_clone = token_mint.clone();
                             let token_symbol_clone = token_symbol.clone();
+                            let mut recipient_send_count = recipient_send_count.clone();
                             
                             // Clone the onhardware event handler for use in async block
                             let onhardware_handler = onhardware.clone();
@@ -783,6 +816,8 @@ pub fn SendTokenModal(
                                         Ok(signature) => {
                                             privacy_progress.set(None);
                                             transaction_signature.set(signature);
+                                            let new_count = increment_send_count(&recipient_address);
+                                            recipient_send_count.set(Some(new_count));
                                             sending.set(false);
                                             if should_clear_hw {
                                                 show_hardware_approval.set(false);
@@ -817,6 +852,8 @@ pub fn SendTokenModal(
 
                                             // Set the transaction signature and show success modal
                                             transaction_signature.set(signature);
+                                            let new_count = increment_send_count(&recipient_address);
+                                            recipient_send_count.set(Some(new_count));
                                             sending.set(false);
                                             show_success_modal.set(true);
                                         }
@@ -837,6 +874,8 @@ pub fn SendTokenModal(
                                                     
                                                     // Set the transaction signature and show success modal
                                                     transaction_signature.set(signature);
+                                                    let new_count = increment_send_count(&recipient_address);
+                                                    recipient_send_count.set(Some(new_count));
                                                     sending.set(false);
                                                     show_success_modal.set(true);
                                                 }

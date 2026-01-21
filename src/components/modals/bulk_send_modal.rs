@@ -7,6 +7,7 @@ use crate::hardware::HardwareWallet;
 use crate::components::modals::send_modal::HardwareWalletEvent;
 use crate::transaction::TransactionClient;
 use crate::signing::{SignerType, hardware::HardwareSigner};
+use crate::storage::{get_address_book_label, get_send_count, increment_send_count};
 use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
 use solana_sdk::pubkey::Pubkey; // ← ADD THIS IMPORT
 use std::sync::Arc;
@@ -187,6 +188,8 @@ pub fn BulkSendModal(
     let mut error_message = use_signal(|| None as Option<String>);
     let mut recipient_balance = use_signal(|| None as Option<f64>);
     let mut checking_balance = use_signal(|| false);
+    let mut recipient_label = use_signal(|| None as Option<String>);
+    let mut recipient_send_count = use_signal(|| None as Option<u64>);
     let mut token_amounts = use_signal(|| std::collections::HashMap::<String, String>::new());
     let mut token_amount_errors = use_signal(|| std::collections::HashMap::<String, String>::new());
     
@@ -288,6 +291,22 @@ pub fn BulkSendModal(
         } else {
             recipient_balance.set(None);
             checking_balance.set(false);
+        }
+    });
+
+    use_effect(move || {
+        if let Some(resolved_pubkey) = *resolved_recipient.read() {
+            let address = resolved_pubkey.to_string();
+            recipient_label.set(get_address_book_label(&address));
+            let count = get_send_count(&address);
+            if count > 0 {
+                recipient_send_count.set(Some(count));
+            } else {
+                recipient_send_count.set(None);
+            }
+        } else {
+            recipient_label.set(None);
+            recipient_send_count.set(None);
         }
     });
 
@@ -411,7 +430,8 @@ pub fn BulkSendModal(
                         },
                         on_resolved: move |pubkey| resolved_recipient.set(pubkey),
                         label: "Send all selected tokens to:",
-                        placeholder: "Enter address or domain (e.g., recipient.sol)"
+                        placeholder: "Enter address or domain (e.g., recipient.sol)",
+                        show_address_book: Some(true)
                     }
                     
                     // Keep the recipient balance display
@@ -424,6 +444,18 @@ pub fn BulkSendModal(
                         div { 
                             class: "recipient-balance",
                             "Recipient balance: {balance:.4} SOL"
+                        }
+                    }
+                    if let Some(label) = recipient_label() {
+                        div {
+                            class: "recipient-balance",
+                            "Tag: {label}"
+                        }
+                    }
+                    if let Some(count) = recipient_send_count() {
+                        div {
+                            class: "recipient-balance",
+                            "Sent {count} times"
                         }
                     }
                 }
@@ -560,6 +592,7 @@ pub fn BulkSendModal(
                                 let wallet_info = wallet.clone();
                                 let recipient_address = recipient_pubkey.to_string(); // ← USE RESOLVED PUBKEY
                                 let rpc_url = custom_rpc.clone();
+                                let mut recipient_send_count = recipient_send_count.clone();
                                 let selected_for_send: Vec<SelectedTokenForBulkSend> = selected_tokens()
                                     .iter()
                                     .filter_map(|token| {
@@ -618,6 +651,8 @@ pub fn BulkSendModal(
 
                                             // Set the transaction signature and show success modal
                                             transaction_signature.set(signature);
+                                            let new_count = increment_send_count(&recipient_address);
+                                            recipient_send_count.set(Some(new_count));
                                             sending.set(false);
                                             show_success_modal.set(true);
                                         }

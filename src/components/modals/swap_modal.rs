@@ -11,6 +11,7 @@ use crate::signing::hardware::HardwareSigner;
 use crate::signing::software::SoftwareSigner;
 use crate::signing::TransactionSigner;
 use crate::wallet::Wallet;
+use crate::prices;
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
@@ -564,6 +565,10 @@ fn short_mint(mint: &str) -> String {
     format!("{}...{}", &mint[..4], &mint[mint.len() - 4..])
 }
 
+fn is_valid_mint(input: &str) -> bool {
+    SolanaPubkey::from_str(input).is_ok()
+}
+
 // Get full token info by symbol
 fn get_token_by_symbol<'a>(symbol: &str, tokens: &'a [Token]) -> Option<&'a Token> {
     tokens.iter().find(|t| t.symbol == symbol)
@@ -870,6 +875,8 @@ pub fn SwapModal(
     let mut token_catalog = use_signal(|| Vec::<JupiterTokenMeta>::new());
     let mut token_catalog_loading = use_signal(|| false);
     let mut token_catalog_loaded = use_signal(|| false);
+    let mut custom_token_loading = use_signal(|| false);
+    let mut custom_token_error = use_signal(|| None as Option<String>);
     
     // Store hardware wallet address (fetched async)
     let mut hw_address = use_signal(|| None as Option<String>);
@@ -2755,26 +2762,84 @@ error_message.set(Some(format!("Failed to sign: {}", e)));
                                 div { style: "color: #9ca3af; font-size: 12px; margin-bottom: 8px;", "Search results" }
                                 div {
                                     style: "max-height: 320px; overflow-y: auto;",
-                                    if token_search_results().is_empty() {
-                                        div { style: "color: #9ca3af; font-size: 13px; padding: 8px 0;", "No results" }
-                                    } else {
-                                        for token in token_search_results() {
-                                            button {
-                                                style: "width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; color: white; text-align: left;",
-                                                onclick: {
-                                                    let update_buying_token = update_buying_token.clone();
-                                                    let token = token.clone();
-                                                    move |_| {
-                                                        let mut handler = update_buying_token.borrow_mut();
-                                                        handler(token.symbol.clone(), Some(token.clone()));
+                                    {
+                                        let query = token_search_query().trim().to_string();
+                                        let is_mint_query = is_valid_mint(&query);
+                                        let has_results = !token_search_results().is_empty();
+
+                                        rsx! {
+                                            if is_mint_query {
+                                                button {
+                                                    style: "width: 100%; background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; color: #e2e8f0; text-align: left;",
+                                                    onclick: {
+                                                        let update_buying_token = update_buying_token.clone();
+                                                        let mint = query.clone();
+                                                        let mut custom_token_loading = custom_token_loading.clone();
+                                                        let mut custom_token_error = custom_token_error.clone();
+                                                        move |_| {
+                                                            custom_token_loading.set(true);
+                                                            custom_token_error.set(None);
+                                                            let mint_clone = mint.clone();
+                                                            let update_buying_token = update_buying_token.clone();
+                                                            spawn(async move {
+                                                                let mut meta = None;
+                                                                if let Ok(info_map) = prices::get_token_metadata(vec![mint_clone.clone()]).await {
+                                                                    if let Some(info) = info_map.get(&mint_clone) {
+                                                                        meta = Some(JupiterTokenMeta {
+                                                                            address: info.id.clone(),
+                                                                            symbol: info.symbol.clone(),
+                                                                            name: info.name.clone(),
+                                                                            decimals: info.decimals,
+                                                                            logo_uri: info.icon.clone(),
+                                                                        });
+                                                                    }
+                                                                }
+                                                                let meta = meta.unwrap_or_else(|| JupiterTokenMeta {
+                                                                    address: mint_clone.clone(),
+                                                                    symbol: short_mint(&mint_clone),
+                                                                    name: format!("Token {}", short_mint(&mint_clone)),
+                                                                    decimals: 9,
+                                                                    logo_uri: None,
+                                                                });
+                                                                custom_token_loading.set(false);
+                                                                let mut handler = update_buying_token.borrow_mut();
+                                                                handler(meta.symbol.clone(), Some(meta));
+                                                            });
+                                                        }
+                                                    },
+                                                    div {
+                                                        div { style: "font-size: 13px; font-weight: 600;", "Use mint address" }
+                                                        div { style: "font-size: 11px; color: #94a3b8;", "{short_mint(&query)}" }
                                                     }
-                                                },
-                                                img { src: "{token.logo_uri.clone().unwrap_or_else(|| ICON_32.to_string())}", style: "width: 28px; height: 28px; border-radius: 50%;" }
-                                                div {
-                                                    div { style: "font-size: 14px; font-weight: 600;", "{token.symbol}" }
-                                                    div { style: "font-size: 11px; color: #9ca3af;", "{token.name}" }
+                                                    div { style: "margin-left: auto; font-size: 11px; color: #38bdf8;", if custom_token_loading() { "Loading..." } else { "Select" } }
                                                 }
-                                                div { style: "margin-left: auto; font-size: 10px; color: #6b7280;", "{short_mint(&token.address)}" }
+                                                if let Some(err) = custom_token_error() {
+                                                    div { style: "color: #f87171; font-size: 12px; padding: 4px 0;", "{err}" }
+                                                }
+                                            }
+
+                                            if !has_results {
+                                                div { style: "color: #9ca3af; font-size: 13px; padding: 8px 0;", "No results" }
+                                            } else {
+                                                for token in token_search_results() {
+                                                    button {
+                                                        style: "width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; color: white; text-align: left;",
+                                                        onclick: {
+                                                            let update_buying_token = update_buying_token.clone();
+                                                            let token = token.clone();
+                                                            move |_| {
+                                                                let mut handler = update_buying_token.borrow_mut();
+                                                                handler(token.symbol.clone(), Some(token.clone()));
+                                                            }
+                                                        },
+                                                        img { src: "{token.logo_uri.clone().unwrap_or_else(|| ICON_32.to_string())}", style: "width: 28px; height: 28px; border-radius: 50%;" }
+                                                        div {
+                                                            div { style: "font-size: 14px; font-weight: 600;", "{token.symbol}" }
+                                                            div { style: "font-size: 11px; color: #9ca3af;", "{token.name}" }
+                                                        }
+                                                        div { style: "margin-left: auto; font-size: 10px; color: #6b7280;", "{short_mint(&token.address)}" }
+                                                    }
+                                                }
                                             }
                                         }
                                     }

@@ -14,6 +14,7 @@ use std::error::Error;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use async_trait::async_trait;
+use base64::Engine;
 
 // Add these new types for future Ledger support
 #[derive(Debug, Clone, PartialEq)]
@@ -313,6 +314,14 @@ impl HardwareWallet {
 
     /// Sign a message with the connected device (enhanced - supports both devices)
     pub async fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+        log::info!(
+            "🧾 Unsigned payload size: {} bytes",
+            message.len()
+        );
+        log::info!(
+            "🧾 Unsigned payload (base64): {}",
+            base64::engine::general_purpose::STANDARD.encode(message)
+        );
         let device_type = self.device_type.lock().await.clone();
         
         match device_type {

@@ -1,6 +1,7 @@
 use crate::wallet::{Wallet, WalletInfo};
 use crate::quantum_vault::StoredVault;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 // Android-specific imports
@@ -235,9 +236,36 @@ fn get_bridge_settings_file_path() -> String {
     format!("{storage_dir}/bridge_settings.json")
 }
 
+fn get_integration_settings_file_path() -> String {
+    let storage_dir = get_storage_dir_simple();
+    format!("{storage_dir}/integration_settings.json")
+}
+
 fn get_quantum_vaults_file_path() -> String {
     let storage_dir = get_storage_dir_simple();
     format!("{storage_dir}/quantum_vaults.json")
+}
+
+fn get_address_book_file_path() -> String {
+    let storage_dir = get_storage_dir_simple();
+    format!("{storage_dir}/address_book.json")
+}
+
+fn get_send_counts_file_path() -> String {
+    let storage_dir = get_storage_dir_simple();
+    format!("{storage_dir}/send_counts.json")
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AddressBookEntry {
+    pub address: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+struct SendCountEntry {
+    address: String,
+    count: u64,
 }
 
 // Ensure storage directory exists with logging
@@ -753,6 +781,103 @@ pub fn load_bridge_settings_from_storage() -> BridgeSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub struct IntegrationSettings {
+    pub lend: bool,
+    pub squads: bool,
+    pub carrot: bool,
+    pub bonk_stake: bool,
+    pub quantum: bool,
+    pub eject: bool,
+    pub privacy: bool,
+    pub retire: bool,
+}
+
+impl Default for IntegrationSettings {
+    fn default() -> Self {
+        Self {
+            lend: true,
+            squads: true,
+            carrot: true,
+            bonk_stake: true,
+            quantum: true,
+            eject: true,
+            privacy: true,
+            retire: true,
+        }
+    }
+}
+
+pub fn save_integration_settings_to_storage(settings: &IntegrationSettings) {
+    log::info!("🔄 Saving integration settings to storage");
+
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(settings).unwrap();
+        storage.set_item("integration_settings", &serialized).unwrap();
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        if let Ok(_) = ensure_storage_dir() {
+            let settings_file = get_integration_settings_file_path();
+            match serde_json::to_string_pretty(settings) {
+                Ok(serialized) => {
+                    match std::fs::write(&settings_file, serialized) {
+                        Ok(_) => log::info!("✅ Integration settings saved to: {}", settings_file),
+                        Err(e) => log::error!("❌ Failed to write integration settings to {}: {}", settings_file, e),
+                    }
+                }
+                Err(e) => log::error!("❌ Failed to serialize integration settings: {}", e),
+            }
+        }
+    }
+}
+
+pub fn load_integration_settings_from_storage() -> IntegrationSettings {
+    log::info!("🔄 Loading integration settings from storage");
+
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        storage
+            .get_item("integration_settings")
+            .unwrap()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default()
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        let settings_file = get_integration_settings_file_path();
+        match std::fs::read_to_string(&settings_file) {
+            Ok(data) => {
+                match serde_json::from_str(&data) {
+                    Ok(settings) => {
+                        log::info!("✅ Integration settings loaded from storage");
+                        settings
+                    }
+                    Err(e) => {
+                        log::error!("❌ Failed to parse integration settings from {}: {}", settings_file, e);
+                        IntegrationSettings::default()
+                    }
+                }
+            }
+            Err(e) => {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    log::error!("❌ Failed to read integration settings from {}: {}", settings_file, e);
+                }
+                IntegrationSettings::default()
+            }
+        }
+    }
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Quantum Vault Storage Functions
 // ══════════════════════════════════════════════════════════════════════════════
@@ -925,6 +1050,182 @@ pub fn save_quantum_vaults_to_storage(vaults: &Vec<StoredVault>) {
             }
         }
     }
+}
+
+pub fn load_address_book_from_storage() -> Vec<AddressBookEntry> {
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        return storage
+            .get_item("address_book")
+            .unwrap()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default();
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        let file_path = get_address_book_file_path();
+        if let Err(e) = ensure_storage_dir() {
+            log::error!("❌ Storage directory error: {}", e);
+            return Vec::new();
+        }
+
+        if !Path::new(&file_path).exists() {
+            return Vec::new();
+        }
+
+        match std::fs::read_to_string(&file_path) {
+            Ok(data) => serde_json::from_str::<Vec<AddressBookEntry>>(&data).unwrap_or_default(),
+            Err(e) => {
+                log::error!("❌ Failed to read address book: {}", e);
+                Vec::new()
+            }
+        }
+    }
+}
+
+pub fn save_address_book_to_storage(entries: &Vec<AddressBookEntry>) {
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(entries).unwrap_or_default();
+        let _ = storage.set_item("address_book", &serialized);
+        return;
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        if let Err(e) = ensure_storage_dir() {
+            log::error!("❌ Storage directory error: {}", e);
+            return;
+        }
+        let file_path = get_address_book_file_path();
+        if let Ok(serialized) = serde_json::to_string_pretty(entries) {
+            if let Err(e) = std::fs::write(&file_path, &serialized) {
+                log::error!("❌ Failed to write address book: {}", e);
+            }
+        }
+    }
+}
+
+pub fn upsert_address_book_entry(address: &str, label: &str) {
+    let mut entries = load_address_book_from_storage();
+    if let Some(existing) = entries.iter_mut().find(|entry| entry.address == address) {
+        existing.label = label.to_string();
+    } else {
+        entries.push(AddressBookEntry {
+            address: address.to_string(),
+            label: label.to_string(),
+        });
+    }
+    save_address_book_to_storage(&entries);
+}
+
+pub fn remove_address_book_entry(address: &str) {
+    let mut entries = load_address_book_from_storage();
+    entries.retain(|entry| entry.address != address);
+    save_address_book_to_storage(&entries);
+}
+
+pub fn get_address_book_label(address: &str) -> Option<String> {
+    load_address_book_from_storage()
+        .into_iter()
+        .find(|entry| entry.address == address)
+        .map(|entry| entry.label)
+}
+
+fn load_send_counts_from_storage() -> HashMap<String, u64> {
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let entries: Vec<SendCountEntry> = storage
+            .get_item("send_counts")
+            .unwrap()
+            .and_then(|data| serde_json::from_str(&data).ok())
+            .unwrap_or_default();
+        return entries.into_iter().map(|e| (e.address, e.count)).collect();
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        let file_path = get_send_counts_file_path();
+        if let Err(e) = ensure_storage_dir() {
+            log::error!("❌ Storage directory error: {}", e);
+            return HashMap::new();
+        }
+
+        if !Path::new(&file_path).exists() {
+            return HashMap::new();
+        }
+
+        match std::fs::read_to_string(&file_path) {
+            Ok(data) => {
+                let entries: Vec<SendCountEntry> = serde_json::from_str(&data).unwrap_or_default();
+                entries.into_iter().map(|e| (e.address, e.count)).collect()
+            }
+            Err(e) => {
+                log::error!("❌ Failed to read send counts: {}", e);
+                HashMap::new()
+            }
+        }
+    }
+}
+
+fn save_send_counts_to_storage(counts: &HashMap<String, u64>) {
+    let entries: Vec<SendCountEntry> = counts
+        .iter()
+        .map(|(address, count)| SendCountEntry {
+            address: address.clone(),
+            count: *count,
+        })
+        .collect();
+
+    #[cfg(feature = "web")]
+    {
+        use wasm_bindgen::JsCast;
+        let window = web_sys::window().unwrap();
+        let storage = window.local_storage().unwrap().unwrap();
+        let serialized = serde_json::to_string(&entries).unwrap_or_default();
+        let _ = storage.set_item("send_counts", &serialized);
+        return;
+    }
+
+    #[cfg(not(feature = "web"))]
+    {
+        if let Err(e) = ensure_storage_dir() {
+            log::error!("❌ Storage directory error: {}", e);
+            return;
+        }
+        let file_path = get_send_counts_file_path();
+        if let Ok(serialized) = serde_json::to_string_pretty(&entries) {
+            if let Err(e) = std::fs::write(&file_path, &serialized) {
+                log::error!("❌ Failed to write send counts: {}", e);
+            }
+        }
+    }
+}
+
+pub fn increment_send_count(address: &str) -> u64 {
+    let mut counts = load_send_counts_from_storage();
+    let counter = counts.entry(address.to_string()).or_insert(0);
+    *counter += 1;
+    let updated = *counter;
+    save_send_counts_to_storage(&counts);
+    updated
+}
+
+pub fn get_send_count(address: &str) -> u64 {
+    load_send_counts_from_storage()
+        .get(address)
+        .copied()
+        .unwrap_or(0)
 }
 
 /// Delete a wallet by address from storage
