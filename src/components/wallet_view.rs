@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus::document::eval;
 use crate::wallet::{Wallet, WalletInfo};
 use crate::storage::{
     load_wallets_from_storage, 
@@ -617,6 +618,191 @@ pub fn WalletView() -> Element {
             save_integration_settings_to_storage(&new_settings);
         }
     };
+    
+    // Initialize liquid metal shader for wallet icon (initial load)
+    use_effect(move || {
+        spawn(async move {
+            // Wait for DOM and scripts to load
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let _ = eval(
+                r#"
+                console.log('🌊 [Initial] Initializing liquid metal shader...');
+                
+                if (window.liquidMetalInstance) {
+                    console.log('🧹 Disposing old instance');
+                    window.liquidMetalInstance.dispose();
+                    window.liquidMetalInstance = null;
+                }
+                
+                const element = document.getElementById('liquid-metal-wallet-icon');
+                if (window.LiquidMetalSVG && element) {
+                    try {
+                        window.liquidMetalInstance = window.LiquidMetalSVG.create('liquid-metal-wallet-icon', 'https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/icons/unruggable_icon.svg', 98);
+                        console.log('✅ Liquid metal SVG logo initialized');
+                    } catch (e) {
+                        console.error('❌ Failed to init liquid metal:', e);
+                    }
+                } else {
+                    console.log('⏳ Component or element not ready yet');
+                }
+                "#
+            );
+        });
+    });
+    
+    // Reinitialize liquid metal shader after refresh completes
+    use_effect(move || {
+        let is_refreshing_value = is_refreshing();
+        
+        if !is_refreshing_value {
+            spawn(async move {
+                // Wait for DOM to stabilize after refresh
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                let _ = eval(
+                    r#"
+                    console.log('🔄 [Refresh] Reinitializing liquid metal shader...');
+                    
+                    // Dispose old instance if it exists
+                    if (window.liquidMetalInstance) {
+                        try {
+                            window.liquidMetalInstance.dispose();
+                            window.liquidMetalInstance = null;
+                            console.log('🧹 Disposed old shader instance');
+                        } catch (e) {
+                            console.warn('⚠️ Error disposing old instance:', e);
+                        }
+                    }
+                    
+                    // Create new instance
+                    const element = document.getElementById('liquid-metal-wallet-icon');
+                    if (window.LiquidMetalSVG && element) {
+                        try {
+                            window.liquidMetalInstance = window.LiquidMetalSVG.create('liquid-metal-wallet-icon', 'https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/icons/unruggable_icon.svg', 98);
+                            console.log('✅ Liquid metal SVG logo reinitialized after refresh');
+                        } catch (e) {
+                            console.error('❌ Failed to reinit liquid metal:', e);
+                        }
+                    } else {
+                        console.error('❌ Cannot reinit - component or element missing');
+                    }
+                    "#
+                );
+            });
+        }
+    });
+    
+    // Initialize liquid metal border on balance section
+    use_effect(move || {
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            let _ = eval(
+                r#"
+                console.log('🌊 [Border] Initializing liquid metal border on balance section...');
+                
+                if (window.LiquidMetalBorder && document.getElementById('balance-section-with-border')) {
+                    try {
+                        window.balanceBorderInstance = window.LiquidMetalBorder.create('balance-section-with-border', {
+                            borderWidth: 5,
+                        });
+                        console.log('✅ Liquid metal border initialized on balance section');
+                    } catch (e) {
+                        console.error('❌ Failed to init balance border:', e);
+                    }
+                } else {
+                    console.warn('⏳ LiquidMetalBorder not loaded or balance element not found');
+                }
+                
+                // Initialize action buttons border
+                if (window.LiquidMetalBorder && document.getElementById('action-buttons-with-border')) {
+                    try {
+                        window.actionButtonsBorderInstance = window.LiquidMetalBorder.create('action-buttons-with-border', {
+                            borderWidth: 5,
+                        });
+                        console.log('✅ Liquid metal border initialized on action buttons container');
+                    } catch (e) {
+                        console.error('❌ Failed to init action buttons border:', e);
+                    }
+                } else {
+                    console.warn('⏳ LiquidMetalBorder not loaded or action buttons element not found');
+                }
+                
+                // Initialize individual action button icon borders
+                if (window.LiquidMetalBorder) {
+                    // Primary button icons (always visible)
+                    const primaryIcons = [
+                        'action-icon-receive',
+                        'action-icon-send',
+                        'action-icon-stake',
+                        'action-icon-swap',
+                        'action-icon-integrations'
+                    ];
+                    
+                    // Integration button icons (conditional)
+                    const integrationIcons = [
+                        'action-icon-lend',
+                        'action-icon-squads',
+                        'action-icon-carrot',
+                        'action-icon-bonk',
+                        'action-icon-quantum',
+                        'action-icon-eject',
+                        'action-icon-privacy',
+                        'action-icon-retire'
+                    ];
+                    
+                    // Initialize instances map
+                    if (!window.actionIconBorderInstances) {
+                        window.actionIconBorderInstances = {};
+                    }
+                    
+                    // Initialize primary button icons
+                    primaryIcons.forEach(iconId => {
+                        const elem = document.getElementById(iconId);
+                        if (elem) {
+                            try {
+                                if (window.actionIconBorderInstances[iconId]) {
+                                    window.actionIconBorderInstances[iconId].dispose();
+                                }
+                                window.actionIconBorderInstances[iconId] = window.LiquidMetalBorder.create(iconId, {
+                                    borderWidth: 2,
+                                });
+                                console.log(`Liquid metal border initialized on ${iconId}`);
+                            } catch (e) {
+                                console.error(`Failed to init border on ${iconId}:`, e);
+                            }
+                        }
+                    });
+                    
+                    // Initialize integration button icons with retry logic (they may appear later)
+                    const initIntegrationIcons = () => {
+                        integrationIcons.forEach(iconId => {
+                            const elem = document.getElementById(iconId);
+                            if (elem && !window.actionIconBorderInstances[iconId]) {
+                                try {
+                                    window.actionIconBorderInstances[iconId] = window.LiquidMetalBorder.create(iconId, {
+                                        borderWidth: 2,
+                                    });
+                                    console.log(`Liquid metal border initialized on ${iconId}`);
+                                } catch (e) {
+                                    console.error(`Failed to init border on ${iconId}:`, e);
+                                }
+                            }
+                        });
+                    };
+                    
+                    // Try to initialize integration icons
+                    initIntegrationIcons();
+                    
+                    // Retry after delays in case integrations row expands
+                    setTimeout(initIntegrationIcons, 500);
+                    setTimeout(initIntegrationIcons, 1000);
+                    setTimeout(initIntegrationIcons, 1500);
+                } else {
+                    console.warn('LiquidMetalBorder not loaded for action buttons');
+                }
+                "#
+            );
+        });
+    });
     
     // Load wallets from storage on component mount
     use_effect(move || {
@@ -1802,14 +1988,24 @@ pub fn WalletView() -> Element {
         "No hardware wallet detected"
     };
 
-    // Log hardware button state whenever it's computed
-    log::info!(
-        "🔘 Button render: connected={}, present={}, status={:?}, interactive={}",
-        hw_connected,
-        hw_device_present,
-        hardware_button_status,
-        hardware_button_interactive
-    );
+    // Enhanced logging for hardware button state
+    let status_debug = format!("{:?}", hardware_button_status);
+    use_effect(move || {
+        let status_str = status_debug.clone();
+        spawn(async move {
+            let _ = eval(&format!(
+                r#"
+                console.log('=== HARDWARE BUTTON STATUS ===');
+                console.log('Connected: {}');
+                console.log('Present: {}');
+                console.log('Status: {}');
+                console.log('Interactive: {}');
+                console.log('===============================');
+                "#,
+                hw_connected, hw_device_present, status_str, hardware_button_interactive
+            ));
+        });
+    });
 
     let refresh_for_success = Rc::clone(&refresh_private_balance);
     let refresh_for_privacy = Rc::clone(&refresh_private_balance);
@@ -2788,6 +2984,7 @@ pub fn WalletView() -> Element {
             div {
                 class: "main-content",
                 div {
+                    id: "balance-section-with-border",
                     class: "balance-section-segmented",
                     
                     // Left side - Balance content
@@ -2866,10 +3063,9 @@ pub fn WalletView() -> Element {
                                 }
                             }
                         } else {
-                            img { 
-                                src: DEVICE_SOFTWARE,
-                                alt: "Software Wallet - Tap to Refresh",
-                                style: "cursor: pointer;"
+                            div {
+                                id: "liquid-metal-wallet-icon",
+                                style: "width: 64px; height: 64px; cursor: pointer;",
                             }
                         }
                     }
@@ -2877,6 +3073,7 @@ pub fn WalletView() -> Element {
                 
                 // Replace the current action-buttons div with this segmented version
                 div {
+                    id: "action-buttons-with-border",
                     class: "action-buttons-segmented",
                     
                     // Primary action buttons row (always visible)
@@ -2884,10 +3081,12 @@ pub fn WalletView() -> Element {
                         class: "action-buttons-grid",
                         
                         button {
+                            id: "action-button-receive",
                             class: "action-button-segmented",
                             onclick: move |_| show_receive_modal.set(true),
                             
                             div {
+                                id: "action-icon-receive",
                                 class: "action-icon-segmented",
                                 img { 
                                     src: "{ICON_RECEIVE}",
@@ -2902,6 +3101,7 @@ pub fn WalletView() -> Element {
                         }
                         
                         button {
+                            id: "action-button-send",
                             class: "action-button-segmented",
                             onclick: move |_| {
                                 if bulk_send_mode() {
@@ -2917,6 +3117,7 @@ pub fn WalletView() -> Element {
                             },
                             
                             div {
+                                id: "action-icon-send",
                                 class: "action-icon-segmented",
                                 if bulk_send_mode() {
                                     div {
@@ -2942,10 +3143,12 @@ pub fn WalletView() -> Element {
                         }
 
                         button {
+                            id: "action-button-stake",
                             class: "action-button-segmented",
                             onclick: move |_| show_stake_modal.set(true),
                             
                             div {
+                                id: "action-icon-stake",
                                 class: "action-icon-segmented",
                                 img { 
                                     src: "{ICON_STAKE}",
@@ -2960,10 +3163,12 @@ pub fn WalletView() -> Element {
                         }
                         
                         button {
+                            id: "action-button-swap",
                             class: "action-button-segmented",
                             onclick: move |_| show_swap_modal.set(true),
                             
                             div {
+                                id: "action-icon-swap",
                                 class: "action-icon-segmented",
                                 img { 
                                     src: "{ICON_SWAP}",
@@ -2979,6 +3184,7 @@ pub fn WalletView() -> Element {
                         
                         // Integrations button (replaces Lend in primary row)
                         button {
+                            id: "action-button-integrations",
                             class: "action-button-segmented",
                             onclick: move |_| {
                                 show_integrations.set(!show_integrations());
@@ -2986,6 +3192,7 @@ pub fn WalletView() -> Element {
                             },
                             
                             div {
+                                id: "action-icon-integrations",
                                 class: "action-icon-segmented",
                                 div {
                                     style: "font-size: 20px; color: white;",
@@ -3011,6 +3218,7 @@ pub fn WalletView() -> Element {
                             
                             if integration_settings_value.lend {
                                 button {
+                                    id: "action-button-lend",
                                     class: "action-button-segmented",
                                     onclick: move |_| {
                                         println!("Lend button clicked!");
@@ -3018,6 +3226,7 @@ pub fn WalletView() -> Element {
                                     },
                                     
                                     div {
+                                        id: "action-icon-lend",
                                         class: "action-icon-segmented",
                                         img { 
                                             src: "{ICON_LEND}",
@@ -3035,6 +3244,7 @@ pub fn WalletView() -> Element {
                             // Temporarily disabled for Solana 3.x testing
                             if integration_settings_value.squads {
                                 button {
+                                    id: "action-button-squads",
                                     class: "action-button-segmented",
                                     onclick: move |_| {
                                         println!("Squads button clicked!");
@@ -3042,6 +3252,7 @@ pub fn WalletView() -> Element {
                                     },
                                     
                                     div {
+                                        id: "action-icon-squads",
                                         class: "action-icon-segmented",
                                         img { 
                                             src: "{ICON_SQUADS}",
@@ -3058,6 +3269,7 @@ pub fn WalletView() -> Element {
                             // 
                             if integration_settings_value.carrot {
                                 button {
+                                    id: "action-button-carrot",
                                     class: "action-button-segmented",
                                     onclick: move |_| {
                                         println!("Carrot button clicked!");
@@ -3065,6 +3277,7 @@ pub fn WalletView() -> Element {
                                     },
                                     
                                     div {
+                                        id: "action-icon-carrot",
                                         class: "action-icon-segmented",
                                         img { 
                                             src: "{ICON_CARROT}",
@@ -3081,6 +3294,7 @@ pub fn WalletView() -> Element {
                             // 
                             if integration_settings_value.bonk_stake {
                                 button {
+                                    id: "action-button-bonk",
                                     class: "action-button-segmented",
                                     onclick: move |_| {
                                         println!("BONK Stake button clicked!");
@@ -3088,6 +3302,7 @@ pub fn WalletView() -> Element {
                                     },
 
                                     div {
+                                        id: "action-icon-bonk",
                                         class: "action-icon-segmented",
                                         img {
                                             src: "{ICON_BONK_STAKE}",
@@ -3104,6 +3319,7 @@ pub fn WalletView() -> Element {
 
                             if integration_settings_value.quantum {
                                 button {
+                                    id: "action-button-quantum",
                                     class: "action-button-segmented",
                                     onclick: move |_| {
                                         println!("Quantum Vault button clicked!");
@@ -3111,6 +3327,7 @@ pub fn WalletView() -> Element {
                                     },
 
                                     div {
+                                        id: "action-icon-quantum",
                                         class: "action-icon-segmented",
                                         img {
                                             src: "{ICON_QUANTUM}",
@@ -3127,6 +3344,7 @@ pub fn WalletView() -> Element {
 
                             if integration_settings_value.eject {
                                 button {
+                                    id: "action-button-eject",
                                     class: "action-button-segmented",
                                     onclick: move |_| {
                                         if eject_mode() {
@@ -3142,6 +3360,7 @@ pub fn WalletView() -> Element {
                                     },
 
                                     div {
+                                        id: "action-icon-eject",
                                         class: "action-icon-segmented",
                                         if eject_mode() {
                                             div {
@@ -3169,9 +3388,11 @@ pub fn WalletView() -> Element {
 
                             if integration_settings_value.privacy {
                                 button {
+                                    id: "action-button-privacy",
                                     class: "action-button-segmented",
                                     onclick: move |_| show_privacycash_modal.set(true),
                                     div {
+                                        id: "action-icon-privacy",
                                         class: "action-icon-segmented",
                                         span { "🔒" }
                                     }
@@ -3184,9 +3405,11 @@ pub fn WalletView() -> Element {
 
                             if integration_settings_value.retire {
                                 button {
+                                    id: "action-button-retire",
                                     class: "action-button-segmented",
                                     onclick: move |_| show_retire_modal.set(true),
                                     div {
+                                        id: "action-icon-retire",
                                         class: "action-icon-segmented",
                                         img {
                                             src: "{ICON_RETIRE}",

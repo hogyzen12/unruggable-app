@@ -77,6 +77,43 @@
     z-index: 1;
 }
 
+/* Liquid metal PIN dots */
+.pin-dot-liquid-metal {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    position: relative;
+    transition: all 0.3s ease;
+}
+
+.pin-dot-liquid-metal.dot-empty {
+    background: transparent;
+}
+
+.pin-dot-liquid-metal.dot-filled {
+    background: linear-gradient(135deg, #c0c0c0 0%, #e8e8e8 25%, #a0a0a0 50%, #d0d0d0 75%, #b0b0b0 100%);
+    box-shadow: 
+        0 0 8px rgba(255, 255, 255, 0.6),
+        0 0 16px rgba(200, 200, 200, 0.4),
+        inset 0 1px 2px rgba(255, 255, 255, 0.8),
+        inset 0 -1px 2px rgba(0, 0, 0, 0.2);
+    animation: liquidMetalFill 0.4s ease-out;
+}
+
+@keyframes liquidMetalFill {
+    0% {
+        transform: scale(0.5);
+        opacity: 0;
+    }
+    50% {
+        transform: scale(1.2);
+    }
+    100% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
 /* Enhanced PIN dots */
 .pin-dots-container {
     display: flex;
@@ -150,57 +187,30 @@
     gap: 16px;
 }
 
+/* Simplified PIN number buttons - liquid metal border only */
 .pin-number-button {
     width: 80px;
     height: 80px;
     border-radius: 50%;
-    background: linear-gradient(145deg, #2a2a2a 0%, #1e1e1e 100%);
-    border: 2px solid rgba(255, 255, 255, 0.05);
+    background: #1a1a1a;
+    border: none;
     color: #ffffff;
     font-size: 28px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
-    overflow: hidden;
-    box-shadow: 
-        0 4px 12px rgba(0, 0, 0, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    overflow: visible;
+    -webkit-tap-highlight-color: transparent;
+    outline: none;
 }
 
-.pin-number-button::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 0;
-    height: 0;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(245, 158, 11, 0.3) 0%, transparent 70%);
-    transform: translate(-50%, -50%);
-    transition: width 0.6s, height 0.6s;
-}
-
-.pin-number-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 
-        0 8px 20px rgba(0, 0, 0, 0.4),
-        0 0 20px rgba(245, 158, 11, 0.1),
-        inset 0 1px 0 rgba(255, 255, 255, 0.1);
-    border-color: rgba(245, 158, 11, 0.3);
-}
-
+.pin-number-button:hover,
+.pin-number-button:focus,
 .pin-number-button:active {
-    transform: scale(0.92);
-    background: linear-gradient(145deg, #1e1e1e 0%, #2a2a2a 100%);
-    box-shadow: 
-        0 2px 8px rgba(0, 0, 0, 0.3),
-        inset 0 1px 3px rgba(0, 0, 0, 0.3);
-}
-
-.pin-number-button:active::before {
-    width: 120px;
-    height: 120px;
+    background: #1a1a1a;
+    outline: none;
+    border: none;
+    box-shadow: none;
 }
 
 .pin-action-button {

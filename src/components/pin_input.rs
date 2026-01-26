@@ -1,5 +1,6 @@
 // src/components/pin_input.rs
 use dioxus::prelude::*;
+use dioxus::document::eval;
 
 #[derive(Props, Clone, PartialEq)]
 pub struct PinInputProps {
@@ -18,6 +19,199 @@ pub fn PinInput(props: PinInputProps) -> Element {
     let mut pin = use_signal(|| String::new());
     let mut submitted = use_signal(|| false);
     let pin_length = 6;
+    
+    // Initialize ALL liquid metal instances on mount (buttons + dots)
+    // Using visibility toggle instead of create/dispose to prevent WebGL context loss
+    use_effect(move || {
+        spawn(async move {
+            // Wait longer for DOM and shader components to be ready
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            
+            let _ = eval(
+                r#"
+                // Store all instances globally
+                if (!window.pinShaderInstances) {
+                    window.pinShaderInstances = {
+                        buttonBorders: {},
+                        dotBorders: {},
+                        dotFills: {},
+                        initialized: false
+                    };
+                }
+                
+                // Check if all required instances are created (buttons + dot borders only)
+                const checkAllCreated = () => {
+                    const buttons = window.pinShaderInstances.buttonBorders;
+                    const dotBorders = window.pinShaderInstances.dotBorders;
+                    
+                    // Check buttons 0-9 only
+                    for (let i = 0; i <= 9; i++) {
+                        if (!buttons[`pin-button-${i}`]) return false;
+                    }
+                    // Check all 6 dot borders (fills created on demand)
+                    for (let i = 0; i < 6; i++) {
+                        if (!dotBorders[`pin-dot-${i}`]) return false;
+                    }
+                    return true;
+                };
+                
+                // Initialize all PIN screen shader instances
+                const initAllPinShaders = () => {
+                    if (!window.LiquidMetalCircleBorder || !window.LiquidMetalComponent) {
+                        console.log('PIN: Shader components not loaded yet');
+                        return false;
+                    }
+                    
+                    let createdCount = 0;
+                    
+                    // Initialize button borders (0-9)
+                    for (let i = 0; i <= 9; i++) {
+                        const elementId = `pin-button-${i}`;
+                        const elem = document.getElementById(elementId);
+                        if (elem && !window.pinShaderInstances.buttonBorders[elementId]) {
+                            try {
+                                window.pinShaderInstances.buttonBorders[elementId] = window.LiquidMetalCircleBorder.create(elementId, {
+                                    borderWidth: 3,
+                                });
+                                createdCount++;
+                            } catch (e) {
+                                console.error(`PIN: Failed button ${elementId}:`, e);
+                            }
+                        }
+                    }
+                    
+                    // Initialize dot borders only (fills created on demand to stay under WebGL limit)
+                    for (let i = 0; i < 6; i++) {
+                        const dotId = `pin-dot-${i}`;
+                        const dotElem = document.getElementById(dotId);
+                        
+                        if (dotElem) {
+                            // Create border instance (for empty state)
+                            if (!window.pinShaderInstances.dotBorders[dotId]) {
+                                try {
+                                    window.pinShaderInstances.dotBorders[dotId] = window.LiquidMetalCircleBorder.create(dotId, {
+                                        borderWidth: 2,
+                                    });
+                                    createdCount++;
+                                } catch (e) {
+                                    console.error(`PIN: Failed dot border ${dotId}:`, e);
+                                }
+                            }
+                            // Note: dot fills are created on demand when PIN is entered
+                        }
+                    }
+                    
+                    if (createdCount > 0) {
+                        console.log(`PIN: Created ${createdCount} shader instances`);
+                    }
+                    
+                    // Check if all are created
+                    if (checkAllCreated()) {
+                        window.pinShaderInstances.initialized = true;
+                        console.log('PIN: All shader instances initialized successfully');
+                        return true;
+                    }
+                    
+                    return false;
+                };
+                
+                // Aggressive retry strategy
+                const tryInit = () => {
+                    if (window.pinShaderInstances.initialized) return;
+                    initAllPinShaders();
+                };
+                
+                // Initial attempts with increasing delays
+                tryInit();
+                setTimeout(tryInit, 100);
+                setTimeout(tryInit, 200);
+                setTimeout(tryInit, 400);
+                setTimeout(tryInit, 800);
+                setTimeout(tryInit, 1200);
+                setTimeout(tryInit, 2000);
+                
+                // Periodic check every 500ms for 5 seconds to catch stragglers
+                let checkCount = 0;
+                const periodicCheck = setInterval(() => {
+                    checkCount++;
+                    if (window.pinShaderInstances.initialized || checkCount > 10) {
+                        clearInterval(periodicCheck);
+                        return;
+                    }
+                    tryInit();
+                }, 500);
+                "#
+            );
+        });
+    });
+    
+    // Update liquid metal PIN dots based on PIN entry
+    // Swap between border and fill instances to stay under WebGL context limit
+    use_effect(move || {
+        let current_pin_len = pin().len();
+        
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            
+            let _ = eval(&format!(
+                r#"
+                const updatePinDots = () => {{
+                    if (!window.pinShaderInstances) return;
+                    if (!window.LiquidMetalCircleBorder || !window.LiquidMetalComponent) return;
+                    
+                    const pinLength = {};
+                    
+                    // Update all 6 dots - swap between border and fill
+                    for (let i = 0; i < 6; i++) {{
+                        const dotId = `pin-dot-${{i}}`;
+                        const dotElem = document.getElementById(dotId);
+                        if (!dotElem) continue;
+                        
+                        const hasBorder = !!window.pinShaderInstances.dotBorders[dotId];
+                        const hasFill = !!window.pinShaderInstances.dotFills[dotId];
+                        
+                        if (i < pinLength) {{
+                            // Should be filled - need fill, dispose border
+                            if (hasBorder) {{
+                                try {{
+                                    window.pinShaderInstances.dotBorders[dotId].dispose();
+                                    delete window.pinShaderInstances.dotBorders[dotId];
+                                }} catch(e) {{}}
+                            }}
+                            if (!hasFill) {{
+                                try {{
+                                    window.pinShaderInstances.dotFills[dotId] = window.LiquidMetalComponent.create(dotId, 20);
+                                }} catch(e) {{
+                                    console.error(`PIN: Failed to create fill for ${{dotId}}:`, e);
+                                }}
+                            }}
+                        }} else {{
+                            // Should be empty - need border, dispose fill
+                            if (hasFill) {{
+                                try {{
+                                    window.pinShaderInstances.dotFills[dotId].dispose();
+                                    delete window.pinShaderInstances.dotFills[dotId];
+                                }} catch(e) {{}}
+                            }}
+                            if (!hasBorder) {{
+                                try {{
+                                    window.pinShaderInstances.dotBorders[dotId] = window.LiquidMetalCircleBorder.create(dotId, {{
+                                        borderWidth: 2,
+                                    }});
+                                }} catch(e) {{
+                                    console.error(`PIN: Failed to create border for ${{dotId}}:`, e);
+                                }}
+                            }}
+                        }}
+                    }}
+                }};
+                
+                updatePinDots();
+                "#,
+                current_pin_len
+            ));
+        });
+    });
     
     // Calculate PIN strength
     let pin_strength = {
@@ -113,22 +307,14 @@ pub fn PinInput(props: PinInputProps) -> Element {
                     }
                 }
                 
-                // PIN dots display with animation
+                // PIN dots display with liquid metal
                 div {
                     class: "pin-dots-container",
                     for i in 0..pin_length {
                         div {
-                            class: if i < pin().len() { 
-                                if i == pin().len() - 1 && !submitted() {
-                                    "pin-dot filled just-added"
-                                } else {
-                                    "pin-dot filled"
-                                }
-                            } else { 
-                                "pin-dot" 
-                            },
-                            // Add subtle animation delay
-                            style: format!("animation-delay: {}ms", i * 50)
+                            id: format!("pin-dot-{}", i),
+                            class: "pin-dot-liquid-metal",
+                            style: "width: 24px; height: 24px; position: relative; border-radius: 50%;"
                         }
                     }
                 }
@@ -177,14 +363,19 @@ pub fn PinInput(props: PinInputProps) -> Element {
                                 {
                                     let digit = (row * 3 + col + 1).to_string();
                                     let digit_char = digit.chars().next().unwrap();
+                                    let button_id = format!("pin-button-{}", digit);
                                     rsx! {
-                                        button {
-                                            class: "pin-number-button",
-                                            onclick: move |_| handle_digit(digit_char),
-                                            onmousedown: move |_| {
-                                                // Visual feedback on press
-                                            },
-                                            "{digit}"
+                                        div {
+                                            id: "{button_id}",
+                                            class: "pin-button-wrapper",
+                                            button {
+                                                class: "pin-number-button",
+                                                onclick: move |_| handle_digit(digit_char),
+                                                onmousedown: move |_| {
+                                                    // Visual feedback on press
+                                                },
+                                                "{digit}"
+                                            }
                                         }
                                     }
                                 }
@@ -197,30 +388,42 @@ pub fn PinInput(props: PinInputProps) -> Element {
                         class: "pin-number-row",
                         
                         if has_cancel {
-                            button {
-                                class: "pin-action-button pin-cancel-button",
-                                onclick: move |_| {
-                                    if let Some(ref cancel) = on_cancel_clone {
-                                        cancel.call(());
-                                    }
-                                },
-                                "×"
+                            div {
+                                id: "pin-button-cancel",
+                                class: "pin-button-wrapper",
+                                button {
+                                    class: "pin-action-button pin-cancel-button",
+                                    onclick: move |_| {
+                                        if let Some(ref cancel) = on_cancel_clone {
+                                            cancel.call(());
+                                        }
+                                    },
+                                    "×"
+                                }
                             }
                         } else {
                             div { class: "pin-spacer" }
                         }
                         
-                        button {
-                            class: "pin-number-button",
-                            onclick: move |_| handle_digit('0'),
-                            "0"
+                        div {
+                            id: "pin-button-0",
+                            class: "pin-button-wrapper",
+                            button {
+                                class: "pin-number-button",
+                                onclick: move |_| handle_digit('0'),
+                                "0"
+                            }
                         }
                         
                         if !pin().is_empty() {
-                            button {
-                                class: "pin-action-button",
-                                onclick: handle_backspace,
-                                "⌫"
+                            div {
+                                id: "pin-button-backspace",
+                                class: "pin-button-wrapper",
+                                button {
+                                    class: "pin-action-button",
+                                    onclick: handle_backspace,
+                                    "⌫"
+                                }
                             }
                         } else {
                             div { class: "pin-spacer" }

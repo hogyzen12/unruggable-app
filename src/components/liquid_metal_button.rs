@@ -1,11 +1,12 @@
 use dioxus::prelude::*;
+use dioxus::document::eval;
 
 /// Visual status states for the liquid metal hardware button.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
-    Neutral,
-    Warn,
-    Ok,
+    Neutral,  // No hardware present
+    Warn,     // Hardware detected
+    Ok,       // Hardware connected
 }
 
 impl Status {
@@ -19,20 +20,24 @@ impl Status {
 
     pub fn aria(self) -> &'static str {
         match self {
-            Status::Neutral => "neutral",
-            Status::Warn => "warning",
-            Status::Ok => "ready",
+            Status::Neutral => "no hardware",
+            Status::Warn => "hardware detected",
+            Status::Ok => "hardware connected",
+        }
+    }
+    
+    pub fn border_width(self) -> u32 {
+        match self {
+            Status::Neutral => 0,
+            Status::Warn => 3,
+            Status::Ok => 5,
         }
     }
 }
 
-/// Liquid metal hardware button inspired by the liquid_metal_implementation.md guide.
-///
-/// * `status` drives the accent colour (neutral/warn/ok)
-/// * `animated` toggles idle shimmer (defaults to true)
-/// * `interactive` disables the button when false
-/// * `onclick` optional handler for click interactions (only fired when interactive)
-/// * `aria_label` override for accessibility text (defaults to status label)
+const ICON_SVG: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/icons/unruggable_icon.svg";
+
+/// Hardware button with conditional liquid metal border.
 #[component]
 pub fn LiquidMetalButton(
     status: Status,
@@ -44,14 +49,10 @@ pub fn LiquidMetalButton(
     #[props(optional)] style: Option<String>,
     children: Element,
 ) -> Element {
-    // Log when the component renders with the current status
-    log::info!("⚙️  LiquidMetalButton rendering with status={:?}, interactive={}", status, interactive);
+    let button_id = use_signal(|| format!("hw-btn-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()));
     
-    let mut class_name = String::from("ball ");
+    let mut class_name = String::from("liquid-metal-hardware-button ");
     class_name.push_str(status.class());
-    if animated {
-        class_name.push_str(" is-animated");
-    }
     if let Some(extra) = class.as_ref() {
         if !extra.is_empty() {
             class_name.push(' ');
@@ -59,38 +60,80 @@ pub fn LiquidMetalButton(
         }
     }
     
-    log::info!("⚙️  LiquidMetalButton computed class=\"{}\"", class_name);
+    // Simple border initialization based on status
+    let button_id_clone = button_id();
+    let border_width = status.border_width();
+    
+    use_effect(move || {
+        let id = button_id_clone.clone();
+        
+        spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            
+            if border_width > 0 {
+                let _ = eval(&format!(
+                    r#"
+                    if (window.LiquidMetalCircleBorder && document.getElementById('{}')) {{
+                        try {{
+                            if (window.hardwareButtonBorder) {{
+                                window.hardwareButtonBorder.dispose();
+                            }}
+                            window.hardwareButtonBorder = window.LiquidMetalCircleBorder.create('{}', {{
+                                borderWidth: {},
+                            }});
+                        }} catch (e) {{
+                            console.error('Hardware button border error:', e);
+                        }}
+                    }}
+                    "#,
+                    id, id, border_width
+                ));
+            } else {
+                let _ = eval(
+                    r#"
+                    if (window.hardwareButtonBorder) {
+                        window.hardwareButtonBorder.dispose();
+                        window.hardwareButtonBorder = null;
+                    }
+                    "#,
+                );
+            }
+        });
+    });
 
     let handler = onclick.clone();
     let clickable = interactive;
-    let label = aria_label.unwrap_or_else(|| format!("Hardware wallet status: {}", status.aria()));
+    let label = aria_label.unwrap_or_else(|| format!("Hardware wallet: {}", status.aria()));
     let style_attr = style.unwrap_or_default();
 
     rsx! {
-        button {
-            class: "{class_name}",
-            style: "{style_attr}",
-            r#type: "button",
-            disabled: {!clickable},
-            "aria-label": "{label}",
-            onclick: move |evt: Event<MouseData>| {
-                evt.stop_propagation();
-                if !clickable {
-                    return;
+        div {
+            id: "{button_id}",
+            class: "liquid-metal-button-container {class_name}",
+            style: "position: relative; width: 48px; height: 48px; border-radius: 50%; {style_attr}",
+            
+            button {
+                class: "hardware-button-inner",
+                style: "position: absolute; inset: 0; background: transparent; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 8px;",
+                r#type: "button",
+                disabled: {!clickable},
+                "aria-label": "{label}",
+                onclick: move |evt: Event<MouseData>| {
+                    evt.stop_propagation();
+                    if !clickable {
+                        return;
+                    }
+                    if let Some(cb) = handler.as_ref() {
+                        cb.call(evt);
+                    }
+                },
+                
+                img {
+                    src: ICON_SVG,
+                    alt: "Hardware wallet",
+                    style: "width: 100%; height: 100%; object-fit: contain; filter: drop-shadow(0 0 2px rgba(255,255,255,0.3));"
                 }
-                if let Some(cb) = handler.as_ref() {
-                    cb.call(evt);
-                }
-            },
-
-            span { class: "core", aria_hidden: "true" }
-            span { class: "rim", aria_hidden: "true" }
-            span { class: "ring", aria_hidden: "true" }
-            span { class: "cup", aria_hidden: "true",
-                {children}
             }
-            span { class: "shine", aria_hidden: "true" }
-            span { class: "led", aria_hidden: "true" }
         }
     }
 }
