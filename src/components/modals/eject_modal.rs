@@ -8,16 +8,16 @@ use crate::transaction::TransactionClient;
 use crate::signing::{SignerType, hardware::HardwareSigner};
 use crate::signing::TransactionSigner;
 use crate::components::address_input::AddressInput;
+use crate::config::tokens::{get_token_catalog, TokenCatalogEntry};
 use solana_sdk::{
     pubkey::Pubkey,
     transaction::{Transaction, VersionedTransaction},
-    message::{Message, VersionedMessage},
+    message::Message,
     signature::Signature,
 };
 use solana_system_interface::instruction as system_instruction;
 use spl_token::instruction as token_instruction;
 use spl_associated_token_account::get_associated_token_address_with_program_id;
-use spl_associated_token_account::instruction::create_associated_token_account;
 use serde::Deserialize;
 use reqwest;
 use std::sync::Arc;
@@ -27,18 +27,76 @@ use base64;
 use bs58;
 
 const SOL_MINT: &str = "So11111111111111111111111111111111111111112";
+const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const ICON_32: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
+
+#[derive(Debug, Clone, PartialEq)]
+struct EjectOutputToken {
+    mint: String,
+    symbol: String,
+    name: String,
+    logo_uri: Option<String>,
+    decimals: u8,
+}
+
+impl EjectOutputToken {
+    fn from_catalog(entry: &TokenCatalogEntry) -> Self {
+        Self {
+            mint: entry.address.clone(),
+            symbol: entry.symbol.clone(),
+            name: entry.name.clone(),
+            logo_uri: entry.logo_uri.clone(),
+            decimals: entry.decimals,
+        }
+    }
+}
+
+fn default_output_token() -> EjectOutputToken {
+    get_token_catalog()
+        .iter()
+        .find(|entry| entry.address == SOL_MINT)
+        .map(EjectOutputToken::from_catalog)
+        .unwrap_or_else(|| EjectOutputToken {
+            mint: SOL_MINT.to_string(),
+            symbol: "SOL".to_string(),
+            name: "Wrapped SOL".to_string(),
+            logo_uri: None,
+            decimals: 9,
+        })
+}
+
+fn output_token_from_mint(mint: &str) -> EjectOutputToken {
+    get_token_catalog()
+        .iter()
+        .find(|entry| entry.address == mint)
+        .map(EjectOutputToken::from_catalog)
+        .unwrap_or_else(|| EjectOutputToken {
+            mint: mint.to_string(),
+            symbol: short_mint(mint),
+            name: format!("Token {}", short_mint(mint)),
+            logo_uri: None,
+            decimals: 9,
+        })
+}
+
+fn short_mint(mint: &str) -> String {
+    if mint.len() <= 8 {
+        return mint.to_string();
+    }
+    format!("{}...{}", &mint[..4], &mint[mint.len() - 4..])
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EjectTokenStatus {
     Pending,
     FetchingQuote,
-    SwappingToSol,
-    SwapSuccess { sol_received: f64 },
+    SwappingToOutput { symbol: String },
+    SwapSuccess { amount: f64, symbol: String },
     SwapFailed { reason: String },
     ClosingAccount,
-    AccountClosed { rent_reclaimed: f64 },
     CloseFailed { reason: String },
-    Complete { sol_received: f64, rent_reclaimed: f64 },
+    SendingOutput { symbol: String },
+    Complete { amount: f64, symbol: String, rent_reclaimed: f64 },
     Failed { reason: String },
 }
 
@@ -51,14 +109,16 @@ impl EjectTokenStatus {
         match self {
             EjectTokenStatus::Pending => "Waiting...".to_string(),
             EjectTokenStatus::FetchingQuote => "Fetching swap quote...".to_string(),
-            EjectTokenStatus::SwappingToSol => "Swapping to SOL...".to_string(),
-            EjectTokenStatus::SwapSuccess { sol_received } => format!("Swapped → {:.4} SOL", sol_received),
+            EjectTokenStatus::SwappingToOutput { symbol } => format!("Swapping to {}...", symbol),
+            EjectTokenStatus::SwapSuccess { amount, symbol } => {
+                format!("Swapped → {:.4} {}", amount, symbol)
+            }
             EjectTokenStatus::SwapFailed { reason } => format!("Swap failed: {}", reason),
             EjectTokenStatus::ClosingAccount => "Closing token account...".to_string(),
-            EjectTokenStatus::AccountClosed { rent_reclaimed } => format!("Closed → {:.6} SOL rent", rent_reclaimed),
             EjectTokenStatus::CloseFailed { reason } => format!("Close failed: {}", reason),
-            EjectTokenStatus::Complete { sol_received, rent_reclaimed } => {
-                format!("✅ Complete: {:.4} SOL + {:.6} rent", sol_received, rent_reclaimed)
+            EjectTokenStatus::SendingOutput { symbol } => format!("Sending {}...", symbol),
+            EjectTokenStatus::Complete { amount, symbol, rent_reclaimed } => {
+                format!("✅ Complete: {:.4} {} + {:.6} SOL rent", amount, symbol, rent_reclaimed)
             }
             EjectTokenStatus::Failed { reason } => format!("❌ Failed: {}", reason),
         }
@@ -67,8 +127,11 @@ impl EjectTokenStatus {
     pub fn status_color(&self) -> &str {
         match self {
             EjectTokenStatus::Pending => "#94a3b8",
-            EjectTokenStatus::FetchingQuote | EjectTokenStatus::SwappingToSol | EjectTokenStatus::ClosingAccount => "#3b82f6",
-            EjectTokenStatus::SwapSuccess { .. } | EjectTokenStatus::AccountClosed { .. } => "#10b981",
+            EjectTokenStatus::FetchingQuote
+            | EjectTokenStatus::SwappingToOutput { .. }
+            | EjectTokenStatus::ClosingAccount
+            | EjectTokenStatus::SendingOutput { .. } => "#3b82f6",
+            EjectTokenStatus::SwapSuccess { .. } => "#10b981",
             EjectTokenStatus::Complete { .. } => "#10b981",
             EjectTokenStatus::SwapFailed { .. } | EjectTokenStatus::CloseFailed { .. } | EjectTokenStatus::Failed { .. } => "#ef4444",
         }
@@ -87,21 +150,25 @@ struct JupiterOrderResponse {
     request_id: String,
 }
 
-/// Try to swap a token to SOL using Jupiter
-async fn try_swap_to_sol(
+/// Try to swap a token to the requested output using Jupiter
+async fn try_swap_to_output(
     token_mint: &str,
+    output_mint: &str,
     amount_lamports: u64,
     user_pubkey: &str,
-    _decimals: u8,
+    output_decimals: u8,
 ) -> Result<(String, f64), String> {
     let client = reqwest::Client::new();
 
     let url = format!(
         "https://lite-api.jup.ag/ultra/v1/order?inputMint={}&outputMint={}&amount={}&taker={}",
-        token_mint, SOL_MINT, amount_lamports, user_pubkey
+        token_mint, output_mint, amount_lamports, user_pubkey
     );
 
-    println!("🔄 Attempting swap: {} lamports of {}", amount_lamports, token_mint);
+    println!(
+        "🔄 Attempting swap: {} lamports of {} -> {}",
+        amount_lamports, token_mint, output_mint
+    );
 
     match client.get(&url).send().await {
         Ok(response) => {
@@ -109,10 +176,11 @@ async fn try_swap_to_sol(
                 match response.json::<JupiterOrderResponse>().await {
                     Ok(order) => {
                         if let Some(tx) = order.transaction {
-                            // Parse the output amount to get SOL received
-                            let sol_out: f64 = order.out_amount.parse().unwrap_or(0.0) / 1_000_000_000.0;
-                            println!("✅ Swap quote received: {} SOL", sol_out);
-                            Ok((tx, sol_out))
+                            // Parse the output amount using the output token decimals
+                            let output_out: f64 = order.out_amount.parse().unwrap_or(0.0)
+                                / 10_f64.powi(output_decimals as i32);
+                            println!("✅ Swap quote received: {}", output_out);
+                            Ok((tx, output_out))
                         } else {
                             Err("No transaction in response".to_string())
                         }
@@ -133,10 +201,11 @@ async fn execute_eject<F>(
     wallet: Option<WalletInfo>,
     hardware_wallet: Option<Arc<HardwareWallet>>,
     custom_rpc: Option<String>,
+    output_token: EjectOutputToken,
     recipient: Option<Pubkey>,
     has_send: bool,
     mut status_callback: F,
-) -> Result<(String, f64, Option<String>), String>
+) -> Result<(String, f64, f64, Option<String>), String>
 where
     F: FnMut(usize, EjectTokenStatus),
 {
@@ -177,7 +246,8 @@ where
     let tx_client = TransactionClient::new(custom_rpc.as_deref());
 
     // Process each token
-    let mut total_sol_reclaimed = 0.0;
+    let mut total_output_received = 0.0;
+    let mut total_rent_reclaimed = 0.0;
     let mut last_signature = String::new();
 
     for (index, token) in tokens.iter().enumerate() {
@@ -196,12 +266,25 @@ where
         status_callback(index, EjectTokenStatus::FetchingQuote);
 
         // Try to swap via Jupiter
-        match try_swap_to_sol(&token.mint, amount_lamports, &user_pubkey_str, token.decimals).await {
-            Ok((unsigned_tx_b64, sol_out)) => {
-                println!("✅ Swap quote obtained: {} SOL expected", sol_out);
+        match try_swap_to_output(
+            &token.mint,
+            &output_token.mint,
+            amount_lamports,
+            &user_pubkey_str,
+            output_token.decimals,
+        )
+        .await
+        {
+            Ok((unsigned_tx_b64, output_out)) => {
+                println!("✅ Swap quote obtained: {} {}", output_out, output_token.symbol);
 
                 // Update status: Swapping
-                status_callback(index, EjectTokenStatus::SwappingToSol);
+                status_callback(
+                    index,
+                    EjectTokenStatus::SwappingToOutput {
+                        symbol: output_token.symbol.clone(),
+                    },
+                );
 
                 // Sign and execute the swap transaction
                 match sign_and_execute_transaction(&unsigned_tx_b64, &*signer, &tx_client).await {
@@ -210,7 +293,13 @@ where
                         last_signature = signature;
 
                         // Update status: Swap success
-                        status_callback(index, EjectTokenStatus::SwapSuccess { sol_received: sol_out });
+                        status_callback(
+                            index,
+                            EjectTokenStatus::SwapSuccess {
+                                amount: output_out,
+                                symbol: output_token.symbol.clone(),
+                            },
+                        );
 
                         // Now close the token account
                         status_callback(index, EjectTokenStatus::ClosingAccount);
@@ -219,19 +308,22 @@ where
                             Ok((close_sig, rent)) => {
                                 println!("✅ Closed token account: {}", close_sig);
                                 last_signature = close_sig;
-                                total_sol_reclaimed += sol_out + rent;
+                                total_output_received += output_out;
+                                total_rent_reclaimed += rent;
                                 status_callback(index, EjectTokenStatus::Complete {
-                                    sol_received: sol_out,
-                                    rent_reclaimed: rent
+                                    amount: output_out,
+                                    symbol: output_token.symbol.clone(),
+                                    rent_reclaimed: rent,
                                 });
                             }
                             Err(e) => {
                                 println!("⚠️ Failed to close account: {}", e);
                                 // Still count the swap as success
-                                total_sol_reclaimed += sol_out;
+                                total_output_received += output_out;
                                 status_callback(index, EjectTokenStatus::Complete {
-                                    sol_received: sol_out,
-                                    rent_reclaimed: 0.0
+                                    amount: output_out,
+                                    symbol: output_token.symbol.clone(),
+                                    rent_reclaimed: 0.0,
                                 });
                             }
                         }
@@ -246,10 +338,11 @@ where
                             Ok((sig, rent)) => {
                                 println!("✅ Closed account: {}", sig);
                                 last_signature = sig;
-                                total_sol_reclaimed += rent;
+                                total_rent_reclaimed += rent;
                                 status_callback(index, EjectTokenStatus::Complete {
-                                    sol_received: 0.0,
-                                    rent_reclaimed: rent
+                                    amount: 0.0,
+                                    symbol: output_token.symbol.clone(),
+                                    rent_reclaimed: rent,
                                 });
                             }
                             Err(e) => {
@@ -270,10 +363,11 @@ where
                     Ok((sig, rent)) => {
                         println!("✅ Closed account: {}", sig);
                         last_signature = sig;
-                        total_sol_reclaimed += rent;
+                        total_rent_reclaimed += rent;
                         status_callback(index, EjectTokenStatus::Complete {
-                            sol_received: 0.0,
-                            rent_reclaimed: rent
+                            amount: 0.0,
+                            symbol: output_token.symbol.clone(),
+                            rent_reclaimed: rent,
                         });
                     }
                     Err(e) => {
@@ -285,12 +379,16 @@ where
         }
     }
 
-    println!("\n💰 Total SOL reclaimed: {} SOL", total_sol_reclaimed);
+    println!(
+        "\n💰 Total output received: {} {} (rent: {} SOL)",
+        total_output_received, output_token.symbol, total_rent_reclaimed
+    );
 
     // If recipient is specified, send the SOL
     let mut send_signature: Option<String> = None;
     if let Some(recipient_pubkey) = recipient {
-        println!("📤 Sending {} SOL to recipient: {}", total_sol_reclaimed, recipient_pubkey);
+        let total_sol_to_send = total_output_received + total_rent_reclaimed;
+        println!("📤 Sending {} SOL to recipient: {}", total_sol_to_send, recipient_pubkey);
         
         // Use the send index (after all token operations)
         let send_index = tokens.len();
@@ -298,13 +396,13 @@ where
         // Update status callback for send operation
         if has_send {
             status_callback(send_index, EjectTokenStatus::Pending);
-            status_callback(send_index, EjectTokenStatus::SwappingToSol); // Reuse "processing" status
+            status_callback(send_index, EjectTokenStatus::SendingOutput { symbol: "SOL".to_string() });
         }
 
         match send_sol_to_recipient(
             &user_pubkey,
             &recipient_pubkey,
-            total_sol_reclaimed,
+            total_sol_to_send,
             &*signer,
             &tx_client
         ).await {
@@ -315,8 +413,9 @@ where
                 
                 if has_send {
                     status_callback(send_index, EjectTokenStatus::Complete {
-                        sol_received: total_sol_reclaimed,
-                        rent_reclaimed: 0.0
+                        amount: total_sol_to_send,
+                        symbol: "SOL".to_string(),
+                        rent_reclaimed: 0.0,
                     });
                 }
             }
@@ -329,8 +428,8 @@ where
         }
     }
 
-    // Return the final signature, total SOL, and optional send signature
-    Ok((last_signature, total_sol_reclaimed, send_signature))
+    // Return the final signature, totals, and optional send signature
+    Ok((last_signature, total_output_received, total_rent_reclaimed, send_signature))
 }
 
 /// Sign and execute a transaction
@@ -525,7 +624,9 @@ fn EjectProcessingModal(
     tokens: Vec<EjectTokenItem>,
     current_step: String,
     is_complete: bool,
-    total_sol_received: f64,
+    output_symbol: String,
+    total_output_received: f64,
+    total_rent_reclaimed: f64,
     final_signature: String,
     send_signature: Option<String>,
     oncancel: EventHandler<()>,
@@ -693,7 +794,7 @@ fn EjectProcessingModal(
                             "✓"
                         }
 
-                        // Total SOL reclaimed
+                        // Total reclaimed summary
                         div {
                             style: "
                                 background: rgba(16, 185, 129, 0.1);
@@ -709,7 +810,7 @@ fn EjectProcessingModal(
                                     font-size: 13px;
                                     margin-bottom: 6px;
                                 ",
-                                "Total SOL Reclaimed"
+                                "Total Reclaimed"
                             }
                             div {
                                 style: "
@@ -717,7 +818,15 @@ fn EjectProcessingModal(
                                     font-size: 24px;
                                     font-weight: 700;
                                 ",
-                                "{total_sol_received:.6} SOL"
+                                "{total_output_received:.6} {output_symbol}"
+                            }
+                            div {
+                                style: "
+                                    color: #94a3b8;
+                                    font-size: 12px;
+                                    margin-top: 6px;
+                                ",
+                                "{total_rent_reclaimed:.6} SOL rent"
                             }
                         }
 
@@ -744,9 +853,38 @@ fn EjectProcessingModal(
                                         word-break: break-all;
                                         font-family: monospace;
                                     ",
-                                    "{final_signature}"
+                                "{final_signature}"
+                            }
+                        }
+
+                        if let Some(sig) = send_signature.clone() {
+                            if !sig.is_empty() {
+                                div {
+                                    style: "margin-bottom: 16px;",
+                                    div {
+                                        style: "
+                                            color: #94a3b8;
+                                            font-size: 12px;
+                                            margin-bottom: 6px;
+                                        ",
+                                        "Send Signature:"
+                                    }
+                                    div {
+                                        style: "
+                                            background: #2a2a2a;
+                                            border: 1px solid #4a4a4a;
+                                            border-radius: 8px;
+                                            padding: 10px 12px;
+                                            color: #cbd5e1;
+                                            font-size: 11px;
+                                            word-break: break-all;
+                                            font-family: monospace;
+                                        ",
+                                        "{sig}"
+                                    }
                                 }
                             }
+                        }
 
                 // Explorer links
                 div {
@@ -911,7 +1049,9 @@ fn EjectHardwareApprovalOverlay(selected_count: usize, oncancel: EventHandler<()
 pub fn EjectSuccessModal(
     signature: String,
     tokens_ejected: usize,
-    total_sol_reclaimed: f64,
+    output_symbol: String,
+    total_output_received: f64,
+    total_rent_reclaimed: f64,
     was_hardware_wallet: bool,
     onclose: EventHandler<()>,
 ) -> Element {
@@ -995,11 +1135,22 @@ pub fn EjectSuccessModal(
                             style: "display: flex; justify-content: space-between;",
                             span {
                                 style: "color: #94a3b8; font-size: 14px;",
-                                "SOL Reclaimed:"
+                                "Swap Output:"
                             }
                             span {
                                 style: "color: #10b981; font-size: 14px; font-weight: 600;",
-                                "{total_sol_reclaimed:.6} SOL"
+                                "{total_output_received:.6} {output_symbol}"
+                            }
+                        }
+                        div {
+                            style: "display: flex; justify-content: space-between; margin-top: 8px;",
+                            span {
+                                style: "color: #94a3b8; font-size: 14px;",
+                                "SOL Rent:"
+                            }
+                            span {
+                                style: "color: #cbd5e1; font-size: 14px; font-weight: 600;",
+                                "{total_rent_reclaimed:.6} SOL"
                             }
                         }
                     }
@@ -1162,12 +1313,16 @@ pub fn EjectModal(
     let mut resolved_recipient = use_signal(|| Option::<Pubkey>::None);
     let mut show_processing_modal = use_signal(|| false);
     let mut processing_complete = use_signal(|| false);
+    let mut output_token = use_signal(|| default_output_token());
+    let mut show_output_token_search = use_signal(|| false);
+    let mut output_search_query = use_signal(|| "".to_string());
 
     // Transaction state
     let mut transaction_signature = use_signal(|| "".to_string());
+    let mut send_signature = use_signal(|| None as Option<String>);
     let mut show_hardware_approval = use_signal(|| false);
-    let mut total_sol_received = use_signal(|| 0.0);
-    let mut estimated_swap_value = use_signal(|| 0.0);
+    let mut total_output_received = use_signal(|| 0.0);
+    let mut total_rent_reclaimed = use_signal(|| 0.0);
 
     // Filter tokens to only selected ones
     let selected_tokens = use_memo(move || {
@@ -1196,6 +1351,8 @@ pub fn EjectModal(
         selected_tokens().len() as f64 * 0.00203928
     });
 
+    let can_send_sol = use_memo(move || output_token().mint == SOL_MINT);
+
     // Estimate fees
     let estimated_fees = use_memo(move || {
         // Base fee per transaction * number of tokens
@@ -1207,6 +1364,41 @@ pub fn EjectModal(
         current_balance >= estimated_fees()
     });
 
+    // Disable send SOL option when output token isn't SOL
+    use_effect(move || {
+        if !can_send_sol() && send_sol_enabled() {
+            send_sol_enabled.set(false);
+            resolved_recipient.set(None);
+        }
+    });
+
+    let output_search_results = use_memo(move || {
+        let query = output_search_query().trim().to_lowercase();
+        let mut results: Vec<EjectOutputToken> = get_token_catalog()
+            .iter()
+            .filter(|token| {
+                if query.is_empty() {
+                    token.address == SOL_MINT || token.address == USDC_MINT
+                } else {
+                    token.symbol.to_lowercase().contains(&query)
+                        || token.name.to_lowercase().contains(&query)
+                        || token.address.to_lowercase().contains(&query)
+                }
+            })
+            .take(50)
+            .map(EjectOutputToken::from_catalog)
+            .collect();
+
+        if !query.is_empty() {
+            results.sort_by_key(|t| {
+                let sym = t.symbol.to_lowercase();
+                if sym == query { 0 } else if sym.starts_with(&query) { 1 } else { 2 }
+            });
+        }
+
+        results
+    });
+
     // Return processing/success modal if EJECT is running or complete
     if show_processing_modal() {
         return rsx! {
@@ -1214,9 +1406,11 @@ pub fn EjectModal(
                 tokens: eject_items(),
                 current_step: current_step_text(),
                 is_complete: processing_complete(),
-                total_sol_received: total_sol_received(),
+                output_symbol: output_token().symbol,
+                total_output_received: total_output_received(),
+                total_rent_reclaimed: total_rent_reclaimed(),
                 final_signature: transaction_signature(),
-                send_signature: None,
+                send_signature: send_signature(),
                 oncancel: move |_| {
                     show_processing_modal.set(false);
                     ejecting.set(false);
@@ -1343,7 +1537,89 @@ pub fn EjectModal(
                         }
                         div {
                             style: "color: #cbd5e1; font-size: 13px; line-height: 1.5;",
-                            "EJECT will attempt to swap your selected tokens to SOL, close token accounts to reclaim rent, and optionally send the SOL to another wallet."
+                            "EJECT will attempt to swap your selected tokens to {output_token().symbol}, close token accounts to reclaim rent, and optionally send SOL when output is SOL."
+                        }
+                    }
+
+                    // Output token selector
+                    div {
+                        style: "
+                            background: #1a1a1a;
+                            border: 1.5px solid #4a4a4a;
+                            border-radius: 12px;
+                            padding: 16px;
+                            margin-bottom: 20px;
+                        ",
+                        div {
+                            style: "
+                                color: #f8fafc;
+                                font-size: 15px;
+                                font-weight: 700;
+                                margin-bottom: 12px;
+                            ",
+                            "Swap Output"
+                        }
+                        div {
+                            style: "display: flex; align-items: center; gap: 12px;",
+                            img {
+                                src: "{output_token().logo_uri.clone().unwrap_or_else(|| ICON_32.to_string())}",
+                                alt: "{output_token().symbol}",
+                                style: "width: 28px; height: 28px; border-radius: 50%;"
+                            }
+                            button {
+                                style: "
+                                    background: #2a2a2a;
+                                    border: 1px solid #5a5a5a;
+                                    border-radius: 10px;
+                                    color: #ffffff;
+                                    font-size: 14px;
+                                    font-weight: 700;
+                                    cursor: pointer;
+                                    outline: none;
+                                    padding: 8px 12px;
+                                    display: inline-flex;
+                                    align-items: center;
+                                    gap: 8px;
+                                ",
+                                onclick: move |_| {
+                                    output_search_query.set("".to_string());
+                                    show_output_token_search.set(true);
+                                },
+                                span { "{output_token().symbol}" }
+                                span { style: "opacity: 0.6; font-size: 12px;", "▾" }
+                            }
+                        }
+
+                        div {
+                            style: "display: flex; gap: 8px; margin-top: 12px;",
+                            button {
+                                style: "
+                                    background: #1f2937;
+                                    border: 1px solid #374151;
+                                    border-radius: 8px;
+                                    color: #e5e7eb;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    padding: 6px 10px;
+                                    cursor: pointer;
+                                ",
+                                onclick: move |_| output_token.set(output_token_from_mint(SOL_MINT)),
+                                "SOL"
+                            }
+                            button {
+                                style: "
+                                    background: #1f2937;
+                                    border: 1px solid #374151;
+                                    border-radius: 8px;
+                                    color: #e5e7eb;
+                                    font-size: 12px;
+                                    font-weight: 600;
+                                    padding: 6px 10px;
+                                    cursor: pointer;
+                                ",
+                                onclick: move |_| output_token.set(output_token_from_mint(USDC_MINT)),
+                                "USDC"
+                            }
                         }
                     }
 
@@ -1495,6 +1771,7 @@ pub fn EjectModal(
                             input {
                                 r#type: "checkbox",
                                 checked: send_sol_enabled(),
+                                disabled: !can_send_sol(),
                                 onchange: move |e| send_sol_enabled.set(e.checked()),
                                 style: "
                                     width: 18px;
@@ -1503,18 +1780,31 @@ pub fn EjectModal(
                                 "
                             }
                             label {
-                                style: "
-                                    color: #f8fafc;
-                                    font-size: 14px;
-                                    font-weight: 600;
-                                    cursor: pointer;
-                                ",
-                                onclick: move |_| send_sol_enabled.set(!send_sol_enabled()),
+                                style: format!(
+                                    "color: #f8fafc; font-size: 14px; font-weight: 600; cursor: pointer; opacity: {};",
+                                    if can_send_sol() { "1" } else { "0.6" }
+                                ),
+                                onclick: move |_| {
+                                    if can_send_sol() {
+                                        send_sol_enabled.set(!send_sol_enabled())
+                                    }
+                                },
                                 "Send resulting SOL to another wallet"
                             }
                         }
 
-                        if send_sol_enabled() {
+                        if !can_send_sol() {
+                            div {
+                                style: "
+                                    color: #94a3b8;
+                                    font-size: 12px;
+                                    margin-top: 4px;
+                                ",
+                                "Switch output to SOL to enable sending."
+                            }
+                        }
+
+                        if send_sol_enabled() && can_send_sol() {
                             div {
                                 style: "margin-top: 12px;",
                                 label {
@@ -1534,6 +1824,90 @@ pub fn EjectModal(
                                     },
                                     on_resolved: move |pubkey_opt| resolved_recipient.set(pubkey_opt),
                                     placeholder: Some("Enter Solana address or .sol domain".to_string()),
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Output token search overlay
+                if show_output_token_search() {
+                    div {
+                        style: "
+                            position: fixed;
+                            inset: 0;
+                            background: rgba(0, 0, 0, 0.6);
+                            z-index: 9999;
+                            display: flex;
+                            align-items: flex-start;
+                            justify-content: center;
+                        ",
+                        div {
+                            style: "
+                                width: 100%;
+                                max-width: 560px;
+                                background: #121212;
+                                border-bottom-left-radius: 16px;
+                                border-bottom-right-radius: 16px;
+                                padding: 16px;
+                                border: 1px solid #2a2a2a;
+                            ",
+                            div {
+                                style: "display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;",
+                                div { style: "font-size: 16px; font-weight: 700; color: white;", "Select output token" }
+                                button {
+                                    style: "background: transparent; border: none; color: #9ca3af; font-size: 16px;",
+                                    onclick: move |_| show_output_token_search.set(false),
+                                    "Close"
+                                }
+                            }
+                            input {
+                                style: "
+                                    width: 100%;
+                                    background: #1a1a1a;
+                                    border: 1px solid #333;
+                                    border-radius: 10px;
+                                    padding: 12px 14px;
+                                    color: white;
+                                    font-size: 14px;
+                                    margin-bottom: 12px;
+                                ",
+                                value: output_search_query(),
+                                placeholder: "Search name, symbol, or mint",
+                                oninput: move |e| output_search_query.set(e.value()),
+                            }
+
+                            if output_search_query().is_empty() {
+                                div { style: "color: #9ca3af; font-size: 12px; margin-bottom: 8px;", "Suggested" }
+                            } else {
+                                div { style: "color: #9ca3af; font-size: 12px; margin-bottom: 8px;", "Search results" }
+                            }
+
+                            if output_search_results().is_empty() {
+                                div { style: "color: #9ca3af; font-size: 13px; padding: 8px 0;", "No results" }
+                            } else {
+                                div {
+                                    style: "max-height: 320px; overflow-y: auto;",
+                                    for token in output_search_results() {
+                                        button {
+                                            style: "width: 100%; background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; color: white; text-align: left;",
+                                            onclick: {
+                                                let token_for_set = token.clone();
+                                                move |_| {
+                                                    output_token.set(token_for_set.clone());
+                                                    show_output_token_search.set(false);
+                                                }
+                                            },
+                                            img { src: "{token.logo_uri.clone().unwrap_or_else(|| ICON_32.to_string())}", style: "width: 28px; height: 28px; border-radius: 50%;" }
+                                            div {
+                                                div { style: "font-size: 14px; font-weight: 600;", "{token.symbol}" }
+                                                div { style: "font-size: 11px; color: #9ca3af;", "{token.name}" }
+                                            }
+                                            if !output_search_query().is_empty() {
+                                                div { style: "margin-left: auto; font-size: 10px; color: #6b7280;", "{short_mint(&token.mint)}" }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1636,8 +2010,8 @@ pub fn EjectModal(
                             let wallet_clone = wallet.clone();
                             let hw_clone = hardware_wallet.clone();
                             let rpc_clone = custom_rpc.clone();
+                            let output_token_clone = output_token();
                             let recipient_clone = resolved_recipient();
-                            let has_hw = hardware_wallet.is_some();
 
                             // Execute EJECT asynchronously with status callback
                             spawn(async move {
@@ -1653,9 +2027,10 @@ pub fn EjectModal(
                                         // Update current step text
                                         let step_text = match &status {
                                             EjectTokenStatus::FetchingQuote => format!("Fetching swap quote for token {}...", index + 1),
-                                            EjectTokenStatus::SwappingToSol => format!("Swapping token {} to SOL...", index + 1),
-                                            EjectTokenStatus::SwapSuccess { sol_received } => format!("Swap successful! Received {:.4} SOL", sol_received),
+                                            EjectTokenStatus::SwappingToOutput { symbol } => format!("Swapping token {} to {}...", index + 1, symbol),
+                                            EjectTokenStatus::SwapSuccess { amount, symbol } => format!("Swap successful! Received {:.4} {}", amount, symbol),
                                             EjectTokenStatus::ClosingAccount => format!("Closing token account {}...", index + 1),
+                                            EjectTokenStatus::SendingOutput { symbol } => format!("Sending {}...", symbol),
                                             EjectTokenStatus::Complete { .. } => format!("Token {} complete!", index + 1),
                                             EjectTokenStatus::Failed { reason } => format!("Token {} failed: {}", index + 1, reason),
                                             _ => format!("Processing token {}...", index + 1),
@@ -1669,14 +2044,17 @@ pub fn EjectModal(
                                     wallet_clone,
                                     hw_clone,
                                     rpc_clone,
+                                    output_token_clone,
                                     recipient_clone,
                                     send_sol_enabled() && resolved_recipient().is_some(),
                                     status_callback,
                                 ).await {
-                                    Ok((signature, total_sol, send_sig)) => {
+                                    Ok((signature, total_output, rent_reclaimed, send_sig)) => {
                                         println!("✅ EJECT completed: {}", signature);
                                         transaction_signature.set(signature);
-                                        total_sol_received.set(total_sol);
+                                        send_signature.set(send_sig);
+                                        total_output_received.set(total_output);
+                                        total_rent_reclaimed.set(rent_reclaimed);
                                         current_step_text.set("All tokens ejected successfully!".to_string());
 
                                         // Mark as complete - modal will transform to success view
