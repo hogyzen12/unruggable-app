@@ -1,13 +1,11 @@
 #[cfg(target_os = "android")]
-use std::sync::{Arc, Mutex};
-#[cfg(target_os = "android")]
-use jni::objects::{JObject, JString, JValue, JByteArray, JObjectArray, GlobalRef};
-#[cfg(target_os = "android")]
-use jni::JNIEnv;
+use crate::hardware::protocol::{format_esp32_command, parse_esp32_response, Command, Response};
 #[cfg(target_os = "android")]
 use dioxus::mobile::wry::prelude::dispatch;
 #[cfg(target_os = "android")]
-use crate::hardware::protocol::{Command, Response, format_esp32_command, parse_esp32_response};
+use jni::objects::{GlobalRef, JObject, JString};
+#[cfg(target_os = "android")]
+use jni::JNIEnv;
 
 #[derive(Debug, Clone)]
 pub struct StorageError(String);
@@ -45,6 +43,16 @@ pub struct AndroidUsbDevice {
 
 #[cfg(target_os = "android")]
 impl AndroidUsbSerial {
+    fn response_profile_for(command: &Command) -> (i32, i32) {
+        match command {
+            Command::SetModeNone
+            | Command::SetModePin(_)
+            | Command::SetModeOtpBegin
+            | Command::SignMessage(_) => (180, 250), // ~45s total wait for button-confirm flows
+            _ => (40, 250), // ~10s default
+        }
+    }
+
     pub fn new() -> Self {
         Self {
             port: None,
@@ -78,7 +86,7 @@ impl AndroidUsbSerial {
     /// Connect to the first available hardware wallet device
     pub async fn find_and_connect(&mut self) -> Result<(), StorageError> {
         let devices = Self::scan_for_devices().await?;
-        
+
         if devices.is_empty() {
             return Err(StorageError("No hardware wallet devices found".to_string()));
         }
@@ -99,11 +107,16 @@ impl AndroidUsbSerial {
             }
         }
 
-        Err(StorageError("Failed to connect to any hardware wallet device".to_string()))
+        Err(StorageError(
+            "Failed to connect to any hardware wallet device".to_string(),
+        ))
     }
 
     /// Connect to a specific USB device
-    pub async fn connect_to_device(&mut self, device: &AndroidUsbDevice) -> Result<(), StorageError> {
+    pub async fn connect_to_device(
+        &mut self,
+        device: &AndroidUsbDevice,
+    ) -> Result<(), StorageError> {
         let device_clone = device.clone();
         let (tx, rx) = std::sync::mpsc::channel();
 
@@ -122,39 +135,54 @@ impl AndroidUsbSerial {
                 }
                 Err(e) => Err(e),
             },
-            Err(e) => Err(StorageError(format!("Failed to connect to USB device: {}", e))),
+            Err(e) => Err(StorageError(format!(
+                "Failed to connect to USB device: {}",
+                e
+            ))),
         }
     }
 
     /// Send command to the hardware wallet
     pub async fn send_command(&self, command: Command) -> Result<Response, StorageError> {
-        // Clone the GlobalRef to avoid lifetime issues
-        let port_global = self.port.as_ref()
+        let port_global = self
+            .port
+            .as_ref()
             .ok_or(StorageError("Not connected to hardware wallet".to_string()))?
             .clone();
+        let (max_reads, read_timeout_ms) = Self::response_profile_for(&command);
         let cmd_data = format_esp32_command(&command);
         let (tx, rx) = std::sync::mpsc::channel();
 
         dispatch(move |env, activity, _webview| {
-            let result = Self::java_usb_serial_transfer(env, activity, &port_global, &cmd_data);
+            let result = Self::java_usb_serial_transfer(
+                env,
+                activity,
+                &port_global,
+                &cmd_data,
+                max_reads,
+                read_timeout_ms,
+            );
             tx.send(result).unwrap();
         });
 
         match rx.recv() {
-            Ok(result) => result.and_then(|response_data| parse_esp32_response(&response_data).map_err(|e| StorageError(format!("Failed to parse response: {}", e)))),
+            Ok(result) => result.and_then(|response_data| {
+                parse_esp32_response(&response_data)
+                    .map_err(|e| StorageError(format!("Failed to parse response: {}", e)))
+            }),
             Err(e) => Err(StorageError(format!("Failed to send command: {}", e))),
         }
     }
 
     /// Disconnect from the USB device
     pub async fn disconnect(&mut self) {
-        if let Some(port_global) = self.port.take() { // Use take() to move the value out
+        if let Some(port_global) = self.port.take() {
             let (tx, rx) = std::sync::mpsc::channel();
             dispatch(move |env, activity, _webview| {
                 let result = Self::java_disconnect_usb_serial_device(env, activity, &port_global);
                 tx.send(result).unwrap();
             });
-            let _ = rx.recv(); // Ignore result for simplicity
+            let _ = rx.recv();
         }
         self.device_info = None;
         log::info!("🔌 Disconnected from USB serial device");
@@ -164,26 +192,66 @@ impl AndroidUsbSerial {
         env: &mut JNIEnv<'_>,
         activity: &JObject<'_>,
     ) -> Result<Vec<AndroidUsbDevice>, StorageError> {
-        // Get UsbManager
-        let usb_service = env.get_static_field("android/content/Context", "USB_SERVICE", "Ljava/lang/String;")?.l()?;
-        let usb_manager = env.call_method(activity, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", &[(&usb_service).into()])?.l()?;
+        let usb_service = env
+            .get_static_field(
+                "android/content/Context",
+                "USB_SERVICE",
+                "Ljava/lang/String;",
+            )?
+            .l()?;
+        let usb_manager = env
+            .call_method(
+                activity,
+                "getSystemService",
+                "(Ljava/lang/String;)Ljava/lang/Object;",
+                &[(&usb_service).into()],
+            )?
+            .l()?;
 
-        // Use UsbSerialProber to find all drivers
         let prober_class = env.find_class("com/hoho/android/usbserial/driver/UsbSerialProber")?;
-        let default_prober = env.call_static_method(prober_class, "getDefaultProber", "()Lcom/hoho/android/usbserial/driver/UsbSerialProber;", &[])?.l()?;
+        let default_prober = env
+            .call_static_method(
+                prober_class,
+                "getDefaultProber",
+                "()Lcom/hoho/android/usbserial/driver/UsbSerialProber;",
+                &[],
+            )?
+            .l()?;
 
-        let drivers = env.call_method(&default_prober, "findAllDrivers", "(Landroid/hardware/usb/UsbManager;)Ljava/util/List;", &[(&usb_manager).into()])?.l()?;
+        let drivers = env
+            .call_method(
+                &default_prober,
+                "findAllDrivers",
+                "(Landroid/hardware/usb/UsbManager;)Ljava/util/List;",
+                &[(&usb_manager).into()],
+            )?
+            .l()?;
 
         let drivers_size = env.call_method(&drivers, "size", "()I", &[])?.i()?;
         let mut hardware_devices = Vec::new();
 
         for i in 0..drivers_size {
-            let driver = env.call_method(&drivers, "get", "(I)Ljava/lang/Object;", &[i.into()])?.l()?;
-            let usb_device = env.call_method(&driver, "getDevice", "()Landroid/hardware/usb/UsbDevice;", &[])?.l()?;
+            let driver = env
+                .call_method(&drivers, "get", "(I)Ljava/lang/Object;", &[i.into()])?
+                .l()?;
+            let usb_device = env
+                .call_method(
+                    &driver,
+                    "getDevice",
+                    "()Landroid/hardware/usb/UsbDevice;",
+                    &[],
+                )?
+                .l()?;
 
-            let vendor_id = env.call_method(&usb_device, "getVendorId", "()I", &[])?.i()?;
-            let product_id = env.call_method(&usb_device, "getProductId", "()I", &[])?.i()?;
-            let device_name = env.call_method(&usb_device, "getDeviceName", "()Ljava/lang/String;", &[])?.l()?;
+            let vendor_id = env
+                .call_method(&usb_device, "getVendorId", "()I", &[])?
+                .i()?;
+            let product_id = env
+                .call_method(&usb_device, "getProductId", "()I", &[])?
+                .i()?;
+            let device_name = env
+                .call_method(&usb_device, "getDeviceName", "()Ljava/lang/String;", &[])?
+                .l()?;
 
             let device_name_str: String = if !device_name.is_null() {
                 env.get_string(&JString::from(device_name))?.into()
@@ -200,7 +268,11 @@ impl AndroidUsbSerial {
                     product_name: None,
                 };
                 hardware_devices.push(hw_device);
-                log::info!("🔍 Found potential hardware wallet: {:04X}:{:04X}", vendor_id, product_id);
+                log::info!(
+                    "🔍 Found potential hardware wallet: {:04X}:{:04X}",
+                    vendor_id,
+                    product_id
+                );
             }
         }
         Ok(hardware_devices)
@@ -211,23 +283,67 @@ impl AndroidUsbSerial {
         activity: &JObject<'_>,
         device: &AndroidUsbDevice,
     ) -> Result<GlobalRef, StorageError> {
-        log::info!("🔄 Connecting to USB serial device: {:04X}:{:04X}", device.vendor_id, device.product_id);
+        log::info!(
+            "🔄 Connecting to USB serial device: {:04X}:{:04X}",
+            device.vendor_id,
+            device.product_id
+        );
 
-        let usb_service = env.get_static_field("android/content/Context", "USB_SERVICE", "Ljava/lang/String;")?.l()?;
-        let usb_manager = env.call_method(activity, "getSystemService", "(Ljava/lang/String;)Ljava/lang/Object;", &[(&usb_service).into()])?.l()?;
+        let usb_service = env
+            .get_static_field(
+                "android/content/Context",
+                "USB_SERVICE",
+                "Ljava/lang/String;",
+            )?
+            .l()?;
+        let usb_manager = env
+            .call_method(
+                activity,
+                "getSystemService",
+                "(Ljava/lang/String;)Ljava/lang/Object;",
+                &[(&usb_service).into()],
+            )?
+            .l()?;
 
         let prober_class = env.find_class("com/hoho/android/usbserial/driver/UsbSerialProber")?;
-        let default_prober = env.call_static_method(prober_class, "getDefaultProber", "()Lcom/hoho/android/usbserial/driver/UsbSerialProber;", &[])?.l()?;
-        let drivers = env.call_method(&default_prober, "findAllDrivers", "(Landroid/hardware/usb/UsbManager;)Ljava/util/List;", &[(&usb_manager).into()])?.l()?;
+        let default_prober = env
+            .call_static_method(
+                prober_class,
+                "getDefaultProber",
+                "()Lcom/hoho/android/usbserial/driver/UsbSerialProber;",
+                &[],
+            )?
+            .l()?;
+        let drivers = env
+            .call_method(
+                &default_prober,
+                "findAllDrivers",
+                "(Landroid/hardware/usb/UsbManager;)Ljava/util/List;",
+                &[(&usb_manager).into()],
+            )?
+            .l()?;
 
         let drivers_size = env.call_method(&drivers, "size", "()I", &[])?.i()?;
         let mut target_driver = None;
 
         for i in 0..drivers_size {
-            let driver = env.call_method(&drivers, "get", "(I)Ljava/lang/Object;", &[i.into()])?.l()?;
-            let usb_device = env.call_method(&driver, "getDevice", "()Landroid/hardware/usb/UsbDevice;", &[])?.l()?;
-            let vendor_id = env.call_method(&usb_device, "getVendorId", "()I", &[])?.i()?;
-            let product_id = env.call_method(&usb_device, "getProductId", "()I", &[])?.i()?;
+            let driver = env
+                .call_method(&drivers, "get", "(I)Ljava/lang/Object;", &[i.into()])?
+                .l()?;
+            let usb_device = env
+                .call_method(
+                    &driver,
+                    "getDevice",
+                    "()Landroid/hardware/usb/UsbDevice;",
+                    &[],
+                )?
+                .l()?;
+            let vendor_id = env
+                .call_method(&usb_device, "getVendorId", "()I", &[])?
+                .i()?;
+            let product_id = env
+                .call_method(&usb_device, "getProductId", "()I", &[])?
+                .i()?;
 
             if vendor_id == device.vendor_id && product_id == device.product_id {
                 target_driver = Some(driver);
@@ -235,19 +351,51 @@ impl AndroidUsbSerial {
             }
         }
 
-        let driver = target_driver.ok_or(StorageError("Could not find USB serial driver for device".to_string()))?;
-        let usb_device = env.call_method(&driver, "getDevice", "()Landroid/hardware/usb/UsbDevice;", &[])?.l()?;
-        let connection = env.call_method(&usb_manager, "openDevice", "(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;", &[(&usb_device).into()])?.l()?;
+        let driver = target_driver.ok_or(StorageError(
+            "Could not find USB serial driver for device".to_string(),
+        ))?;
+        let usb_device = env
+            .call_method(
+                &driver,
+                "getDevice",
+                "()Landroid/hardware/usb/UsbDevice;",
+                &[],
+            )?
+            .l()?;
+        let connection = env
+            .call_method(
+                &usb_manager,
+                "openDevice",
+                "(Landroid/hardware/usb/UsbDevice;)Landroid/hardware/usb/UsbDeviceConnection;",
+                &[(&usb_device).into()],
+            )?
+            .l()?;
 
         if connection.is_null() {
-            return Err(StorageError("Failed to open USB device connection - permission required".to_string()));
+            return Err(StorageError(
+                "Failed to open USB device connection - permission required".to_string(),
+            ));
         }
 
-        let ports = env.call_method(&driver, "getPorts", "()Ljava/util/List;", &[])?.l()?;
-        let port = env.call_method(&ports, "get", "(I)Ljava/lang/Object;", &[0.into()])?.l()?;
+        let ports = env
+            .call_method(&driver, "getPorts", "()Ljava/util/List;", &[])?
+            .l()?;
+        let port = env
+            .call_method(&ports, "get", "(I)Ljava/lang/Object;", &[0.into()])?
+            .l()?;
 
-        env.call_method(&port, "open", "(Landroid/hardware/usb/UsbDeviceConnection;)V", &[(&connection).into()])?;
-        env.call_method(&port, "setParameters", "(IIII)V", &[115200.into(), 8.into(), 1.into(), 0.into()])?;
+        env.call_method(
+            &port,
+            "open",
+            "(Landroid/hardware/usb/UsbDeviceConnection;)V",
+            &[(&connection).into()],
+        )?;
+        env.call_method(
+            &port,
+            "setParameters",
+            "(IIII)V",
+            &[115200.into(), 8.into(), 1.into(), 0.into()],
+        )?;
 
         let port_global = env.new_global_ref(&port)?;
         log::info!("✅ USB serial connection established");
@@ -259,28 +407,67 @@ impl AndroidUsbSerial {
         _activity: &JObject<'_>,
         port_global: &GlobalRef,
         data: &[u8],
+        max_reads: i32,
+        read_timeout_ms: i32,
     ) -> Result<Vec<u8>, StorageError> {
         log::info!("📤 USB Serial Transfer: {} bytes", data.len());
         let port = port_global.as_obj();
 
         let java_data = env.byte_array_from_slice(data)?;
-        let bytes_written = env.call_method(&port, "write", "([BI)I", &[(&java_data).into(), 1000.into()])?.i()?;
+        let bytes_written = env
+            .call_method(
+                &port,
+                "write",
+                "([BI)I",
+                &[(&java_data).into(), 1000.into()],
+            )?
+            .i()?;
 
         if bytes_written <= 0 {
-            return Err(StorageError("Failed to write data to USB serial port".to_string()));
+            return Err(StorageError(
+                "Failed to write data to USB serial port".to_string(),
+            ));
         }
 
-        let response_buffer = env.new_byte_array(1024)?;
-        let bytes_read = env.call_method(&port, "read", "([BI)I", &[(&response_buffer).into(), 5000.into()])?.i()?;
+        // Collect multiple reads so startup logs + protocol lines can be parsed safely.
+        let mut collected = Vec::with_capacity(1024);
+        let mut idle_reads = 0;
 
-        if bytes_read <= 0 {
-            return Err(StorageError("No response received from hardware wallet".to_string()));
+        for _ in 0..max_reads {
+            let response_buffer = env.new_byte_array(1024)?;
+            let bytes_read = env
+                .call_method(
+                    &port,
+                    "read",
+                    "([BI)I",
+                    &[(&response_buffer).into(), read_timeout_ms.into()],
+                )?
+                .i()?;
+
+            if bytes_read > 0 {
+                let response_data = env.convert_byte_array(&response_buffer)?;
+                collected.extend_from_slice(&response_data[..bytes_read as usize]);
+                idle_reads = 0;
+
+                if collected.len() >= 16 * 1024 {
+                    break;
+                }
+            } else {
+                idle_reads += 1;
+                if !collected.is_empty() && idle_reads >= 3 {
+                    break;
+                }
+            }
         }
 
-        let response_data = env.convert_byte_array(&response_buffer)?;
-        let result = response_data[..bytes_read as usize].to_vec();
-        log::info!("📥 Received {} bytes from hardware wallet", bytes_read);
-        Ok(result)
+        if collected.is_empty() {
+            return Err(StorageError(
+                "No response received from hardware wallet".to_string(),
+            ));
+        }
+
+        log::info!("📥 Received {} bytes from hardware wallet", collected.len());
+        Ok(collected)
     }
 
     fn java_disconnect_usb_serial_device(
@@ -313,7 +500,6 @@ impl AndroidUsbSerial {
             // ESP32-S3 native USB
             (0x303A, 0x1001) => true, // ESP32-S3
             (0x303A, 0x0002) => true, // ESP32-S2
-            // Add more hardware wallet VID/PIDs as needed
             _ => false,
         }
     }

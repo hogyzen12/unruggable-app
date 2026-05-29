@@ -1578,23 +1578,18 @@ pub fn WalletView() -> Element {
                         mint_to_symbol_map.insert(account.mint.clone(), symbol);
                     }
 
-                    // STEP 4: Fetch prices for ALL tokens
-                    // println!("Fetching prices for {} discovered tokens", mint_to_symbol_map.len());
-                    let token_prices_result = if !mint_to_symbol_map.is_empty() {
-                        prices::get_prices_for_tokens(mint_to_symbol_map.clone()).await
-                    } else {
-                        Ok(HashMap::new())
-                    };
-
-                    let dynamic_token_prices = match token_prices_result {
-                        Ok(prices) => {
-                            // println!("Successfully fetched prices for {} tokens", prices.len());
-                            prices
-                        },
-                        Err(e) => {
-                            log::warn!("Error fetching dynamic prices: {}", e);
-                            HashMap::new()
+                    // STEP 4: Fetch prices by mint address to avoid symbol collisions.
+                    let mint_addresses_for_prices: Vec<String> = mint_to_symbol_map.keys().cloned().collect();
+                    let dynamic_mint_prices = if !mint_addresses_for_prices.is_empty() {
+                        match prices::get_jupiter_prices_for_mints(mint_addresses_for_prices).await {
+                            Ok(prices) => prices,
+                            Err(e) => {
+                                log::warn!("Error fetching dynamic token prices by mint: {}", e);
+                                HashMap::new()
+                            }
                         }
+                    } else {
+                        HashMap::new()
                     };
 
                     // STEP 5: Create tokens for display with metadata
@@ -1614,14 +1609,17 @@ pub fn WalletView() -> Element {
                                 (format!("Token {}", &symbol), None)
                             };
                             
-                            // Get price from dynamic prices, fallback to hardcoded snapshot, then to 1.0
-                            let price = dynamic_token_prices.get(&symbol)
+                            // Get price by mint first, then fallback to symbol snapshot and stablecoin defaults.
+                            let price = dynamic_mint_prices.get(&account.mint)
                                 .copied()
                                 .or_else(|| token_prices_snapshot.get(&symbol).copied())
                                 .unwrap_or_else(|| {
-                                    match symbol.as_str() {
-                                        "USDC" | "USDT" => 1.0,
-                                        _ => 0.0, // Show $0 for unknown token prices
+                                    if account.mint == USDC_MINT || symbol == "USDC" {
+                                        1.0
+                                    } else if account.mint == USDT_MINT || symbol == "USDT" {
+                                        1.0
+                                    } else {
+                                        0.0 // Show $0 for unknown token prices
                                     }
                                 });
                             

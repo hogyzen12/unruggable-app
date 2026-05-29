@@ -181,8 +181,7 @@ fn App() -> Element {
         });
     });
     // Check if onboarding has been completed
-    let mut show_onboarding = use_signal(|| true);
-    //let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
+    let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
     
     // Check if PIN is set and locked
     let mut is_locked = use_signal(|| storage::has_pin());

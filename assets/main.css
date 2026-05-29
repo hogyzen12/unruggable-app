@@ -5933,6 +5933,89 @@ body:has(.token-item-selected) .token-item:hover {
     margin-bottom: 24px;
 }
 
+.hardware-modal .connection-steps {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin: 0 0 24px 0;
+}
+
+.hardware-modal .connection-step-chip {
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(99, 102, 241, 0.45);
+    background: rgba(99, 102, 241, 0.14);
+    color: #c7d2fe;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.hardware-modal .no-devices-actions {
+    margin-top: 16px;
+    display: flex;
+    justify-content: center;
+}
+
+.hardware-modal .rescan-button {
+    width: auto;
+    min-width: 180px;
+}
+
+/* Embed PinInput cleanly inside hardware modal instead of fullscreen overlay style */
+.hardware-modal .pin-input-overlay {
+    position: static;
+    top: auto;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    background: transparent;
+    z-index: auto;
+    animation: none;
+}
+
+.hardware-modal .pin-input-container {
+    max-width: none;
+    width: 100%;
+    padding: 0;
+    background: transparent;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+}
+
+.hardware-modal .pin-input-container::before {
+    display: none;
+}
+
+.hardware-modal .pin-input-title {
+    font-size: 24px;
+}
+
+.hardware-modal .pin-input-subtitle {
+    margin-bottom: 24px;
+}
+
+.hardware-modal .pin-dots-container {
+    margin: 24px 0;
+}
+
+.hardware-modal .pin-number-button,
+.hardware-modal .pin-action-button,
+.hardware-modal .pin-spacer {
+    width: 68px;
+    height: 68px;
+}
+
+@media (max-width: 480px) {
+    .hardware-modal .pin-number-button,
+    .hardware-modal .pin-action-button,
+    .hardware-modal .pin-spacer {
+        width: 60px;
+        height: 60px;
+    }
+}
+
 .success-header {
     display: flex;
     flex-direction: column;

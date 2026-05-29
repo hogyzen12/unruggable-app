@@ -29,15 +29,33 @@ pub fn PinInput(props: PinInputProps) -> Element {
             
             let _ = eval(
                 r#"
-                // Store all instances globally
-                if (!window.pinShaderInstances) {
-                    window.pinShaderInstances = {
-                        buttonBorders: {},
-                        dotBorders: {},
-                        dotFills: {},
-                        initialized: false
-                    };
+                // Dispose stale instances from any prior PIN screen to avoid
+                // binding old WebGL contexts to newly mounted DOM nodes.
+                const disposeInstanceMap = (instances) => {
+                    if (!instances) return;
+                    Object.keys(instances).forEach((key) => {
+                        try {
+                            const instance = instances[key];
+                            if (instance && typeof instance.dispose === 'function') {
+                                instance.dispose();
+                            }
+                        } catch (_) {}
+                    });
+                };
+                
+                if (window.pinShaderInstances) {
+                    disposeInstanceMap(window.pinShaderInstances.buttonBorders);
+                    disposeInstanceMap(window.pinShaderInstances.dotBorders);
+                    disposeInstanceMap(window.pinShaderInstances.dotFills);
                 }
+                
+                // Store all instances globally
+                window.pinShaderInstances = {
+                    buttonBorders: {},
+                    dotBorders: {},
+                    dotFills: {},
+                    initialized: false
+                };
                 
                 // Check if all required instances are created (buttons + dot borders only)
                 const checkAllCreated = () => {

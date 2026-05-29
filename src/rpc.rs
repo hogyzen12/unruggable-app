@@ -76,6 +76,74 @@ pub async fn get_balance(address: &str, rpc_url: Option<&str>) -> Result<f64, St
     Err(format!("Failed to parse balance from response: {:?}", json))
 }
 
+pub async fn get_balances(
+    addresses: &[String],
+    rpc_url: Option<&str>,
+) -> Result<HashMap<String, f64>, String> {
+    if addresses.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let client = Client::new();
+    let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
+    const MAX_ACCOUNTS_PER_REQUEST: usize = 100;
+    let mut balances = HashMap::with_capacity(addresses.len());
+
+    for (batch_idx, chunk) in addresses.chunks(MAX_ACCOUNTS_PER_REQUEST).enumerate() {
+        let request = RpcRequest {
+            jsonrpc: "2.0".to_string(),
+            id: (batch_idx + 1) as u64,
+            method: "getMultipleAccounts".to_string(),
+            params: vec![
+                serde_json::json!(chunk),
+                serde_json::json!({
+                    "commitment": "finalized",
+                    "encoding": "base64"
+                }),
+            ],
+        };
+
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to send request: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!("RPC error: {}", response.status()));
+        }
+
+        let json: Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if let Some(error) = json.get("error") {
+            return Err(format!("RPC error: {:?}", error));
+        }
+
+        let values = json
+            .get("result")
+            .and_then(|result| result.get("value"))
+            .and_then(|value| value.as_array())
+            .ok_or_else(|| format!("Failed to parse balances from response: {:?}", json))?;
+
+        for (idx, address) in chunk.iter().enumerate() {
+            let lamports = values
+                .get(idx)
+                .and_then(|account| account.get("lamports"))
+                .and_then(|lamports| lamports.as_u64())
+                .unwrap_or(0);
+
+            balances.insert(address.clone(), lamports as f64 / 1_000_000_000.0);
+        }
+    }
+
+    Ok(balances)
+}
+
 pub async fn get_minimum_balance_for_rent_exemption(
     account_size: usize,
     rpc_url: Option<&str>,
@@ -150,12 +218,32 @@ struct TokenInfo {
 
 #[derive(Debug, Deserialize)]
 struct TokenAmount {
+    #[allow(dead_code)]
     amount: String,
     decimals: u8,
     #[serde(rename = "uiAmount")]
-    ui_amount: f64,
-    #[serde(rename = "uiAmountString")]
+    ui_amount: Option<f64>,
+    #[serde(rename = "uiAmountString", default)]
     ui_amount_string: String,
+}
+
+fn parse_ui_token_amount(token_amount: &TokenAmount) -> f64 {
+    if let Some(ui_amount) = token_amount.ui_amount {
+        return ui_amount;
+    }
+
+    if let Ok(ui_amount_from_string) = token_amount.ui_amount_string.parse::<f64>() {
+        return ui_amount_from_string;
+    }
+
+    if let Ok(base_units) = token_amount.amount.parse::<u128>() {
+        let divisor = 10_f64.powi(i32::from(token_amount.decimals));
+        if divisor > 0.0 {
+            return (base_units as f64) / divisor;
+        }
+    }
+
+    0.0
 }
 
 /// Parameters for filtering token accounts by mint or program ID.
@@ -236,13 +324,16 @@ pub async fn get_token_accounts_by_owner(
         .result
         .value
         .into_iter()
-        .map(|account| TokenAccountInfo {
-            pubkey: account.pubkey,
-            mint: account.account.data.parsed.info.mint,
-            owner: account.account.data.parsed.info.owner,
-            amount: account.account.data.parsed.info.token_amount.ui_amount,
-            decimals: account.account.data.parsed.info.token_amount.decimals,
-            state: account.account.data.parsed.info.state,
+        .map(|account| {
+            let token_amount = &account.account.data.parsed.info.token_amount;
+            TokenAccountInfo {
+                pubkey: account.pubkey,
+                mint: account.account.data.parsed.info.mint,
+                owner: account.account.data.parsed.info.owner,
+                amount: parse_ui_token_amount(token_amount),
+                decimals: token_amount.decimals,
+                state: account.account.data.parsed.info.state,
+            }
         })
         .collect();
 

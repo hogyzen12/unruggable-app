@@ -100,7 +100,9 @@ pub fn filter_tokens(tokens: &[TokenDisplayData], filter: &TokenFilter) -> Vec<T
             
             // Minimum value filter
             if let Some(min_value) = filter.min_value_usd {
-                if token_data.token.value_usd < min_value {
+                // Only apply USD threshold to tokens that actually have a market price.
+                // Otherwise non-zero balances with unknown prices are hidden as "$0.00".
+                if token_data.has_price_data && token_data.token.value_usd < min_value {
                     return false;
                 }
             }

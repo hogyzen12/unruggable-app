@@ -1,13 +1,14 @@
-use dioxus::prelude::*;
-use crate::wallet::{Wallet, WalletInfo};
+use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
+use crate::hardware::AuthMode;
 use crate::hardware::HardwareWallet;
-use crate::transaction::TransactionClient;
-use crate::signing::hardware::HardwareSigner;
-use crate::signing::{SignerType, TransactionSigner};
 use crate::privacycash;
 use crate::rpc;
+use crate::signing::hardware::HardwareSigner;
+use crate::signing::{SignerType, TransactionSigner};
 use crate::storage::{get_address_book_label, get_send_count, increment_send_count};
-use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
+use crate::transaction::TransactionClient;
+use crate::wallet::{Wallet, WalletInfo};
+use dioxus::prelude::*;
 use solana_sdk::pubkey::Pubkey; // ← ADD THIS IMPORT
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -16,21 +17,86 @@ use tokio::time::{sleep, Duration};
 
 const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnlockMode {
+    Pin,
+    Otp,
+}
+
+fn extract_hardware_error_code(message: &str) -> Option<String> {
+    const MARKER: &str = "Hardware wallet error: ";
+    let idx = message.find(MARKER)?;
+    let code = &message[idx + MARKER.len()..];
+    let code = code
+        .split(|c| c == '\n' || c == '\r')
+        .next()
+        .unwrap_or(code)
+        .trim();
+    if code.is_empty() {
+        None
+    } else {
+        Some(code.to_string())
+    }
+}
+
+fn format_unlock_error_message(err: &str) -> String {
+    if let Some(code) = extract_hardware_error_code(err) {
+        return match code.as_str() {
+            "AUTH_FAILED" | "OTP_BAD_CODE" => "Incorrect code. Please try again.".to_string(),
+            "AUTH_LOCKED" => {
+                "Too many failed attempts. Device auth is locked. Use physical factory wipe to recover."
+                    .to_string()
+            }
+            "BAD_PIN_FORMAT" | "BAD_OTP_FORMAT" => {
+                "Code must be exactly 6 digits.".to_string()
+            }
+            "AUTH_MODE_MISMATCH" => {
+                "Unlock method does not match device auth mode. Reconnect device.".to_string()
+            }
+            "TIME_NOT_SET" => {
+                "Device time not set. Reconnect and try again.".to_string()
+            }
+            other => format!("Unlock failed: {other}"),
+        };
+    }
+
+    format!("Unlock failed: {err}")
+}
+
+async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
+    if let Ok(Some(info)) = wallet.refresh_esp32_info().await {
+        return match info.auth_mode {
+            AuthMode::Pin => Some(UnlockMode::Pin),
+            AuthMode::Otp => Some(UnlockMode::Otp),
+            _ => None,
+        };
+    }
+
+    match wallet.get_cached_esp32_info().await {
+        Some(info) => match info.auth_mode {
+            AuthMode::Pin => Some(UnlockMode::Pin),
+            AuthMode::Otp => Some(UnlockMode::Otp),
+            _ => None,
+        },
+        None => None,
+    }
+}
+
 /// Hardware wallet approval overlay component shown during transaction signing
 #[component]
 fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "hardware-approval-overlay",
-            
+
             div {
                 class: "hardware-approval-content",
-                
-                h3 { 
+
+                h3 {
                     class: "hardware-approval-title",
                     "Confirm on Hardware Wallet"
                 }
-                
+
                 div {
                     class: "hardware-icon-container",
                     div {
@@ -46,12 +112,12 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
                         }
                     }
                 }
-                
+
                 p {
                     class: "hardware-approval-text",
                     "Please check your hardware wallet and confirm the transaction details."
                 }
-                
+
                 div {
                     class: "hardware-steps",
                     div {
@@ -60,7 +126,7 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
                         span { "Press the button on your Unruggable to confirm" }
                     }
                 }
-                
+
                 button {
                     class: "hardware-cancel-button",
                     onclick: move |_| oncancel.call(()),
@@ -80,19 +146,22 @@ pub fn TransactionSuccessModal(
 ) -> Element {
     // Explorer links - Solscan and Orb
     let solscan_url = format!("https://solscan.io/tx/{}", signature);
-    let orb_url = format!("https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary", signature);
-    
+    let orb_url = format!(
+        "https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary",
+        signature
+    );
+
     rsx! {
         div {
             class: "modal-backdrop",
             onclick: move |_| onclose.call(()),
-            
+
             div {
                 class: "modal-content",
                 onclick: move |e| e.stop_propagation(),
-                
+
                 h2 { class: "modal-title", "Transaction Sent Successfully!" }
-                
+
                 div {
                     class: "tx-icon-container",
                     div {
@@ -100,7 +169,7 @@ pub fn TransactionSuccessModal(
                         "✓" // Checkmark icon
                     }
                 }
-                
+
                 div {
                     class: "success-message",
                     "Your transaction was submitted to the Solana network."
@@ -111,8 +180,8 @@ pub fn TransactionSuccessModal(
                     div {
                         class: "wallet-field",
                         label { "Transaction Signature:" }
-                        div { 
-                            class: "address-display", 
+                        div {
+                            class: "address-display",
                             title: "Click to copy",
                             onclick: move |_| {
                                 // We can't do actual clipboard operations in Dioxus yet
@@ -121,16 +190,16 @@ pub fn TransactionSuccessModal(
                             },
                             "{signature}"
                         }
-                        div { 
+                        div {
                             class: "copy-hint",
                             "Click to copy"
                         }
                     }
-                    
+
                     div {
                         class: "explorer-links",
                         p { "View transaction in explorer:" }
-                        
+
                         div {
                             class: "explorer-buttons",
                             a {
@@ -150,7 +219,7 @@ pub fn TransactionSuccessModal(
                         }
                     }
                 }
-                
+
                 div { class: "modal-buttons",
                     button {
                         class: "modal-button primary",
@@ -201,14 +270,19 @@ pub fn SendModalWithHardware(
     let mut private_balance = use_signal(|| None as Option<u64>);
     let mut private_balance_loading = use_signal(|| false);
     let mut privacy_progress = use_signal(|| None as Option<String>);
-    
+
     // Add state for transaction success modal - always declared
     let mut show_success_modal = use_signal(|| false);
     let mut transaction_signature = use_signal(|| "".to_string());
     let mut was_hardware_transaction = use_signal(|| false);
-    
+
     // Add state for hardware wallet approval overlay - always declared
     let mut show_hardware_approval = use_signal(|| false);
+    let mut show_unlock_modal = use_signal(|| false);
+    let mut unlock_mode = use_signal(|| None as Option<UnlockMode>);
+    let mut unlock_code = use_signal(|| "".to_string());
+    let mut unlock_error = use_signal(|| None as Option<String>);
+    let mut unlock_in_progress = use_signal(|| false);
 
     let execute_send: Rc<RefCell<dyn FnMut()>> = Rc::new(RefCell::new({
         let hardware_wallet = hardware_wallet.clone();
@@ -227,13 +301,20 @@ pub fn SendModalWithHardware(
         let mut private_balance = private_balance.clone();
         let mut privacy_progress = privacy_progress.clone();
         let mut private_balance_loading = private_balance_loading.clone();
+        let mut show_unlock_modal = show_unlock_modal.clone();
+        let mut unlock_mode = unlock_mode.clone();
+        let mut unlock_code = unlock_code.clone();
+        let mut unlock_error = unlock_error.clone();
+        let mut unlock_in_progress = unlock_in_progress.clone();
         let on_privacy_refresh = on_privacy_refresh.clone();
         let privacy_enabled = privacy_enabled.clone();
         move || {
             let recipient_pubkey = match resolved_recipient.read().as_ref() {
                 Some(pubkey) => *pubkey,
                 None => {
-                    error_message.set(Some("Please enter a valid recipient address or domain".to_string()));
+                    error_message.set(Some(
+                        "Please enter a valid recipient address or domain".to_string(),
+                    ));
                     return;
                 }
             };
@@ -304,13 +385,55 @@ pub fn SendModalWithHardware(
                         return;
                     };
 
-                    let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
-                        error_message.set(Some("Failed to sign auth message".to_string()));
-                        sending.set(false);
-                        if should_clear_hw {
-                            show_hardware_approval.set(false);
+                    let signature = match privacycash::sign_auth_message(&signer).await {
+                        Ok(signature) => signature,
+                        Err(err) => {
+                            let err_text = err.to_string();
+                            if should_clear_hw {
+                                if let Some(code) = extract_hardware_error_code(&err_text) {
+                                    if code == "LOCKED" {
+                                        if let Some(hw) = hardware_wallet_clone.clone() {
+                                            if let Some(mode) =
+                                                resolve_unlock_mode(hw.as_ref()).await
+                                            {
+                                                unlock_mode.set(Some(mode));
+                                                unlock_code.set(String::new());
+                                                unlock_error.set(None);
+                                                unlock_in_progress.set(false);
+                                                show_unlock_modal.set(true);
+                                                sending.set(false);
+                                                show_hardware_approval.set(false);
+                                                return;
+                                            }
+                                        }
+                                    } else if code == "MODE_UNSET" {
+                                        error_message.set(Some(
+                                            "Device setup is required. Reconnect and complete hardware setup."
+                                                .to_string(),
+                                        ));
+                                        sending.set(false);
+                                        show_hardware_approval.set(false);
+                                        return;
+                                    } else if code == "AUTH_LOCKED" {
+                                        error_message.set(Some(
+                                            "Device auth is locked. Use physical factory wipe to recover."
+                                                .to_string(),
+                                        ));
+                                        sending.set(false);
+                                        show_hardware_approval.set(false);
+                                        return;
+                                    }
+                                }
+                            }
+
+                            error_message
+                                .set(Some(format!("Failed to sign auth message: {err_text}")));
+                            sending.set(false);
+                            if should_clear_hw {
+                                show_hardware_approval.set(false);
+                            }
+                            return;
                         }
-                        return;
                     };
 
                     let rpc_url = rpc_url.unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
@@ -321,7 +444,8 @@ pub fn SendModalWithHardware(
                     if private_balance_value < lamports {
                         let topup = lamports - private_balance_value;
                         let topup_sol = topup as f64 / 1_000_000_000.0;
-                        privacy_progress.set(Some("Step 1/2: Depositing to private balance…".to_string()));
+                        privacy_progress
+                            .set(Some("Step 1/2: Depositing to private balance…".to_string()));
                         let mut tx = match privacycash::build_deposit_tx(
                             &authority,
                             &signature,
@@ -332,7 +456,8 @@ pub fn SendModalWithHardware(
                         {
                             Ok(tx) => tx,
                             Err(err) => {
-                                error_message.set(Some(format!("Failed to build deposit tx: {err}")));
+                                error_message
+                                    .set(Some(format!("Failed to build deposit tx: {err}")));
                                 sending.set(false);
                                 if should_clear_hw {
                                     show_hardware_approval.set(false);
@@ -354,7 +479,9 @@ pub fn SendModalWithHardware(
                             }
                         };
 
-                        if let Err(err) = privacycash::sign_transaction(&signer, &mut tx, recent_blockhash).await {
+                        if let Err(err) =
+                            privacycash::sign_transaction(&signer, &mut tx, recent_blockhash).await
+                        {
                             error_message.set(Some(format!("Failed to sign deposit tx: {err}")));
                             sending.set(false);
                             if should_clear_hw {
@@ -383,7 +510,10 @@ pub fn SendModalWithHardware(
                             private_balance_value = balance;
                             private_balance.set(Some(balance));
                         }
-                        privacy_progress.set(Some(format!("Step 1/2 complete: Deposited {:.4} SOL", topup_sol)));
+                        privacy_progress.set(Some(format!(
+                            "Step 1/2 complete: Deposited {:.4} SOL",
+                            topup_sol
+                        )));
                     }
 
                     privacy_progress.set(Some("Step 2/2: Sending privately…".to_string()));
@@ -398,7 +528,8 @@ pub fn SendModalWithHardware(
                     {
                         Ok(req) => req,
                         Err(err) => {
-                            error_message.set(Some(format!("Failed to build withdraw request: {err}")));
+                            error_message
+                                .set(Some(format!("Failed to build withdraw request: {err}")));
                             sending.set(false);
                             if should_clear_hw {
                                 show_hardware_approval.set(false);
@@ -432,9 +563,17 @@ pub fn SendModalWithHardware(
                 } else if let Some(hw) = hardware_wallet_clone {
                     let hw_signer = HardwareSigner::from_wallet(hw.clone());
                     let send_result = if use_no_timeout {
-                        client.send_sol_with_signer_no_timeout(&hw_signer, &recipient_address, amount_value).await
+                        client
+                            .send_sol_with_signer_no_timeout(
+                                &hw_signer,
+                                &recipient_address,
+                                amount_value,
+                            )
+                            .await
                     } else {
-                        client.send_sol_with_signer(&hw_signer, &recipient_address, amount_value).await
+                        client
+                            .send_sol_with_signer(&hw_signer, &recipient_address, amount_value)
+                            .await
                     };
                     match send_result {
                         Ok(signature) => {
@@ -447,6 +586,38 @@ pub fn SendModalWithHardware(
                             show_success_modal.set(true);
                         }
                         Err(e) => {
+                            let err_text = e.to_string();
+                            if let Some(code) = extract_hardware_error_code(&err_text) {
+                                if code == "LOCKED" {
+                                    if let Some(mode) = resolve_unlock_mode(hw.as_ref()).await {
+                                        unlock_mode.set(Some(mode));
+                                        unlock_code.set(String::new());
+                                        unlock_error.set(None);
+                                        unlock_in_progress.set(false);
+                                        show_unlock_modal.set(true);
+                                        sending.set(false);
+                                        show_hardware_approval.set(false);
+                                        return;
+                                    }
+                                } else if code == "MODE_UNSET" {
+                                    error_message.set(Some(
+                                        "Device setup is required. Reconnect and complete hardware setup."
+                                            .to_string(),
+                                    ));
+                                    sending.set(false);
+                                    show_hardware_approval.set(false);
+                                    return;
+                                } else if code == "AUTH_LOCKED" {
+                                    error_message.set(Some(
+                                        "Device auth is locked. Use physical factory wipe to recover."
+                                            .to_string(),
+                                    ));
+                                    sending.set(false);
+                                    show_hardware_approval.set(false);
+                                    return;
+                                }
+                            }
+
                             error_message.set(Some(format!("Transaction failed: {}", e)));
                             sending.set(false);
                             show_hardware_approval.set(false);
@@ -456,9 +627,13 @@ pub fn SendModalWithHardware(
                     match Wallet::from_wallet_info(&wallet_info) {
                         Ok(wallet) => {
                             let send_result = if use_no_timeout {
-                                client.send_sol_no_timeout(&wallet, &recipient_address, amount_value).await
+                                client
+                                    .send_sol_no_timeout(&wallet, &recipient_address, amount_value)
+                                    .await
                             } else {
-                                client.send_sol(&wallet, &recipient_address, amount_value).await
+                                client
+                                    .send_sol(&wallet, &recipient_address, amount_value)
+                                    .await
                             };
                             match send_result {
                                 Ok(signature) => {
@@ -485,10 +660,10 @@ pub fn SendModalWithHardware(
                     sending.set(false);
                     show_hardware_approval.set(false);
                 }
-
             });
         }
     }));
+    let execute_send_for_unlock = Rc::clone(&execute_send);
 
     let execute_send_for_delay = Rc::clone(&execute_send);
     use_effect(move || {
@@ -507,8 +682,8 @@ pub fn SendModalWithHardware(
                     if pending_send() {
                         show_delay_modal.set(false);
                         pending_send.set(false);
-                            execute_send.borrow_mut()();
-                        }
+                        execute_send.borrow_mut()();
+                    }
                     break;
                 }
                 sleep(Duration::from_secs(1)).await;
@@ -573,7 +748,9 @@ pub fn SendModalWithHardware(
         let mut private_balance_loading = private_balance_loading.clone();
         Rc::new(RefCell::new(move || {
             private_balance_loading.set(true);
-            let rpc_url = rpc_url.clone().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
+            let rpc_url = rpc_url
+                .clone()
+                .unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
             let wallet_info = wallet_info.clone();
             let hw_for_refresh = hw_for_refresh.clone();
             let mut private_balance = private_balance.clone();
@@ -600,7 +777,13 @@ pub fn SendModalWithHardware(
                     private_balance_loading.set(false);
                     return;
                 };
-                match privacycash::get_private_balance(&authority, &signature, Some(rpc_url.as_str())).await {
+                match privacycash::get_private_balance(
+                    &authority,
+                    &signature,
+                    Some(rpc_url.as_str()),
+                )
+                .await
+                {
                     Ok(balance) => {
                         private_balance.set(Some(balance));
                     }
@@ -681,6 +864,115 @@ pub fn SendModalWithHardware(
                     }
                 }
 
+                if show_unlock_modal() {
+                    div {
+                        class: "modal-backdrop",
+                        onclick: move |_| {},
+                        div {
+                            class: "modal-content",
+                            onclick: move |e| e.stop_propagation(),
+                            style: "
+                                max-width: 420px;
+                                margin: 0 auto;
+                                text-align: left;
+                            ",
+                            h2 { class: "modal-title", "Unlock Hardware Device" }
+                            p { class: "success-message",
+                                match unlock_mode() {
+                                    Some(UnlockMode::Pin) => "Enter your 6-digit Device PIN to continue signing.",
+                                    Some(UnlockMode::Otp) => "Enter your 6-digit authenticator code to continue signing.",
+                                    None => "Enter device unlock code to continue signing.",
+                                }
+                            }
+                            div {
+                                class: "wallet-field",
+                                label {
+                                    match unlock_mode() {
+                                        Some(UnlockMode::Pin) => "Device PIN",
+                                        Some(UnlockMode::Otp) => "Authenticator Code",
+                                        None => "Unlock Code",
+                                    }
+                                }
+                                input {
+                                    r#type: "password",
+                                    value: "{unlock_code}",
+                                    oninput: move |e| unlock_code.set(e.value()),
+                                    placeholder: "6 digits",
+                                    maxlength: "6",
+                                    autocomplete: "off"
+                                }
+                            }
+                            if let Some(err) = unlock_error() {
+                                div { class: "error-message", "{err}" }
+                            }
+                            div { class: "modal-buttons",
+                                button {
+                                    class: "modal-button cancel",
+                                    disabled: unlock_in_progress(),
+                                    onclick: move |_| {
+                                        show_unlock_modal.set(false);
+                                        unlock_in_progress.set(false);
+                                        unlock_error.set(None);
+                                        unlock_code.set(String::new());
+                                    },
+                                    "Cancel"
+                                }
+                                button {
+                                    class: "modal-button primary",
+                                    disabled: unlock_in_progress(),
+                                    onclick: {
+                                        let hardware_wallet = hardware_wallet.clone();
+                                        move |_| {
+                                            if unlock_in_progress() {
+                                                return;
+                                            }
+
+                                            let Some(hw) = hardware_wallet.clone() else {
+                                                unlock_error.set(Some("Hardware wallet disconnected".to_string()));
+                                                return;
+                                            };
+
+                                            let code = unlock_code();
+                                            if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+                                                unlock_error.set(Some("Code must be exactly 6 digits.".to_string()));
+                                                return;
+                                            }
+
+                                            let mode = unlock_mode();
+                                            let execute_send_for_unlock = Rc::clone(&execute_send_for_unlock);
+                                            spawn(async move {
+                                                unlock_in_progress.set(true);
+                                                unlock_error.set(None);
+
+                                                let unlock_result = match mode {
+                                                    Some(UnlockMode::Pin) => hw.unlock_pin(&code).await.map(|_| ()),
+                                                    Some(UnlockMode::Otp) => hw.unlock_otp(&code).await.map(|_| ()),
+                                                    None => Err("Unknown unlock mode".into()),
+                                                };
+
+                                                match unlock_result {
+                                                    Ok(()) => {
+                                                        unlock_in_progress.set(false);
+                                                        unlock_error.set(None);
+                                                        unlock_code.set(String::new());
+                                                        show_unlock_modal.set(false);
+                                                        execute_send_for_unlock.borrow_mut()();
+                                                    }
+                                                    Err(err) => {
+                                                        unlock_in_progress.set(false);
+                                                        unlock_error.set(Some(format_unlock_error_message(&err.to_string())));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    },
+                                    if unlock_in_progress() { "Unlocking..." } else { "Unlock and Retry" }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 div {
                     style: "
                         display: flex;
@@ -750,7 +1042,7 @@ pub fn SendModalWithHardware(
                         placeholder: "Enter address or domain (e.g., kvty.sol)",
                         show_address_book: Some(true)
                     }
-                    
+
                     // Keep the recipient balance display
                     if checking_balance() {
                         div {

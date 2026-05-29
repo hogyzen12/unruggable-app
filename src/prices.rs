@@ -1,6 +1,6 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use chrono::Utc;
 use std::sync::Mutex;
@@ -12,6 +12,8 @@ const PYTH_HISTORY_URL: &str = "https://benchmarks.pyth.network/v1/shims/trading
 const JUPITER_PRICE_API_URL: &str = "https://lite-api.jup.ag/price/v3";
 const JUPITER_TOKEN_API_URL: &str = "https://lite-api.jup.ag/tokens/v2/search";
 const PRICE_CACHE_TIMEOUT: u64 = 120; // 2 minutes
+const JUPITER_PRICE_IDS_PER_REQUEST: usize = 50;
+const JUPITER_TOKEN_IDS_PER_REQUEST: usize = 100;
 
 // Token mint addresses for Jupiter API
 pub const TOKEN_MINTS: &[(&str, &str)] = &[
@@ -56,6 +58,21 @@ struct JupiterTokenPrice {
     decimals: Option<u8>,
     #[serde(rename = "priceChange24h")]
     price_change_24h: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct JupiterPriceResponseEnvelope {
+    data: HashMap<String, JupiterTokenPrice>,
+}
+
+fn parse_jupiter_price_response(response_text: &str) -> Result<HashMap<String, JupiterTokenPrice>, String> {
+    if let Ok(map_response) = serde_json::from_str::<HashMap<String, JupiterTokenPrice>>(response_text) {
+        return Ok(map_response);
+    }
+
+    serde_json::from_str::<JupiterPriceResponseEnvelope>(response_text)
+        .map(|wrapped| wrapped.data)
+        .map_err(|e| format!("Failed to parse Jupiter response: {} - Response: {}", e, response_text))
 }
 
 // Jupiter Token API V2 response structure
@@ -124,46 +141,82 @@ fn get_price_cache() -> &'static Mutex<(HashMap<String, f64>, HashMap<String, Mu
 
 /// Fetch prices from Jupiter API for specific mint addresses
 pub async fn get_jupiter_prices_for_mints(mint_addresses: Vec<String>) -> Result<HashMap<String, f64>, Box<dyn Error>> {
-    println!("Fetching prices from Jupiter API for {} mints...", mint_addresses.len());
+    if mint_addresses.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut seen_mints = HashSet::new();
+    let unique_mints: Vec<String> = mint_addresses
+        .into_iter()
+        .filter(|mint| seen_mints.insert(mint.clone()))
+        .collect();
+
+    println!("Fetching prices from Jupiter API for {} mints...", unique_mints.len());
     
     let client = Client::new();
-    
-    // Build comma-separated mint addresses
-    let ids_param = mint_addresses.join(",");
-    
-    println!("Jupiter API request: {} with IDs: {}", JUPITER_PRICE_API_URL, ids_param);
-    
-    let response = client
-        .get(JUPITER_PRICE_API_URL)
-        .query(&[("ids", &ids_param)])
-        .header("Accept", "application/json")
-        .send()
-        .await
-        .map_err(|e| format!("Jupiter API request failed: {}", e))?;
-
-    let status = response.status();
-    println!("Jupiter API response status: {}", status);
-
-    if !status.is_success() {
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(format!("Jupiter API error {}: {}", status, error_text).into());
-    }
-
-    let response_text = response.text().await?;
-    println!("Jupiter API raw response: {}", response_text);
-
-    let jupiter_response: HashMap<String, JupiterTokenPrice> = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Failed to parse Jupiter response: {} - Response: {}", e, response_text))?;
-
     let mut prices = HashMap::new();
-    
-    // Map mint addresses to prices
-    for (mint_address, token_data) in jupiter_response {
-        prices.insert(mint_address.clone(), token_data.usd_price);
-        println!("Jupiter: {} = ${:.4}", mint_address, token_data.usd_price);
+    let mut successful_chunks = 0usize;
+    let mut failed_chunks = 0usize;
+
+    for mint_chunk in unique_mints.chunks(JUPITER_PRICE_IDS_PER_REQUEST) {
+        let ids_param = mint_chunk.join(",");
+        println!(
+            "Jupiter API request: {} with {} IDs",
+            JUPITER_PRICE_API_URL,
+            mint_chunk.len()
+        );
+
+        let response = match client
+            .get(JUPITER_PRICE_API_URL)
+            .query(&[("ids", &ids_param)])
+            .header("Accept", "application/json")
+            .send()
+            .await
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                failed_chunks += 1;
+                println!("Jupiter API request failed for chunk: {}", e);
+                continue;
+            }
+        };
+
+        let status = response.status();
+        if !status.is_success() {
+            failed_chunks += 1;
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            println!("Jupiter API error {} for chunk: {}", status, error_text);
+            continue;
+        }
+
+        let response_text = response.text().await?;
+        let jupiter_response = match parse_jupiter_price_response(&response_text) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                failed_chunks += 1;
+                println!("{}", e);
+                continue;
+            }
+        };
+
+        successful_chunks += 1;
+
+        for (mint_address, token_data) in jupiter_response {
+            prices.insert(mint_address.clone(), token_data.usd_price);
+            println!("Jupiter: {} = ${:.4}", mint_address, token_data.usd_price);
+        }
     }
-    
-    println!("Jupiter API returned {} prices", prices.len());
+
+    if successful_chunks == 0 && failed_chunks > 0 {
+        return Err("All Jupiter price chunks failed".into());
+    }
+
+    println!(
+        "Jupiter API returned {} prices ({} successful chunks, {} failed chunks)",
+        prices.len(),
+        successful_chunks,
+        failed_chunks
+    );
     Ok(prices)
 }
 
@@ -198,8 +251,7 @@ pub async fn get_jupiter_prices() -> Result<HashMap<String, f64>, Box<dyn Error>
     let response_text = response.text().await?;
     println!("Jupiter API raw response: {}", response_text);
 
-    let jupiter_response: HashMap<String, JupiterTokenPrice> = serde_json::from_str(&response_text)
-        .map_err(|e| format!("Failed to parse Jupiter response: {} - Response: {}", e, response_text))?;
+    let jupiter_response = parse_jupiter_price_response(&response_text)?;
 
     let mut prices = HashMap::new();
     
@@ -277,17 +329,24 @@ pub async fn get_token_metadata(mint_addresses: Vec<String>) -> Result<HashMap<S
     if mint_addresses.is_empty() {
         return Ok(HashMap::new());
     }
+
+    let mut seen_mints = HashSet::new();
+    let unique_mints: Vec<String> = mint_addresses
+        .into_iter()
+        .filter(|mint| seen_mints.insert(mint.clone()))
+        .collect();
     
-    println!("Fetching token metadata from Jupiter Token API for {} tokens...", mint_addresses.len());
+    println!("Fetching token metadata from Jupiter Token API for {} tokens...", unique_mints.len());
     
     let client = Client::new();
     
     // Build comma-separated mint addresses (max 100 as per API docs)
-    let chunks: Vec<_> = mint_addresses.chunks(100).collect();
+    let chunks: Vec<_> = unique_mints.chunks(JUPITER_TOKEN_IDS_PER_REQUEST).collect();
     let mut all_tokens = HashMap::new();
     
     for chunk in chunks {
         let ids_param = chunk.join(",");
+        let requested_ids: HashSet<&str> = chunk.iter().map(|mint| mint.as_str()).collect();
         
         println!("Jupiter Token API request: {} with query: {}", JUPITER_TOKEN_API_URL, ids_param);
         
@@ -317,7 +376,9 @@ pub async fn get_token_metadata(mint_addresses: Vec<String>) -> Result<HashMap<S
 
         // Index by mint address
         for token_info in token_infos {
-            all_tokens.insert(token_info.id.clone(), token_info);
+            if requested_ids.contains(token_info.id.as_str()) {
+                all_tokens.insert(token_info.id.clone(), token_info);
+            }
         }
         
         // Small delay between requests to be nice to the API
