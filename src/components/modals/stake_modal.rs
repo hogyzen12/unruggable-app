@@ -1,28 +1,114 @@
-use dioxus::prelude::*;
-use crate::wallet::WalletInfo;
-use crate::hardware::HardwareWallet;
-use crate::validators::{ValidatorInfo, get_recommended_validators};
-use crate::staking::{self, DetailedStakeAccount, StakeAccountState};
-use crate::staking::{MergeGroup, MergeType};
-use crate::unstaking::{
-    instant_unstake_stake_account, can_instant_unstake, 
-    normal_unstake_stake_account, can_normal_unstake,
-    partial_unstake_stake_account, can_partial_unstake,
-    withdraw_stake_account, can_withdraw
-};
-use std::sync::Arc;
-use std::collections::HashMap;
-use crate::signing::hardware::HardwareSigner;
+use crate::hardware::{AuthMode, HardwareWallet};
 use crate::staking::create_stake_account;
 use crate::staking::find_mergeable_stake_accounts;
-use std::sync::LazyLock;
+use crate::staking::MergeGroup;
+use crate::staking::{self, DetailedStakeAccount, StakeAccountState};
+use crate::unstaking::{
+    can_instant_unstake, can_normal_unstake, can_partial_unstake, can_withdraw,
+    instant_unstake_stake_account, normal_unstake_stake_account, partial_unstake_stake_account,
+    withdraw_stake_account,
+};
+use crate::validators::{get_recommended_validators, ValidatorInfo};
+use crate::wallet::WalletInfo;
+use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::LazyLock;
 
 #[derive(PartialEq, Clone, Debug)]
 enum ModalMode {
     Stake,
     MyStakes,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnlockMode {
+    Pin,
+    Otp,
+}
+
+fn extract_hardware_error_code(message: &str) -> Option<String> {
+    const MARKER: &str = "Hardware wallet error: ";
+    let idx = message.find(MARKER)?;
+    let code = &message[idx + MARKER.len()..];
+    let code = code
+        .split(|c| c == '\n' || c == '\r')
+        .next()
+        .unwrap_or(code)
+        .trim();
+    if code.is_empty() {
+        None
+    } else {
+        Some(code.to_string())
+    }
+}
+
+fn format_unlock_error_message(err: &str) -> String {
+    if let Some(code) = extract_hardware_error_code(err) {
+        return match code.as_str() {
+            "AUTH_FAILED" | "OTP_BAD_CODE" => "Incorrect code. Please try again.".to_string(),
+            "AUTH_LOCKED" => {
+                "Too many failed attempts. Device auth is locked. Use physical factory wipe to recover."
+                    .to_string()
+            }
+            "BAD_PIN_FORMAT" | "BAD_OTP_FORMAT" => {
+                "Code must be exactly 6 digits.".to_string()
+            }
+            "BUTTON_TIMEOUT" => {
+                "No button press detected. Submit the code again, then press the device button within 8 seconds."
+                    .to_string()
+            }
+            "AUTH_MODE_MISMATCH" => {
+                "Unlock method does not match the device mode. Open hardware connect and try again."
+                    .to_string()
+            }
+            "TIME_NOT_SET" => {
+                "Device time is not set yet. Try the unlock again.".to_string()
+            }
+            other => format!("Unlock failed: {other}"),
+        };
+    }
+
+    format!("Unlock failed: {err}")
+}
+
+fn abbreviate_middle(value: &str, prefix_chars: usize, suffix_chars: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count == 0 {
+        return String::new();
+    }
+    if char_count <= prefix_chars + suffix_chars {
+        return value.to_string();
+    }
+
+    let prefix: String = value.chars().take(prefix_chars).collect();
+    let suffix: String = value
+        .chars()
+        .skip(char_count.saturating_sub(suffix_chars))
+        .collect();
+
+    format!("{prefix}...{suffix}")
+}
+
+async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
+    if let Ok(Some(info)) = wallet.refresh_esp32_info().await {
+        return match info.auth_mode {
+            AuthMode::Pin => Some(UnlockMode::Pin),
+            AuthMode::Otp => Some(UnlockMode::Otp),
+            _ => None,
+        };
+    }
+
+    match wallet.get_cached_esp32_info().await {
+        Some(info) => match info.auth_mode {
+            AuthMode::Pin => Some(UnlockMode::Pin),
+            AuthMode::Otp => Some(UnlockMode::Otp),
+            _ => None,
+        },
+        None => None,
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -44,9 +130,8 @@ pub struct ValidatorEntry {
 static VALIDATORS_JSON: &str = include_str!("../../../assets/validators.json");
 
 // Parse JSON only once when first accessed - mobile-friendly!
-static VALIDATOR_METADATA: LazyLock<HashMap<String, ValidatorEntry>> = LazyLock::new(|| {
-    parse_validators_from_json(VALIDATORS_JSON)
-});
+static VALIDATOR_METADATA: LazyLock<HashMap<String, ValidatorEntry>> =
+    LazyLock::new(|| parse_validators_from_json(VALIDATORS_JSON));
 
 /// Parse validators from JSON string with robust handling
 fn parse_validators_from_json(json_str: &str) -> HashMap<String, ValidatorEntry> {
@@ -55,11 +140,10 @@ fn parse_validators_from_json(json_str: &str) -> HashMap<String, ValidatorEntry>
     match serde_json::from_str::<Value>(json_str) {
         Ok(value) => {
             let entries: Vec<ValidatorEntry> = match value {
-                Value::Array(arr) => {
-                    arr.into_iter()
-                        .filter_map(|v| serde_json::from_value(v).ok())
-                        .collect()
-                }
+                Value::Array(arr) => arr
+                    .into_iter()
+                    .filter_map(|v| serde_json::from_value(v).ok())
+                    .collect(),
                 Value::Object(obj) => {
                     if let Ok(entry) = serde_json::from_value(Value::Object(obj)) {
                         vec![entry]
@@ -73,7 +157,10 @@ fn parse_validators_from_json(json_str: &str) -> HashMap<String, ValidatorEntry>
             for entry in entries {
                 map.insert(entry.vote_account.clone(), entry);
             }
-            println!("Successfully loaded {} validators from local JSON", map.len());
+            println!(
+                "Successfully loaded {} validators from local JSON",
+                map.len()
+            );
         }
         Err(e) => {
             eprintln!("Failed to parse validators JSON: {}", e);
@@ -89,15 +176,15 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "hardware-approval-overlay",
-            
+
             div {
                 class: "hardware-approval-content",
-                
-                h3 { 
+
+                h3 {
                     class: "hardware-approval-title",
-                    "Confirm Staking on Hardware Wallet"
+                    "Confirm on Hardware Wallet"
                 }
-                
+
                 div {
                     class: "hardware-icon-container",
                     div {
@@ -113,30 +200,30 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
                         }
                     }
                 }
-                
+
                 p {
                     class: "hardware-approval-text",
-                    "Please check your hardware wallet and confirm the staking transaction details."
+                    "Please check your hardware wallet and confirm the transaction details."
                 }
-                
+
                 div {
                     class: "hardware-steps",
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "1" }
-                        span { "Review the staking details on your Unruggable" }
+                        span { "Review the transaction on your Unruggable" }
                     }
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "2" }
-                        span { "Press the button to confirm the transaction" }
+                        span { "Press the hardware button once to confirm the transaction" }
                     }
                 }
-                
+
                 button {
                     class: "hardware-cancel-button",
                     onclick: move |_| oncancel.call(()),
-                    "Cancel Staking"
+                    "Cancel"
                 }
             }
         }
@@ -153,10 +240,14 @@ fn UnstakeSuccessModal(
     was_hardware_wallet: bool,
     onclose: EventHandler<()>,
 ) -> Element {
+    let _ = was_hardware_wallet;
     // Explorer links - Solscan and Orb
     let solscan_url = format!("https://solscan.io/tx/{}", signature);
-    let orb_url = format!("https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary", signature);
-    
+    let orb_url = format!(
+        "https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary",
+        signature
+    );
+
     rsx! {
         div {
             class: "modal-backdrop",
@@ -209,13 +300,6 @@ fn UnstakeSuccessModal(
                                 "⏳ 2-3 days"
                             }
                         }
-                    }
-                }
-
-                if was_hardware_wallet {
-                    div {
-                        class: "hardware-reconnect-notice",
-                        "Your hardware wallet has been disconnected after the transaction. You'll need to reconnect it for future operations."
                     }
                 }
 
@@ -283,10 +367,14 @@ fn StakeSuccessModal(
     was_hardware_wallet: bool,
     onclose: EventHandler<()>,
 ) -> Element {
+    let _ = was_hardware_wallet;
     // Explorer links - Solscan and Orb
     let solscan_url = format!("https://solscan.io/tx/{}", signature);
-    let orb_url = format!("https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary", signature);
-    
+    let orb_url = format!(
+        "https://orb.helius.dev/tx/{}?cluster=mainnet-beta&tab=summary",
+        signature
+    );
+
     rsx! {
         div {
             class: "modal-backdrop",
@@ -347,13 +435,6 @@ fn StakeSuccessModal(
                             class: "stake-detail-value",
                             "✅ Activating (2-3 epochs)"
                         }
-                    }
-                }
-
-                if was_hardware_wallet {
-                    div {
-                        class: "hardware-reconnect-notice",
-                        "Your hardware wallet has been disconnected after the transaction. You'll need to reconnect it for future operations."
                     }
                 }
 
@@ -429,10 +510,11 @@ pub fn StakeModal(
     let mut show_validator_dropdown = use_signal(|| false);
     let mut staking = use_signal(|| false);
     let mut loading_stakes = use_signal(|| false);
+    let mut stake_scan_completed = use_signal(|| false);
     let mut error_message = use_signal(|| None as Option<String>);
     let mut validators = use_signal(|| Vec::<ValidatorInfo>::new());
     let mut stake_accounts = use_signal(|| Vec::<DetailedStakeAccount>::new());
-    
+
     // Add state for staking success modal
     let mut show_success_modal = use_signal(|| false);
     let mut success_signature = use_signal(|| "".to_string());
@@ -441,20 +523,25 @@ pub fn StakeModal(
 
     // Hardware wallet prompting states
     let mut show_hardware_approval = use_signal(|| false);
+    let mut show_unlock_modal = use_signal(|| false);
+    let mut unlock_mode = use_signal(|| None as Option<UnlockMode>);
+    let mut unlock_code = use_signal(|| "".to_string());
+    let mut unlock_error = use_signal(|| None as Option<String>);
+    let mut unlock_in_progress = use_signal(|| false);
     let mut was_hardware_transaction = use_signal(|| false);
     let mut merge_groups = use_signal(|| Vec::<MergeGroup>::new());
     let mut merging = use_signal(|| false);
 
-    let instant_unstaking = use_signal(|| false);
-    let normal_unstaking = use_signal(|| false);
+    let mut instant_unstaking = use_signal(|| false);
+    let mut normal_unstaking = use_signal(|| false);
     let mut partial_unstaking = use_signal(|| false);
     let mut withdrawing = use_signal(|| false);
-    
+
     // Partial unstake modal state
     let mut show_partial_unstake_modal = use_signal(|| false);
     let mut partial_unstake_account = use_signal(|| None as Option<DetailedStakeAccount>);
     let mut partial_unstake_amount = use_signal(|| "".to_string());
-    
+
     // Unstake success modal states
     let mut show_unstake_success_modal = use_signal(|| false);
     let mut unstake_success_signature = use_signal(|| "".to_string());
@@ -465,20 +552,20 @@ pub fn StakeModal(
     use_effect(move || {
         spawn(async move {
             println!("📋 Stake modal opened - loading validators with live data...");
-            
-            // This single call handles everything: 
+
+            // This single call handles everything:
             // - Fetches live data from RPC
-            // - Updates with real commission, stake, and skip rates  
+            // - Updates with real commission, stake, and skip rates
             // - Falls back to static data if RPC fails
             // - Prints detailed debug info to console
             let validator_list = get_recommended_validators().await;
-            
+
             // Set default validator (the first one marked as default)
             if let Some(default_validator) = validator_list.iter().find(|v| v.is_default).cloned() {
                 println!("🌟 Selected default validator: {}", default_validator.name);
                 selected_validator.set(Some(default_validator));
             }
-            
+
             validators.set(validator_list);
             println!("🚀 Validator data loaded and ready for UI");
         });
@@ -492,20 +579,31 @@ pub fn StakeModal(
     // Load stake accounts when switching to My Stakes mode
     use_effect(move || {
         let current_mode = mode();
-        println!("🔍 DEBUG: use_effect triggered with mode: {:?}", current_mode);
-        
+        println!(
+            "🔍 DEBUG: use_effect triggered with mode: {:?}",
+            current_mode
+        );
+
         if current_mode == ModalMode::MyStakes {
             // Check if we're already loading or already have data
             if loading_stakes() {
                 println!("⏳ DEBUG: Already loading, skipping...");
                 return;
             }
-            
-            if !stake_accounts().is_empty() {
-                println!("📊 DEBUG: Already have {} accounts, skipping...", stake_accounts().len());
+
+            if stake_scan_completed() {
+                println!("🧾 DEBUG: Stake scan already completed for this modal session");
                 return;
             }
-            
+
+            if !stake_accounts().is_empty() {
+                println!(
+                    "📊 DEBUG: Already have {} accounts, skipping...",
+                    stake_accounts().len()
+                );
+                return;
+            }
+
             println!("🚀 DEBUG: Starting stake scan...");
             loading_stakes.set(true);
             error_message.set(None);
@@ -516,7 +614,7 @@ pub fn StakeModal(
 
             spawn(async move {
                 println!("📡 DEBUG: In async block");
-                
+
                 // Get wallet address
                 let wallet_address = if let Some(hw) = &hardware_wallet_clone {
                     match hw.get_public_key().await {
@@ -526,7 +624,10 @@ pub fn StakeModal(
                         }
                         Err(e) => {
                             println!("❌ DEBUG: HW wallet error: {}", e);
-                            error_message.set(Some(format!("Failed to get hardware wallet address: {}", e)));
+                            error_message.set(Some(format!(
+                                "Failed to get hardware wallet address: {}",
+                                e
+                            )));
                             loading_stakes.set(false);
                             return;
                         }
@@ -544,9 +645,21 @@ pub fn StakeModal(
                 println!("🔍 DEBUG: Calling scan_stake_accounts...");
 
                 // Scan for stake accounts
-                match staking::scan_stake_accounts(&wallet_address, custom_rpc_clone.as_deref()).await {
+                match staking::scan_stake_accounts(&wallet_address, custom_rpc_clone.as_deref())
+                    .await
+                {
                     Ok(accounts) => {
-                        println!("✅ DEBUG: Successfully got {} accounts - setting in UI", accounts.len());
+                        println!(
+                            "✅ DEBUG: Successfully got {} accounts - setting in UI",
+                            accounts.len()
+                        );
+                        if accounts.is_empty() {
+                            println!(
+                                "ℹ️ DEBUG: No stake accounts found for wallet {}",
+                                wallet_address
+                            );
+                        }
+                        stake_scan_completed.set(true);
                         stake_accounts.set(accounts);
                         loading_stakes.set(false);
                     }
@@ -558,14 +671,20 @@ pub fn StakeModal(
                 }
             });
         } else {
-            println!("ℹ️ DEBUG: Mode is not MyStakes, current mode: {:?}", current_mode);
+            println!(
+                "ℹ️ DEBUG: Mode is not MyStakes, current mode: {:?}",
+                current_mode
+            );
         }
     });
 
     use_effect(move || {
         let accounts = stake_accounts();
         if !accounts.is_empty() {
-            println!("🔍 DEBUG: Calculating merge opportunities for {} accounts", accounts.len());
+            println!(
+                "🔍 DEBUG: Calculating merge opportunities for {} accounts",
+                accounts.len()
+            );
             // Use current epoch 835 for now (from your logs)
             let current_epoch = 835;
             let groups = find_mergeable_stake_accounts(&accounts, current_epoch);
@@ -576,18 +695,13 @@ pub fn StakeModal(
         }
     });
 
-
-
-    // Calculate total staked amount
-    let total_staked = stake_accounts().iter()
-        .map(|account| account.balance.saturating_sub(account.rent_exempt_reserve))
-        .sum::<u64>() as f64 / 1_000_000_000.0;
-
     // Show partial unstake modal if requested
     if show_partial_unstake_modal() {
         if let Some(account) = partial_unstake_account() {
-            let available_sol = (account.balance.saturating_sub(account.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
-            
+            let available_sol = (account.balance.saturating_sub(account.rent_exempt_reserve))
+                as f64
+                / 1_000_000_000.0;
+
             return rsx! {
                 div {
                     class: "modal-backdrop",
@@ -601,13 +715,13 @@ pub fn StakeModal(
 
                         div {
                             class: "modal-body",
-                            
+
                             div {
                                 class: "wallet-field",
                                 label { "Available to Unstake:" }
-                                div { 
-                                    class: "balance-display", 
-                                    "{available_sol:.6} SOL" 
+                                div {
+                                    class: "balance-display",
+                                    "{available_sol:.6} SOL"
                                 }
                             }
 
@@ -672,7 +786,7 @@ pub fn StakeModal(
                                     let wallet_for_partial = wallet.clone();
                                     let hardware_wallet_for_partial = hardware_wallet.clone();
                                     let custom_rpc_for_partial = custom_rpc.clone();
-                                    
+
                                     move |_| {
                                         let amount_str = partial_unstake_amount();
                                         let amount = match amount_str.parse::<f64>() {
@@ -680,43 +794,49 @@ pub fn StakeModal(
                                             _ => return,
                                         };
 
-                                        println!("PARTIAL UNSTAKE: Starting for {} SOL from account {}", 
+                                        println!("PARTIAL UNSTAKE: Starting for {} SOL from account {}",
                                             amount, account_clone.pubkey);
-                                        
+
                                         partial_unstaking.set(true);
                                         show_partial_unstake_modal.set(false);
-                                        
+
                                         // Show hardware approval overlay if using hardware wallet
                                         if hardware_wallet_for_partial.is_some() {
                                             show_hardware_approval.set(true);
+                                            was_hardware_transaction.set(true);
+                                        } else {
+                                            was_hardware_transaction.set(false);
                                         }
-                                        
+
                                         let wallet_clone = wallet_for_partial.clone();
                                         let hardware_wallet_clone = hardware_wallet_for_partial.clone();
                                         let custom_rpc_clone = custom_rpc_for_partial.clone();
                                         let account_async = account_clone.clone();
-                                        
+
                                         let mut partial_unstaking_clone = partial_unstaking.clone();
                                         let mut error_message_clone = error_message.clone();
                                         let mut show_hardware_approval_clone = show_hardware_approval.clone();
                                         let mut stake_accounts_clone = stake_accounts.clone();
-                                        
+                                        let mut stake_scan_completed_clone = stake_scan_completed.clone();
+
                                         spawn(async move {
                                             println!("PARTIAL UNSTAKE: Executing transaction...");
-                                            
+                                            let hardware_wallet_for_unlock = hardware_wallet_clone.clone();
+
                                             match partial_unstake_stake_account(
                                                 &account_async,
                                                 amount,
                                                 wallet_clone.as_ref(),
-                                                hardware_wallet_clone,
+                                                hardware_wallet_clone.clone(),
                                                 custom_rpc_clone.as_deref(),
                                             ).await {
                                                 Ok(signature) => {
                                                     println!("✅ Partial unstake completed: {}", signature);
-                                                    
+
                                                     show_hardware_approval_clone.set(false);
+                                                    stake_scan_completed_clone.set(false);
                                                     stake_accounts_clone.set(Vec::new());
-                                                    
+
                                                     // Show success modal
                                                     unstake_success_signature.set(signature);
                                                     unstake_success_operation.set("Partial Unstake".to_string());
@@ -725,11 +845,47 @@ pub fn StakeModal(
                                                 }
                                                 Err(e) => {
                                                     println!("❌ Partial unstake error: {}", e);
-                                                    error_message_clone.set(Some(format!("Partial unstake failed: {}", e)));
+                                                    let err_text = e.to_string();
+                                                    if let Some(hw) = hardware_wallet_for_unlock {
+                                                        if let Some(code) = extract_hardware_error_code(&err_text) {
+                                                            match code.as_str() {
+                                                                "LOCKED" => {
+                                                                    if let Some(mode) = resolve_unlock_mode(hw.as_ref()).await {
+                                                                        unlock_mode.set(Some(mode));
+                                                                        unlock_code.set(String::new());
+                                                                        unlock_error.set(None);
+                                                                        unlock_in_progress.set(false);
+                                                                        show_unlock_modal.set(true);
+                                                                        show_hardware_approval_clone.set(false);
+                                                                        partial_unstaking_clone.set(false);
+                                                                        return;
+                                                                    }
+                                                                    error_message_clone.set(Some("Device is locked. Unlock it and try again.".to_string()));
+                                                                    show_hardware_approval_clone.set(false);
+                                                                    partial_unstaking_clone.set(false);
+                                                                    return;
+                                                                }
+                                                                "MODE_UNSET" => {
+                                                                    error_message_clone.set(Some("Device setup is required. Complete hardware setup before signing.".to_string()));
+                                                                    show_hardware_approval_clone.set(false);
+                                                                    partial_unstaking_clone.set(false);
+                                                                    return;
+                                                                }
+                                                                "AUTH_LOCKED" => {
+                                                                    error_message_clone.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                                    show_hardware_approval_clone.set(false);
+                                                                    partial_unstaking_clone.set(false);
+                                                                    return;
+                                                                }
+                                                                _ => {}
+                                                            }
+                                                        }
+                                                    }
+                                                    error_message_clone.set(Some(format!("Partial unstake failed: {}", err_text)));
                                                     show_hardware_approval_clone.set(false);
                                                 }
                                             }
-                                            
+
                                             partial_unstaking_clone.set(false);
                                         });
                                     }
@@ -789,7 +945,7 @@ pub fn StakeModal(
             },
 
             div {
-                class: "modal-content stake-modal",
+                class: "modal-content app-modal-shell stake-modal",
                 onclick: move |e| e.stop_propagation(),
                 style: "position: relative;", // Needed for absolute positioning of overlay
 
@@ -799,13 +955,149 @@ pub fn StakeModal(
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             staking.set(false);
+                            partial_unstaking.set(false);
+                            instant_unstaking.set(false);
+                            normal_unstaking.set(false);
+                            withdrawing.set(false);
+                            merging.set(false);
+                            error_message.set(Some("Transaction cancelled".to_string()));
+                        }
+                    }
+                }
+
+                if show_unlock_modal() {
+                    div {
+                        class: "modal-backdrop",
+                        onclick: move |_| {},
+                        div {
+                            class: "modal-content",
+                            onclick: move |e| e.stop_propagation(),
+                            style: "
+                                max-width: 420px;
+                                margin: 0 auto;
+                                text-align: left;
+                            ",
+                            h2 { class: "modal-title", "Unlock Hardware Device" }
+                            p { class: "success-message",
+                                match (unlock_mode(), unlock_in_progress()) {
+                                    (Some(UnlockMode::Pin), true) => "Unlocking device...",
+                                    (Some(UnlockMode::Pin), false) => "Enter your 6-digit Device PIN to continue.",
+                                    (Some(UnlockMode::Otp), true) => "Code accepted. Press the hardware button once within 8 seconds to continue.",
+                                    (Some(UnlockMode::Otp), false) => "Enter your 6-digit authenticator code. After you submit it, press the hardware button once to continue.",
+                                    (None, _) => "Enter device unlock code to continue.",
+                                }
+                            }
+                            div {
+                                class: "wallet-field",
+                                label {
+                                    match unlock_mode() {
+                                        Some(UnlockMode::Pin) => "Device PIN",
+                                        Some(UnlockMode::Otp) => "Authenticator Code",
+                                        None => "Unlock Code",
+                                    }
+                                }
+                                input {
+                                    r#type: "password",
+                                    value: "{unlock_code}",
+                                    oninput: move |e| {
+                                        unlock_code.set(
+                                            e.value()
+                                                .chars()
+                                                .filter(|c| c.is_ascii_digit())
+                                                .take(6)
+                                                .collect(),
+                                        )
+                                    },
+                                    placeholder: "6 digits",
+                                    maxlength: "6",
+                                    autocomplete: "off",
+                                    inputmode: "numeric",
+                                    pattern: "[0-9]*",
+                                    disabled: unlock_in_progress()
+                                }
+                            }
+                            if let Some(err) = unlock_error() {
+                                div { class: "error-message", "{err}" }
+                            }
+                            div { class: "modal-buttons",
+                                button {
+                                    class: "modal-button cancel",
+                                    disabled: unlock_in_progress(),
+                                    onclick: move |_| {
+                                        show_unlock_modal.set(false);
+                                        unlock_mode.set(None);
+                                        unlock_in_progress.set(false);
+                                        unlock_error.set(None);
+                                        unlock_code.set(String::new());
+                                    },
+                                    "Cancel"
+                                }
+                                button {
+                                    class: "modal-button primary",
+                                    disabled: unlock_in_progress(),
+                                    onclick: {
+                                        let hardware_wallet = hardware_wallet.clone();
+                                        move |_| {
+                                            if unlock_in_progress() {
+                                                return;
+                                            }
+
+                                            let Some(hw) = hardware_wallet.clone() else {
+                                                unlock_error.set(Some("Hardware wallet disconnected".to_string()));
+                                                return;
+                                            };
+
+                                            let code = unlock_code();
+                                            if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+                                                unlock_error.set(Some("Code must be exactly 6 digits.".to_string()));
+                                                return;
+                                            }
+
+                                            let mode = unlock_mode();
+                                            spawn(async move {
+                                                unlock_in_progress.set(true);
+                                                unlock_error.set(None);
+
+                                                let unlock_result = match mode {
+                                                    Some(UnlockMode::Pin) => hw.unlock_pin(&code).await.map(|_| ()),
+                                                    Some(UnlockMode::Otp) => hw.unlock_otp(&code).await.map(|_| ()),
+                                                    None => Err("Unknown unlock mode".into()),
+                                                };
+
+                                                match unlock_result {
+                                                    Ok(()) => {
+                                                        unlock_in_progress.set(false);
+                                                        unlock_error.set(None);
+                                                        unlock_code.set(String::new());
+                                                        unlock_mode.set(None);
+                                                        show_unlock_modal.set(false);
+                                                        error_message.set(Some("Device unlocked. Retry the action.".to_string()));
+                                                    }
+                                                    Err(err) => {
+                                                        unlock_in_progress.set(false);
+                                                        unlock_error.set(Some(format_unlock_error_message(&err.to_string())));
+                                                    }
+                                                }
+                                            });
+                                        }
+                                    },
+                                    if unlock_in_progress() {
+                                        match unlock_mode() {
+                                            Some(UnlockMode::Otp) => "Press Device Button...",
+                                            _ => "Unlocking...",
+                                        }
+                                    } else {
+                                        "Unlock Device"
+                                    }
+                                }
+                            }
                         }
                     }
                 }
 
                 // Header with toggle
                 div {
-                    class: "modal-header-with-toggle",
+                    class: "modal-header-with-toggle app-modal-header app-modal-header-toggle",
 
                     div {
                         class: "mode-toggle",
@@ -827,9 +1119,9 @@ pub fn StakeModal(
                             "My Staked Sol"
                         }
                     }
-                    
+
                     button {
-                        class: "modal-close-button",
+                        class: "app-modal-close-button",
                         onclick: move |_| onclose.call(()),
                         "×"
                     }
@@ -854,9 +1146,9 @@ pub fn StakeModal(
                         div {
                             class: "wallet-field",
                             label { "Available Balance:" }
-                            div { 
-                                class: "balance-display", 
-                                "{current_balance:.6} SOL" 
+                            div {
+                                class: "balance-display",
+                                "{current_balance:.6} SOL"
                             }
                         }
 
@@ -890,13 +1182,13 @@ pub fn StakeModal(
                                             "Select a validator..."
                                         }
                                     }
-                                    
+
                                     div {
                                         class: "dropdown-arrow",
                                         if show_validator_dropdown() { "▲" } else { "▼" }
                                     }
                                 }
-                        
+
                                 // Validator Dropdown
                                 if show_validator_dropdown() {
                                     div {
@@ -991,7 +1283,7 @@ pub fn StakeModal(
                                     div { class: "loading-spinner" }
                                     "🔍 Scanning for stake accounts..."
                                 }
-                            } 
+                            }
                             // Empty state (preserved but modernized)
                             else if stake_accounts().is_empty() {
                                 div {
@@ -1002,11 +1294,47 @@ pub fn StakeModal(
                                     }
                                     div {
                                         class: "no-stakes-title",
-                                        "No Stake Accounts Found"
+                                        "No Staked SOL Yet"
                                     }
                                     div {
                                         class: "no-stakes-description",
-                                        "You don't have any active stake accounts yet. Switch to 'Stake SOL' to create your first stake account."
+                                        {
+                                            if current_balance >= 0.01 {
+                                                let recommended_validator = selected_validator()
+                                                    .map(|validator| validator.name)
+                                                    .unwrap_or_else(|| "the recommended validator".to_string());
+                                                format!(
+                                                    "This wallet does not have any stake accounts yet. Stake with {} to start earning and keep everything in one place.",
+                                                    recommended_validator
+                                                )
+                                            } else {
+                                                "This wallet does not have any stake accounts yet. Add at least 0.01 SOL plus fees, then stake to get started.".to_string()
+                                            }
+                                        }
+                                    }
+                                    div {
+                                        class: "no-stakes-hint",
+                                        if current_balance >= 0.01 {
+                                            "Your recommended validator is already preselected in the Stake SOL tab."
+                                        } else {
+                                            "Open Stake SOL to see the recommended validator and the minimum amount required."
+                                        }
+                                    }
+                                    div {
+                                        class: "no-stakes-actions",
+                                        button {
+                                            class: "button-standard primary no-stakes-cta",
+                                            onclick: move |_| {
+                                                mode.set(ModalMode::Stake);
+                                                error_message.set(None);
+                                                show_validator_dropdown.set(false);
+                                            },
+                                            if current_balance >= 0.01 {
+                                                "Stake SOL"
+                                            } else {
+                                                "View Staking Setup"
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1051,11 +1379,11 @@ pub fn StakeModal(
                                         div {
                                             key: "{account.pubkey}",
                                             class: "stake-account-modern",
-                                            
+
                                             // Account header with validator info
                                             div {
                                                 class: "stake-account-header-modern",
-                                                
+
                                                 // Validator logo and info
                                                 div {
                                                     class: "validator-info-modern",
@@ -1066,12 +1394,12 @@ pub fn StakeModal(
                                                                 let metadata_map = VALIDATOR_METADATA.clone();
                                                                 println!("🔍 DEBUG: Looking for validator in account.validator_name: '{}'", account.validator_name);
                                                                 // Removed the available keys println
-                                                                
+
                                                                 // Clean and extract potential vote account
                                                                 let cleaned_name = account.validator_name.trim_start_matches("Validator ").trim().to_string();
                                                                 let potential_vote_account = cleaned_name.chars().filter(|c| c.is_alphanumeric()).collect::<String>();
                                                                 println!("🔍 DEBUG: Extracted potential vote account: '{}'", potential_vote_account);
-                                                                
+
                                                                 // Find match
                                                                 let validator_match = metadata_map.get(&potential_vote_account)
                                                                     .or_else(|| metadata_map.values().find(|v| {
@@ -1084,7 +1412,7 @@ pub fn StakeModal(
                                                                         }
                                                                         matches
                                                                     }));
-                                                                
+
                                                                 let validator_logo = validator_match
                                                                     .and_then(|v| {
                                                                         println!("🖼️ Logo URL for {}: {:?}", v.keybase_name, v.keybase_avatar_url);
@@ -1107,7 +1435,7 @@ pub fn StakeModal(
                                                                 let metadata_map = VALIDATOR_METADATA.clone();
                                                                 let cleaned_name = account.validator_name.trim_start_matches("Validator ").trim().to_string();
                                                                 let potential_vote_account = cleaned_name.chars().filter(|c| c.is_alphanumeric()).collect::<String>();
-                                                                
+
                                                                 // Find match (same as above)
                                                                 let validator_match = metadata_map.get(&potential_vote_account)
                                                                     .or_else(|| metadata_map.values().find(|v| {
@@ -1116,13 +1444,20 @@ pub fn StakeModal(
                                                                         v.keybase_name.to_lowercase().contains(&cleaned_name.to_lowercase()) ||
                                                                         cleaned_name.to_lowercase().contains(&v.keybase_name.to_lowercase())
                                                                     }));
-                                                                
+
                                                                 validator_match
                                                                     .map(|v| v.keybase_name.clone())
                                                                     .unwrap_or_else(|| {
                                                                         if !account.validator_name.is_empty() {
                                                                             let pubkey = account.validator_name.trim_start_matches("Validator ").trim();
-                                                                            format!("Validator {}...{}", &pubkey[0..4], &pubkey[pubkey.len()-4..])
+                                                                            if pubkey.is_empty() {
+                                                                                "Unknown Validator".to_string()
+                                                                            } else {
+                                                                                format!(
+                                                                                    "Validator {}",
+                                                                                    abbreviate_middle(pubkey, 4, 4)
+                                                                                )
+                                                                            }
                                                                         } else {
                                                                             "Unknown Validator".to_string()
                                                                         }
@@ -1133,29 +1468,29 @@ pub fn StakeModal(
                                                             class: "validator-address-modern",
                                                             {
                                                                 let pubkey_str = account.pubkey.to_string();
-                                                                format!("{}...{}", &pubkey_str[..4], &pubkey_str[pubkey_str.len()-4..])
+                                                                abbreviate_middle(&pubkey_str, 4, 4)
                                                             }
                                                         }
                                                     }
                                                 }
-                                                
+
                                                 // Status badge
                                                 div {
                                                     class: match account.state {
                                                         StakeAccountState::Delegated => "status-badge active",
-                                                        StakeAccountState::Initialized => "status-badge activating", 
+                                                        StakeAccountState::Initialized => "status-badge activating",
                                                         StakeAccountState::Uninitialized => "status-badge inactive",
                                                         StakeAccountState::RewardsPool => "status-badge rewards",
                                                     },
                                                     match account.state {
                                                         StakeAccountState::Delegated => "ACTIVE",
                                                         StakeAccountState::Initialized => "ACTIVATING",
-                                                        StakeAccountState::Uninitialized => "INACTIVE", 
+                                                        StakeAccountState::Uninitialized => "INACTIVE",
                                                         StakeAccountState::RewardsPool => "REWARDS",
                                                     }
                                                 }
                                             }
-                                            
+
                                             // Simplified staked amount (no label, rounded to 2 decimals)
                                             div {
                                                 class: "stake-account-details-modern",
@@ -1164,7 +1499,7 @@ pub fn StakeModal(
                                                     "{(account.balance.saturating_sub(account.rent_exempt_reserve) as f64 / 1_000_000_000.0):.2} SOL"
                                                 }
                                             }
-                                            
+
                                             // Action buttons: instant, partial, and normal unstake
                                             div {
                                                 class: "stake-actions-modern",
@@ -1178,44 +1513,50 @@ pub fn StakeModal(
                                                             let wallet_for_withdraw = wallet.clone();
                                                             let hardware_wallet_for_withdraw = hardware_wallet.clone();
                                                             let custom_rpc_for_withdraw = custom_rpc.clone();
-                                                            
+
                                                             let mut withdrawing_clone = withdrawing.clone();
                                                             let mut error_message_clone = error_message.clone();
                                                             let mut show_hardware_approval_clone = show_hardware_approval.clone();
                                                             let mut stake_accounts_clone = stake_accounts.clone();
-                                                            
+                                                            let mut stake_scan_completed_clone = stake_scan_completed.clone();
+
                                                             move |_| {
                                                                 let withdraw_amount_sol = account_clone.balance as f64 / 1_000_000_000.0;
-                                                                println!("WITHDRAW: Starting for account {} ({:.6} SOL)", 
+                                                                println!("WITHDRAW: Starting for account {} ({:.6} SOL)",
                                                                     account_clone.pubkey, withdraw_amount_sol);
-                                                                
+
                                                                 withdrawing_clone.set(true);
                                                                 error_message_clone.set(None);
-                                                                
+
                                                                 if hardware_wallet_for_withdraw.is_some() {
                                                                     show_hardware_approval_clone.set(true);
+                                                                    was_hardware_transaction.set(true);
+                                                                } else {
+                                                                    was_hardware_transaction.set(false);
                                                                 }
-                                                                
+
                                                                 let wallet_clone = wallet_for_withdraw.clone();
                                                                 let hardware_wallet_clone = hardware_wallet_for_withdraw.clone();
                                                                 let custom_rpc_clone = custom_rpc_for_withdraw.clone();
                                                                 let account_async = account_clone.clone();
-                                                                
+
                                                                 spawn(async move {
                                                                     println!("WITHDRAW: Executing transaction...");
-                                                                    
+                                                                    let hardware_wallet_for_unlock = hardware_wallet_clone.clone();
+
                                                                     match withdraw_stake_account(
                                                                         &account_async,
                                                                         wallet_clone.as_ref(),
-                                                                        hardware_wallet_clone,
+                                                                        hardware_wallet_clone.clone(),
                                                                         custom_rpc_clone.as_deref(),
                                                                     ).await {
                                                                         Ok(signature) => {
                                                                             println!("✅ Withdraw completed: {}", signature);
-                                                                            
+
                                                                             show_hardware_approval_clone.set(false);
+                                                                            stake_scan_completed_clone.set(false);
                                                                             stake_accounts_clone.set(Vec::new());
-                                                                            
+
                                                                             // Show success modal
                                                                             let withdraw_amount_sol = account_clone.balance as f64 / 1_000_000_000.0;
                                                                             unstake_success_signature.set(signature);
@@ -1225,11 +1566,47 @@ pub fn StakeModal(
                                                                         }
                                                                         Err(e) => {
                                                                             println!("❌ Withdraw error: {}", e);
-                                                                            error_message_clone.set(Some(format!("Withdraw failed: {}", e)));
+                                                                            let err_text = e.to_string();
+                                                                            if let Some(hw) = hardware_wallet_for_unlock {
+                                                                                if let Some(code) = extract_hardware_error_code(&err_text) {
+                                                                                    match code.as_str() {
+                                                                                        "LOCKED" => {
+                                                                                            if let Some(mode) = resolve_unlock_mode(hw.as_ref()).await {
+                                                                                                unlock_mode.set(Some(mode));
+                                                                                                unlock_code.set(String::new());
+                                                                                                unlock_error.set(None);
+                                                                                                unlock_in_progress.set(false);
+                                                                                                show_unlock_modal.set(true);
+                                                                                                show_hardware_approval_clone.set(false);
+                                                                                                withdrawing_clone.set(false);
+                                                                                                return;
+                                                                                            }
+                                                                                            error_message_clone.set(Some("Device is locked. Unlock it and try again.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            withdrawing_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        "MODE_UNSET" => {
+                                                                                            error_message_clone.set(Some("Device setup is required. Complete hardware setup before signing.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            withdrawing_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        "AUTH_LOCKED" => {
+                                                                                            error_message_clone.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            withdrawing_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        _ => {}
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                            error_message_clone.set(Some(format!("Withdraw failed: {}", err_text)));
                                                                             show_hardware_approval_clone.set(false);
                                                                         }
                                                                     }
-                                                                    
+
                                                                     withdrawing_clone.set(false);
                                                                 });
                                                             }
@@ -1252,50 +1629,56 @@ pub fn StakeModal(
                                                             let wallet_for_instant = wallet.clone();
                                                             let hardware_wallet_for_instant = hardware_wallet.clone();
                                                             let custom_rpc_for_instant = custom_rpc.clone();
-                                                            
+
                                                             // Clone mutable signals
                                                             let mut instant_unstaking_clone = instant_unstaking.clone();
                                                             let mut error_message_clone = error_message.clone();
                                                             let mut show_hardware_approval_clone = show_hardware_approval.clone();
                                                             let mut stake_accounts_clone = stake_accounts.clone();
-                                                            
+                                                            let mut stake_scan_completed_clone = stake_scan_completed.clone();
+
                                                             move |_| {
                                                                 let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
-                                                                println!("INSTANT UNSTAKE: Starting for account {} ({:.6} SOL)", 
+                                                                println!("INSTANT UNSTAKE: Starting for account {} ({:.6} SOL)",
                                                                     account_clone.pubkey, stake_balance_sol);
-                                                                
+
                                                                 instant_unstaking_clone.set(true);
                                                                 error_message_clone.set(None);
-                                                                
+
                                                                 // Show hardware approval overlay if using hardware wallet
                                                                 if hardware_wallet_for_instant.is_some() {
                                                                     show_hardware_approval_clone.set(true);
+                                                                    was_hardware_transaction.set(true);
+                                                                } else {
+                                                                    was_hardware_transaction.set(false);
                                                                 }
-                                                                
+
                                                                 // Clone for async block
                                                                 let wallet_clone = wallet_for_instant.clone();
                                                                 let hardware_wallet_clone = hardware_wallet_for_instant.clone();
                                                                 let custom_rpc_clone = custom_rpc_for_instant.clone();
                                                                 let account_async = account_clone.clone();
-                                                                
+
                                                                 spawn(async move {
                                                                     println!("INSTANT UNSTAKE: Executing transaction...");
-                                                                    
+                                                                    let hardware_wallet_for_unlock = hardware_wallet_clone.clone();
+
                                                                     match instant_unstake_stake_account(
                                                                         &account_async,
                                                                         wallet_clone.as_ref(),
-                                                                        hardware_wallet_clone,
+                                                                        hardware_wallet_clone.clone(),
                                                                         custom_rpc_clone.as_deref(),
                                                                     ).await {
                                                                         Ok(signature) => {
                                                                             println!("✅ Instant unstake completed: {}", signature);
-                                                                            
+
                                                                             // Hide hardware approval overlay
                                                                             show_hardware_approval_clone.set(false);
-                                                                            
+
                                                                             // Clear stake accounts to trigger refresh
+                                                                            stake_scan_completed_clone.set(false);
                                                                             stake_accounts_clone.set(Vec::new());
-                                                                            
+
                                                                             // Show success modal
                                                                             let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
                                                                             unstake_success_signature.set(signature);
@@ -1305,11 +1688,47 @@ pub fn StakeModal(
                                                                         }
                                                                         Err(e) => {
                                                                             println!("❌ Instant unstake error: {}", e);
-                                                                            error_message_clone.set(Some(format!("Instant unstake failed: {}", e)));
+                                                                            let err_text = e.to_string();
+                                                                            if let Some(hw) = hardware_wallet_for_unlock {
+                                                                                if let Some(code) = extract_hardware_error_code(&err_text) {
+                                                                                    match code.as_str() {
+                                                                                        "LOCKED" => {
+                                                                                            if let Some(mode) = resolve_unlock_mode(hw.as_ref()).await {
+                                                                                                unlock_mode.set(Some(mode));
+                                                                                                unlock_code.set(String::new());
+                                                                                                unlock_error.set(None);
+                                                                                                unlock_in_progress.set(false);
+                                                                                                show_unlock_modal.set(true);
+                                                                                                show_hardware_approval_clone.set(false);
+                                                                                                instant_unstaking_clone.set(false);
+                                                                                                return;
+                                                                                            }
+                                                                                            error_message_clone.set(Some("Device is locked. Unlock it and try again.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            instant_unstaking_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        "MODE_UNSET" => {
+                                                                                            error_message_clone.set(Some("Device setup is required. Complete hardware setup before signing.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            instant_unstaking_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        "AUTH_LOCKED" => {
+                                                                                            error_message_clone.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            instant_unstaking_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        _ => {}
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                            error_message_clone.set(Some(format!("Instant unstake failed: {}", err_text)));
                                                                             show_hardware_approval_clone.set(false);
                                                                         }
                                                                     }
-                                                                    
+
                                                                     instant_unstaking_clone.set(false);
                                                                 });
                                                             }
@@ -1320,7 +1739,7 @@ pub fn StakeModal(
                                                             "⚡"
                                                         }
                                                     }
-                                                    
+
                                                     button {
                                                         class: "action-btn tertiary",
                                                         disabled: partial_unstaking() || instant_unstaking() || normal_unstaking() || !can_partial_unstake(&account),
@@ -1334,7 +1753,7 @@ pub fn StakeModal(
                                                         },
                                                         "📊 Partial"
                                                     }
-                                                    
+
                                                     button {
                                                         class: "action-btn primary",
                                                         disabled: normal_unstaking() || instant_unstaking() || partial_unstaking() || !can_normal_unstake(&account),
@@ -1344,50 +1763,56 @@ pub fn StakeModal(
                                                             let wallet_for_normal = wallet.clone();
                                                             let hardware_wallet_for_normal = hardware_wallet.clone();
                                                             let custom_rpc_for_normal = custom_rpc.clone();
-                                                            
+
                                                             // Clone mutable signals
                                                             let mut normal_unstaking_clone = normal_unstaking.clone();
                                                             let mut error_message_clone = error_message.clone();
                                                             let mut show_hardware_approval_clone = show_hardware_approval.clone();
                                                             let mut stake_accounts_clone = stake_accounts.clone();
-                                                            
+                                                            let mut stake_scan_completed_clone = stake_scan_completed.clone();
+
                                                             move |_| {
                                                                 let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
-                                                                println!("NORMAL UNSTAKE: Starting for account {} ({:.6} SOL)", 
+                                                                println!("NORMAL UNSTAKE: Starting for account {} ({:.6} SOL)",
                                                                     account_clone.pubkey, stake_balance_sol);
-                                                                
+
                                                                 normal_unstaking_clone.set(true);
                                                                 error_message_clone.set(None);
-                                                                
+
                                                                 // Show hardware approval overlay if using hardware wallet
                                                                 if hardware_wallet_for_normal.is_some() {
                                                                     show_hardware_approval_clone.set(true);
+                                                                    was_hardware_transaction.set(true);
+                                                                } else {
+                                                                    was_hardware_transaction.set(false);
                                                                 }
-                                                                
+
                                                                 // Clone for async block
                                                                 let wallet_clone = wallet_for_normal.clone();
                                                                 let hardware_wallet_clone = hardware_wallet_for_normal.clone();
                                                                 let custom_rpc_clone = custom_rpc_for_normal.clone();
                                                                 let account_async = account_clone.clone();
-                                                                
+
                                                                 spawn(async move {
                                                                     println!("NORMAL UNSTAKE: Executing deactivate transaction...");
-                                                                    
+                                                                    let hardware_wallet_for_unlock = hardware_wallet_clone.clone();
+
                                                                     match normal_unstake_stake_account(
                                                                         &account_async,
                                                                         wallet_clone.as_ref(),
-                                                                        hardware_wallet_clone,
+                                                                        hardware_wallet_clone.clone(),
                                                                         custom_rpc_clone.as_deref(),
                                                                     ).await {
                                                                         Ok(signature) => {
                                                                             println!("✅ Normal unstake completed: {}", signature);
-                                                                            
+
                                                                             // Hide hardware approval overlay
                                                                             show_hardware_approval_clone.set(false);
-                                                                            
+
                                                                             // Clear stake accounts to trigger refresh
+                                                                            stake_scan_completed_clone.set(false);
                                                                             stake_accounts_clone.set(Vec::new());
-                                                                            
+
                                                                             // Show success modal
                                                                             let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
                                                                             unstake_success_signature.set(signature);
@@ -1397,11 +1822,47 @@ pub fn StakeModal(
                                                                         }
                                                                         Err(e) => {
                                                                             println!("❌ Normal unstake error: {}", e);
-                                                                            error_message_clone.set(Some(format!("Normal unstake failed: {}", e)));
+                                                                            let err_text = e.to_string();
+                                                                            if let Some(hw) = hardware_wallet_for_unlock {
+                                                                                if let Some(code) = extract_hardware_error_code(&err_text) {
+                                                                                    match code.as_str() {
+                                                                                        "LOCKED" => {
+                                                                                            if let Some(mode) = resolve_unlock_mode(hw.as_ref()).await {
+                                                                                                unlock_mode.set(Some(mode));
+                                                                                                unlock_code.set(String::new());
+                                                                                                unlock_error.set(None);
+                                                                                                unlock_in_progress.set(false);
+                                                                                                show_unlock_modal.set(true);
+                                                                                                show_hardware_approval_clone.set(false);
+                                                                                                normal_unstaking_clone.set(false);
+                                                                                                return;
+                                                                                            }
+                                                                                            error_message_clone.set(Some("Device is locked. Unlock it and try again.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            normal_unstaking_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        "MODE_UNSET" => {
+                                                                                            error_message_clone.set(Some("Device setup is required. Complete hardware setup before signing.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            normal_unstaking_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        "AUTH_LOCKED" => {
+                                                                                            error_message_clone.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                                                            show_hardware_approval_clone.set(false);
+                                                                                            normal_unstaking_clone.set(false);
+                                                                                            return;
+                                                                                        }
+                                                                                        _ => {}
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                            error_message_clone.set(Some(format!("Normal unstake failed: {}", err_text)));
                                                                             show_hardware_approval_clone.set(false);
                                                                         }
                                                                     }
-                                                                    
+
                                                                     normal_unstaking_clone.set(false);
                                                                 });
                                                             }
@@ -1422,16 +1883,16 @@ pub fn StakeModal(
                     }
                 }
 
-                div { 
+                div {
                     class: "modal-buttons",
-                    
+
                     if mode() == ModalMode::Stake {
                         button {
                             class: "button-standard primary",
                             disabled: staking() || amount().is_empty() || amount().parse::<f64>().unwrap_or(0.0) < 0.01 || selected_validator().is_none(),
                             onclick: move |_| {
                                 error_message.set(None);
-                                
+
                                 // Validate amount
                                 let stake_amount = match amount().parse::<f64>() {
                                     Ok(amt) if amt >= 0.01 && amt <= current_balance => amt,
@@ -1440,7 +1901,7 @@ pub fn StakeModal(
                                         return;
                                     }
                                 };
-                            
+
                                 // Validate validator selection
                                 let validator = match selected_validator() {
                                     Some(v) => v,
@@ -1449,7 +1910,7 @@ pub fn StakeModal(
                                         return;
                                     }
                                 };
-                            
+
                                 staking.set(true);
 
                                 // Show hardware approval overlay if using hardware wallet
@@ -1459,16 +1920,17 @@ pub fn StakeModal(
                                 } else {
                                     was_hardware_transaction.set(false);
                                 }
-                            
+
                                 let wallet_clone = wallet.clone();
                                 let hardware_wallet_clone = hardware_wallet.clone();
                                 let custom_rpc_clone = custom_rpc.clone();
                                 let validator_vote_account = validator.vote_account.clone();
-                            
+
                                 spawn(async move {
+                                    let hardware_wallet_for_unlock = hardware_wallet_clone.clone();
                                     match create_stake_account(
                                         wallet_clone.as_ref(),
-                                        hardware_wallet_clone,
+                                        hardware_wallet_clone.clone(),
                                         &validator_vote_account,
                                         stake_amount,
                                         custom_rpc_clone.as_deref(),
@@ -1477,7 +1939,7 @@ pub fn StakeModal(
                                             println!("Successfully created stake account: {:?}", stake_info);
                                             staking.set(false);
                                             show_hardware_approval.set(false);
-                                            
+
                                             // Set success modal data
                                             success_signature.set(stake_info.transaction_signature);
                                             success_amount.set(stake_amount);
@@ -1486,7 +1948,43 @@ pub fn StakeModal(
                                         }
                                         Err(e) => {
                                             println!("Staking error: {}", e);
-                                            error_message.set(Some(e.to_string()));
+                                            let err_text = e.to_string();
+                                            if let Some(hw) = hardware_wallet_for_unlock {
+                                                if let Some(code) = extract_hardware_error_code(&err_text) {
+                                                    match code.as_str() {
+                                                        "LOCKED" => {
+                                                            if let Some(mode) = resolve_unlock_mode(hw.as_ref()).await {
+                                                                unlock_mode.set(Some(mode));
+                                                                unlock_code.set(String::new());
+                                                                unlock_error.set(None);
+                                                                unlock_in_progress.set(false);
+                                                                show_unlock_modal.set(true);
+                                                                staking.set(false);
+                                                                show_hardware_approval.set(false);
+                                                                return;
+                                                            }
+                                                            error_message.set(Some("Device is locked. Unlock it and try again.".to_string()));
+                                                            staking.set(false);
+                                                            show_hardware_approval.set(false);
+                                                            return;
+                                                        }
+                                                        "MODE_UNSET" => {
+                                                            error_message.set(Some("Device setup is required. Complete hardware setup before signing.".to_string()));
+                                                            staking.set(false);
+                                                            show_hardware_approval.set(false);
+                                                            return;
+                                                        }
+                                                        "AUTH_LOCKED" => {
+                                                            error_message.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                            staking.set(false);
+                                                            show_hardware_approval.set(false);
+                                                            return;
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                            error_message.set(Some(err_text));
                                             staking.set(false);
                                             show_hardware_approval.set(false);
                                         }
@@ -1511,44 +2009,45 @@ pub fn StakeModal(
                                     let wallet_for_merge = wallet.clone();
                                     let hardware_wallet_for_merge = hardware_wallet.clone();
                                     let custom_rpc_for_merge = custom_rpc.clone();
-                                    
+
                                     move |_| {
                                         println!("🔗 DEBUG: Merge button clicked!");
                                         println!("🔗 DEBUG: Available merge groups: {}", merge_groups().len());
-                                        
+
                                         for (i, group) in merge_groups().iter().enumerate() {
-                                            println!("  Group {}: {} - {} accounts, {:.6} SOL", 
-                                                i + 1, 
-                                                group.merge_type, 
+                                            println!("  Group {}: {} - {} accounts, {:.6} SOL",
+                                                i + 1,
+                                                group.merge_type,
                                                 group.accounts.len(),
                                                 group.total_amount as f64 / 1_000_000_000.0
                                             );
                                         }
-                                        
+
                                         merging.set(true);
-                                        
+
                                         // Clone for the async block
                                         let wallet_clone = wallet_for_merge.clone();
                                         let hardware_wallet_clone = hardware_wallet_for_merge.clone();
                                         let custom_rpc_clone = custom_rpc_for_merge.clone();
                                         let merge_groups_clone = merge_groups();
-                                        
+
                                         // Clone signals that need to be mutable
                                         let mut merging_clone = merging.clone();
                                         let mut stake_accounts_clone = stake_accounts.clone();
+                                        let mut stake_scan_completed_clone = stake_scan_completed.clone();
                                         let mut error_message_clone = error_message.clone();
                                         let mut show_hardware_approval_clone = show_hardware_approval.clone();
-                                        
+
                                         // Show hardware approval overlay if using hardware wallet
                                         if hardware_wallet_for_merge.is_some() {
                                             show_hardware_approval.set(true);
                                         }
-                                        
+
                                         spawn(async move {
                                             // Get the first merge group for now (simplest implementation)
                                             if let Some(first_group) = merge_groups_clone.first() {
                                                 println!("🔗 Processing merge group with {} accounts", first_group.accounts.len());
-                                                
+
                                                 match staking::merge_stake_accounts(
                                                     first_group,
                                                     wallet_clone.as_ref(),
@@ -1557,20 +2056,21 @@ pub fn StakeModal(
                                                 ).await {
                                                     Ok(signature) => {
                                                         println!("✅ Merge completed: {}", signature);
-                                                        
+
                                                         // Hide hardware approval overlay if it was shown
                                                         show_hardware_approval_clone.set(false);
-                                                        
+
                                                         // Clear stake accounts to trigger refresh on next scan
+                                                        stake_scan_completed_clone.set(false);
                                                         stake_accounts_clone.set(Vec::new());
-                                                        
+
                                                         // Show success message
                                                         error_message_clone.set(Some(format!(
-                                                            "✅ Successfully merged {} accounts! Transaction: {}", 
-                                                            first_group.accounts.len(), 
+                                                            "✅ Successfully merged {} accounts! Transaction: {}",
+                                                            first_group.accounts.len(),
                                                             signature
                                                         )));
-                                                        
+
                                                         // Clear the message after 5 seconds
                                                         let mut error_message_clear = error_message_clone.clone();
                                                         spawn(async move {
@@ -1580,12 +2080,12 @@ pub fn StakeModal(
                                                     }
                                                     Err(e) => {
                                                         println!("❌ Merge failed: {}", e);
-                                                        
+
                                                         // Hide hardware approval overlay if it was shown
                                                         show_hardware_approval_clone.set(false);
-                                                        
+
                                                         error_message_clone.set(Some(format!("❌ Merge failed: {}", e)));
-                                                        
+
                                                         // Clear error message after 10 seconds
                                                         let mut error_message_clear = error_message_clone.clone();
                                                         spawn(async move {
@@ -1598,7 +2098,7 @@ pub fn StakeModal(
                                                 println!("❌ No merge groups available");
                                                 error_message_clone.set(Some("❌ No merge opportunities found".to_string()));
                                             }
-                                            
+
                                             merging_clone.set(false);
                                         });
                                     }

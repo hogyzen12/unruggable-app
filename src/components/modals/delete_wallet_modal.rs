@@ -1,11 +1,11 @@
-use dioxus::prelude::*;
 use crate::wallet::WalletInfo;
+use dioxus::prelude::*;
 
 #[component]
 pub fn DeleteWalletModal(
     wallet: Option<WalletInfo>,
     onconfirm: EventHandler<()>,
-    onclose: EventHandler<()>
+    onclose: EventHandler<()>,
 ) -> Element {
     rsx! {
         div { class: "modal-backdrop",
@@ -13,7 +13,7 @@ pub fn DeleteWalletModal(
             div {
                 class: "modal-content",
                 onclick: move |e| e.stop_propagation(),
-                
+
                 div { class: "modal-header",
                     h2 { class: "modal-title", "Delete Wallet" }
                     button {
@@ -22,7 +22,7 @@ pub fn DeleteWalletModal(
                         "×"
                     }
                 }
-                
+
                 div { class: "modal-body",
                     if let Some(wallet_info) = wallet {
                         div {
@@ -41,7 +41,7 @@ pub fn DeleteWalletModal(
                         div { class: "error-message", "No wallet selected" }
                     }
                 }
-                
+
                 div { class: "modal-buttons",
                     button {
                         class: "modal-button cancel",

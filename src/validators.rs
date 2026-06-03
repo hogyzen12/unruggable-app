@@ -1,6 +1,8 @@
+#![allow(dead_code)]
+
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use reqwest::Client;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidatorInfo {
@@ -61,7 +63,7 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             is_default: true,
         },
         ValidatorInfo {
-            identity: "BULKzVM41WAyQZfL34vxqdsYwEYH9mJAJyzRS4xraf8b".to_string(), 
+            identity: "BULKzVM41WAyQZfL34vxqdsYwEYH9mJAJyzRS4xraf8b".to_string(),
             vote_account: "BULKEEKf9Hjy4nwCthjzheEk4joH23LLXttAHjqEZmB2".to_string(),
             name: "BULK".to_string(),
             description: "One Exchange. Infinite Markets.".to_string(),
@@ -74,10 +76,12 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             identity: "6xWLi1TDSh65fWsSqE1zdvANTSuVDRMx4ghsGJwgunS8".to_string(),
             vote_account: "BbM5kJgrwEj3tYFfBPnjcARB54wDUHkXmLUTkazUmt2x".to_string(),
             name: "Jito Validator".to_string(),
-            description: "High-performance Jito validator with 99.99% voting rate and MEV optimization".to_string(),
+            description:
+                "High-performance Jito validator with 99.99% voting rate and MEV optimization"
+                    .to_string(),
             commission: 0.0,
             active_stake: 253219.0, // From the data you provided
-            skip_rate: 1.0, // Very low estimate given 99.99% voting rate
+            skip_rate: 1.0,         // Very low estimate given 99.99% voting rate
             is_default: false,
         },
         ValidatorInfo {
@@ -121,7 +125,7 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
             active_stake: 0.0,
             skip_rate: 3.0, // Static estimate
             is_default: false,
-        },        
+        },
         ValidatorInfo {
             identity: "radM7PKUpZwJ9bYPAJ7V8FXHeUmH1zim6iaXUKkftP9".to_string(),
             vote_account: "radYEig9KGrMTMWbWRFV7LStotQbnLgPaEFHVDsudQz".to_string(),
@@ -172,12 +176,15 @@ fn get_static_validators() -> Vec<ValidatorInfo> {
 /// This should be called whenever the stake modal is opened
 pub async fn get_recommended_validators() -> Vec<ValidatorInfo> {
     println!("🔍 Fetching live validator data...");
-    
+
     match fetch_live_validator_data(None).await {
         Ok(validators) => {
-            println!("✅ Successfully fetched live validator data for {} validators", validators.len());
+            println!(
+                "✅ Successfully fetched live validator data for {} validators",
+                validators.len()
+            );
             validators
-        },
+        }
         Err(e) => {
             println!("❌ Failed to fetch live validator data: {}", e);
             println!("📋 Falling back to static validator data");
@@ -187,53 +194,54 @@ pub async fn get_recommended_validators() -> Vec<ValidatorInfo> {
 }
 
 /// Simplified validator data fetching - only use direct RPC values
-async fn fetch_live_validator_data(rpc_url: Option<&str>) -> Result<Vec<ValidatorInfo>, Box<dyn std::error::Error>> {
+async fn fetch_live_validator_data(
+    rpc_url: Option<&str>,
+) -> Result<Vec<ValidatorInfo>, Box<dyn std::error::Error>> {
     let client = Client::new();
     let url = rpc_url.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
-    
+
     println!("🌐 Calling getVoteAccounts RPC method...");
-    
+
     // Get all vote accounts from the network
     let request = RpcRequest {
         jsonrpc: "2.0".to_string(),
         id: 1,
         method: "getVoteAccounts".to_string(),
-        params: vec![
-            serde_json::json!({
-                "commitment": "finalized"
-            })
-        ],
+        params: vec![serde_json::json!({
+            "commitment": "finalized"
+        })],
     };
-    
+
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
         .json(&request)
         .send()
         .await?;
-    
+
     if !response.status().is_success() {
         return Err(format!("RPC error: {}", response.status()).into());
     }
-    
+
     let json: serde_json::Value = response.json().await?;
-    
+
     // Check for errors in the response
     if let Some(error) = json.get("error") {
         return Err(format!("RPC error: {:?}", error).into());
     }
-    
+
     // Parse the vote accounts
     let rpc_response: RpcResponse<VoteAccountsResponse> = serde_json::from_value(json)?;
-    
-    println!("📊 Found {} current validators and {} delinquent validators", 
-        rpc_response.result.current.len(), 
+
+    println!(
+        "📊 Found {} current validators and {} delinquent validators",
+        rpc_response.result.current.len(),
         rpc_response.result.delinquent.len()
     );
-    
+
     // Create a HashMap for quick lookup of live data by vote account
     let mut live_data: HashMap<String, VoteAccountInfo> = HashMap::new();
-    
+
     // Add both current and delinquent validators to our lookup
     for vote_account in rpc_response.result.current {
         live_data.insert(vote_account.vote_pubkey.clone(), vote_account);
@@ -241,48 +249,37 @@ async fn fetch_live_validator_data(rpc_url: Option<&str>) -> Result<Vec<Validato
     for vote_account in rpc_response.result.delinquent {
         live_data.insert(vote_account.vote_pubkey.clone(), vote_account);
     }
-    
+
     // Get our curated validator list
     let mut validators = get_static_validators();
-    
-    println!("🔄 Updating {} curated validators with live data:", validators.len());
-    
+
+    println!(
+        "🔄 Updating {} curated validators with live data:",
+        validators.len()
+    );
+
     // Update each validator with ONLY direct RPC data
     for validator in &mut validators {
         if let Some(live_info) = live_data.get(&validator.vote_account) {
             // Store old values for comparison
-            let old_commission = validator.commission;
-            let old_stake = validator.active_stake;
-            
             // Update with ONLY direct RPC data - no calculations
             validator.commission = live_info.commission as f64;
-            validator.active_stake = live_info.activated_stake as f64 / 1_000_000_000.0; // Convert lamports to SOL
-            // Keep skip_rate as static value from our list (or set to 0 if you want to remove it)
-            
-            //println!("  ✅ {} ({})", validator.name, validator.vote_account);
-            //println!("     Commission: {:.1}% -> {:.1}%", old_commission, validator.commission);
-            //println!("     Active Stake: {:.2} SOL -> {:.2} SOL", old_stake, validator.active_stake);
-            //println!("     Skip Rate: Using static value {:.1}% (no live data available)", validator.skip_rate);
+            validator.active_stake = live_info.activated_stake as f64 / 1_000_000_000.0;
+        // Convert lamports to SOL
+        // Keep skip_rate as static value from our list (or set to 0 if you want to remove it)
+
+        //println!("  ✅ {} ({})", validator.name, validator.vote_account);
+        //println!("     Commission: {:.1}% -> {:.1}%", old_commission, validator.commission);
+        //println!("     Active Stake: {:.2} SOL -> {:.2} SOL", old_stake, validator.active_stake);
+        //println!("     Skip Rate: Using static value {:.1}% (no live data available)", validator.skip_rate);
         } else {
-            println!("  ⚠️  {} ({}): No live data found - keeping static values", 
-                validator.name, validator.vote_account);
+            println!(
+                "  ⚠️  {} ({}): No live data found - keeping static values",
+                validator.name, validator.vote_account
+            );
         }
     }
-    
+
     println!("🎯 Live validator data update completed!");
     Ok(validators)
-}
-
-// Legacy function for backward compatibility - now just calls the async version
-// This can be removed once you update all calling code
-pub fn get_recommended_validators_sync() -> Vec<ValidatorInfo> {
-    println!("⚠️  Warning: Using synchronous validator data (static fallback)");
-    get_static_validators()
-}
-
-// Function to fetch live validator data - this replaces the old implementation
-pub async fn fetch_live_validators(rpc_url: Option<&str>) -> Result<Vec<ValidatorInfo>, Box<dyn std::error::Error>> {
-    // get_recommended_validators already handles errors internally and returns Vec<ValidatorInfo>
-    // It falls back to static data if live data fails, so it never fails
-    Ok(get_recommended_validators().await)
 }

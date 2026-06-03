@@ -19,3 +19,6 @@ dist/android/unruggable-release.aab
 unruggable.dmg.sha256
 unruggable.dmg
 .gitignore
+partner_secrets.local
+.env.local
+.env.*.local

@@ -1,6 +1,7 @@
 // src/hardware/ledger.rs
 // Only compile this module on desktop platforms (not mobile)
 #![cfg(not(any(target_os = "android", target_os = "ios")))]
+#![allow(dead_code, deprecated)]
 
 use super::LedgerDerivationAddress;
 use hidapi::HidApi;
@@ -112,7 +113,10 @@ impl LedgerConnection {
         Some((account, change))
     }
 
-    fn push_unique_address(accounts: &mut Vec<LedgerDerivationAddress>, entry: LedgerDerivationAddress) {
+    fn push_unique_address(
+        accounts: &mut Vec<LedgerDerivationAddress>,
+        entry: LedgerDerivationAddress,
+    ) {
         if !accounts
             .iter()
             .any(|existing| existing.pubkey == entry.pubkey || existing.path == entry.path)
@@ -214,8 +218,10 @@ impl LedgerConnection {
         self.account = Self::DEFAULT_ACCOUNT;
         self.change = Self::DEFAULT_CHANGE;
         self.selected_derivation_path = Some(path);
-        self.selected_derivation_path_str =
-            Some(Self::path_string(Self::DEFAULT_ACCOUNT, Self::DEFAULT_CHANGE));
+        self.selected_derivation_path_str = Some(Self::path_string(
+            Self::DEFAULT_ACCOUNT,
+            Self::DEFAULT_CHANGE,
+        ));
         self.host_device_path = Some(host_device_path);
 
         log::info!("✅ Successfully connected to Ledger device");
@@ -238,7 +244,9 @@ impl LedgerConnection {
     }
 
     pub fn get_derivation_path(&self) -> Option<String> {
-        self.pubkey.as_ref().and_then(|_| self.selected_derivation_path_str.clone())
+        self.pubkey
+            .as_ref()
+            .and_then(|_| self.selected_derivation_path_str.clone())
     }
 
     pub fn get_derivation_indices(&self) -> Option<(u32, u32)> {
@@ -270,13 +278,17 @@ impl LedgerConnection {
         Ok(pubkey.to_string())
     }
 
-    pub fn set_derivation_path_str(&mut self, derivation_path: &str) -> Result<String, LedgerError> {
+    pub fn set_derivation_path_str(
+        &mut self,
+        derivation_path: &str,
+    ) -> Result<String, LedgerError> {
         if self.pubkey.is_none() {
             return Err(LedgerError("Not connected to Ledger device".to_string()));
         }
 
-        let path = DerivationPath::from_absolute_path_str(derivation_path)
-            .map_err(|e| LedgerError(format!("Invalid derivation path '{derivation_path}': {e}")))?;
+        let path = DerivationPath::from_absolute_path_str(derivation_path).map_err(|e| {
+            LedgerError(format!("Invalid derivation path '{derivation_path}': {e}"))
+        })?;
 
         let (ledger, host_device_path) = self.open_ledger_wallet()?;
         let pubkey = ledger
@@ -367,13 +379,14 @@ impl LedgerConnection {
             // wallets that expose Ledger addresses from that branch.
             if change == 0 {
                 let account_only_path = Self::bip44_account_only_path(account)?;
-                let account_only_pubkey = ledger.get_pubkey(&account_only_path, false).map_err(|e| {
-                    LedgerError(format!(
-                        "Failed to derive {}: {}",
-                        Self::account_only_path_string(account),
-                        e
-                    ))
-                })?;
+                let account_only_pubkey =
+                    ledger.get_pubkey(&account_only_path, false).map_err(|e| {
+                        LedgerError(format!(
+                            "Failed to derive {}: {}",
+                            Self::account_only_path_string(account),
+                            e
+                        ))
+                    })?;
                 let account_only_pubkey_str = account_only_pubkey.to_string();
                 Self::push_unique_address(
                     &mut accounts,

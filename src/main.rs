@@ -1,37 +1,49 @@
-use dioxus::document::eval;
 use dioxus::prelude::*;
 use std::sync::Arc;
-use serde_json::Value;
-use std::sync::OnceLock;
 
-mod wallet;
-mod rpc;
-mod prices;
-mod transaction;
-mod signing;
-mod hardware;
-mod storage;
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios")
+))]
+use serde_json::Value;
+
+#[cfg(not(test))]
+#[allow(unused_macros)]
+macro_rules! println {
+    ($($arg:tt)*) => {{}};
+}
+
+#[cfg(not(test))]
+#[allow(unused_macros)]
+macro_rules! eprintln {
+    ($($arg:tt)*) => {{}};
+}
+
+mod clipboard;
 mod components;
-mod validators;
-mod staking;
-mod unstaking;
+mod config;
 mod currency;
 mod currency_utils;
-mod sns;
-mod config;
-mod token_utils;
-mod privacycash;
-// Temporarily disabled for Solana 3.x testing (these depend on Solana 2.x SDKs)
-mod squads;
-mod carrot;
-mod bonk_staking;
-mod titan;
-mod quantum_vault;
+mod asset_hosting;
+mod hardware;
+mod partner_secrets;
 mod pin;
+mod prices;
+mod privacycash;
+mod quantum_vault;
+mod rpc;
+mod signing;
+mod sns;
+mod staking;
+mod storage;
 mod timeout;
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-mod bridge;
+mod titan;
+mod token_utils;
+mod transaction;
+mod unstaking;
+mod validators;
+mod wallet;
 
 use components::*;
 
@@ -42,27 +54,93 @@ enum Route {
     WalletView {},
 }
 
-// MAC and iOS bundling does not adhere to the asset! macro.
-// Android does. For apple builds use hosted resources.
+const PREAUTH_SHELL_STYLE: &str = concat!(
+    "position:fixed;",
+    "inset:0;",
+    "background:linear-gradient(180deg, #090b10 0%, #11151d 100%);",
+    "color:#ffffff;",
+    "overflow:auto;"
+);
+const AUTO_LOCK_IDLE_MS: u64 = 5 * 60 * 1000;
+const ACTIVITY_UPDATE_THROTTLE_MS: u64 = 1_500;
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios")
+))]
+const DESKTOP_LOCK_MONITOR_SCRIPT: &str = r#"
+(() => {
+    if (window.__unruggableLockMonitorInstalled) {
+        try { dioxus.send({ type: "ready", now: Date.now() }); } catch (_) {}
+        return;
+    }
 
-// For iOS/macOS builds, uncomment the remote URLs and comment out the asset! macros
-//const MAIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/main.css";
-//const PIN_CSS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/pin-premium.css";
-const PRIVACY_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/privacy.js";
-const PRIVACY_WASM_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/transaction2.wasm";
-const PRIVACY_ZKEY_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/transaction2.zkey";
-const LIQUID_METAL_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/liquid_metal_component.js";
-const LIQUID_METAL_SVG_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/liquid_metal_svg.js";
-const LIQUID_METAL_BORDER_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/liquid_metal_border.js";
-const LIQUID_METAL_CIRCLE_BORDER_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/liquid_metal_circle_border.js";
-const LIQUID_METAL_CIRCLE_JS_URL: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/liquid_metal_circle.js";
+    window.__unruggableLockMonitorInstalled = true;
 
-// For local/Android builds, use the asset! macro
-const MAIN_CSS: Asset = asset!("/assets/main.css");
-const PIN_CSS: Asset = asset!("/assets/pin-premium.css");
+    const safeSend = (type) => {
+        try {
+            dioxus.send({ type, now: Date.now() });
+        } catch (_) {}
+    };
+
+    window.addEventListener("blur", () => safeSend("blur"));
+    window.addEventListener("focus", () => safeSend("focus"));
+    document.addEventListener("visibilitychange", () => {
+        safeSend(document.hidden ? "hidden" : "focus");
+    });
+
+    safeSend("ready");
+})();
+"#;
+
+fn current_timestamp_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct AppSecurityContext {
+    pub is_locked: Signal<bool>,
+    pub last_activity_ms: Signal<u64>,
+}
+
+impl AppSecurityContext {
+    pub fn record_activity(self) {
+        let now = current_timestamp_ms();
+        if now.saturating_sub((self.last_activity_ms)()) >= ACTIVITY_UPDATE_THROTTLE_MS {
+            let mut last_activity_ms = self.last_activity_ms;
+            last_activity_ms.set(now);
+        }
+    }
+
+    pub fn unlock_now(self) {
+        let mut last_activity_ms = self.last_activity_ms;
+        last_activity_ms.set(current_timestamp_ms());
+
+        let mut is_locked = self.is_locked;
+        is_locked.set(false);
+    }
+
+    pub fn lock_now(self, reason: &str) {
+        println!("App relock triggered: {}", reason);
+        crate::pin::clear_session();
+
+        let mut last_activity_ms = self.last_activity_ms;
+        last_activity_ms.set(current_timestamp_ms());
+
+        let mut is_locked = self.is_locked;
+        is_locked.set(true);
+    }
+}
 
 // ── DESKTOP (macOS/Windows/Linux) ─────────────────────────────────────────────
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
+#[cfg(all(
+    not(target_arch = "wasm32"),
+    not(target_os = "android"),
+    not(target_os = "ios")
+))]
 fn main() {
     // Hard-disable Dioxus edit server & devtools in the shipped app
     std::env::set_var("DIOXUS_DISABLE_EDIT", "1");
@@ -77,44 +155,17 @@ fn main() {
         std::env::var("DIOXUS_DEVTOOLS")
     );
 
-    dioxus::launch(App);
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-fn start_browser_bridge() -> Arc<bridge::BridgeHandler> {
-    use bridge::{BridgeHandler, BridgeServer};
-
-    let handler = Arc::new(BridgeHandler::new());
-    let handler_clone = Arc::clone(&handler);
-    let bridge_enabled = storage::load_bridge_settings_from_storage().enabled;
-    handler.set_enabled(bridge_enabled);
-
-    println!("🌉 Starting browser bridge server...");
-    std::thread::spawn(move || {
-        let rt = tokio::runtime::Runtime::new().expect("Failed to create Tokio runtime");
-
-        rt.block_on(async {
-            let server = Arc::new(BridgeServer::new(7777));
-            let callback: bridge::RequestCallback = Arc::new(move |request| {
-                let handler = handler_clone.clone();
-                Box::pin(async move { handler.handle_request(request).await })
-            });
-
-            server.set_callback(callback);
-
-            if let Err(e) = server.start().await {
-                eprintln!("Bridge server error: {}", e);
-            }
-        });
-    });
-
-    handler
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-fn init_bridge_handler() -> Arc<bridge::BridgeHandler> {
-    static BRIDGE_HANDLER: OnceLock<Arc<bridge::BridgeHandler>> = OnceLock::new();
-    BRIDGE_HANDLER.get_or_init(start_browser_bridge).clone()
+    dioxus::LaunchBuilder::new()
+        .with_cfg(desktop!({
+            use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
+            Config::new().with_window(
+                WindowBuilder::new()
+                    .with_title("unruggable")
+                    .with_inner_size(LogicalSize::new(520.0, 960.0))
+                    .with_min_inner_size(LogicalSize::new(480.0, 900.0)),
+            )
+        }))
+        .launch(App);
 }
 
 // Web & Mobile keep the generic launcher:
@@ -123,131 +174,178 @@ fn main() {
     dioxus::launch(App);
 }
 
-
 #[component]
 fn App() -> Element {
-    let (privacy_js_src, wasm_url, zkey_url, liquid_metal_js_src, liquid_metal_svg_js_src, liquid_metal_border_js_src, liquid_metal_circle_border_js_src, liquid_metal_circle_js_src) = if cfg!(any(
-        target_arch = "wasm32"
-    )) {
-        (
-            PRIVACY_JS_URL.to_string(),
-            PRIVACY_WASM_URL.to_string(),
-            PRIVACY_ZKEY_URL.to_string(),
-            LIQUID_METAL_JS_URL.to_string(),
-            LIQUID_METAL_SVG_JS_URL.to_string(),
-            LIQUID_METAL_BORDER_JS_URL.to_string(),
-            LIQUID_METAL_CIRCLE_BORDER_JS_URL.to_string(),
-            LIQUID_METAL_CIRCLE_JS_URL.to_string(),
-        )
-    } else {
-        let privacy_js = asset!("/assets/privacy.js", AssetOptions::builder().with_hash_suffix(false));
-        let privacy_wasm = asset!("/assets/transaction2.wasm", AssetOptions::builder().with_hash_suffix(false));
-        let privacy_zkey = asset!("/assets/transaction2.zkey", AssetOptions::builder().with_hash_suffix(false));
-        let liquid_metal_js = asset!("/assets/liquid_metal_component.js", AssetOptions::builder().with_hash_suffix(false));
-        let liquid_metal_svg_js = asset!("/assets/liquid_metal_svg.js", AssetOptions::builder().with_hash_suffix(false));
-        let liquid_metal_border_js = asset!("/assets/liquid_metal_border.js", AssetOptions::builder().with_hash_suffix(false));
-        let liquid_metal_circle_border_js = asset!("/assets/liquid_metal_circle_border.js", AssetOptions::builder().with_hash_suffix(false));
-        let liquid_metal_circle_js = asset!("/assets/liquid_metal_circle.js", AssetOptions::builder().with_hash_suffix(false));
-        (
-            privacy_js.to_string(),
-            privacy_wasm.to_string(),
-            privacy_zkey.to_string(),
-            liquid_metal_js.to_string(),
-            liquid_metal_svg_js.to_string(),
-            liquid_metal_border_js.to_string(),
-            liquid_metal_circle_border_js.to_string(),
-            liquid_metal_circle_js.to_string(),
-        )
-    };
-    println!("[PrivacyCash] asset wasm url: {}", wasm_url);
-    println!("[PrivacyCash] asset zkey url: {}", zkey_url);
+    let main_css_href = crate::asset_hosting::app_asset("main.css");
+    let pin_css_href = crate::asset_hosting::app_asset("pin-premium.css");
+    let mut show_onboarding =
+        use_signal(|| !storage::has_completed_onboarding() || !storage::has_pin());
 
-    use_effect(move || {
-        let wasm_url = wasm_url.clone();
-        let zkey_url = zkey_url.clone();
-        spawn(async move {
-            let mut e = eval(
-                r#"
-                let [wasmUrl, zkeyUrl] = await dioxus.recv();
-                globalThis.PRIVACY_CASH_WASM_URL = wasmUrl;
-                globalThis.PRIVACY_CASH_ZKEY_URL = zkeyUrl;
-                console.log('PrivacyCash asset globals set', { wasmUrl, zkeyUrl });
-                "#,
-            );
-            let _ = e.send(Value::Array(vec![
-                Value::String(wasm_url),
-                Value::String(zkey_url),
-            ]));
-        });
-    });
-    // Check if onboarding has been completed
-    let mut show_onboarding = use_signal(|| !storage::has_completed_onboarding());
-    
     // Check if PIN is set and locked
-    let mut is_locked = use_signal(|| storage::has_pin());
-    
-    // Initialize SNS resolver with your RPC endpoint
-    let sns_resolver = Arc::new(sns::SnsResolver::new(
-        "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string() // Use your preferred RPC endpoint
-    ));
+    let is_locked = use_signal(|| storage::has_pin());
+    let last_activity_ms = use_signal(current_timestamp_ms);
+    let idle_monitor_generation = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(0u64)));
+    let app_security = AppSecurityContext {
+        is_locked,
+        last_activity_ms,
+    };
+
+    use_context_provider(move || app_security);
+
+    // Initialize shared clients once so unlock re-renders stay cheap.
+    let sns_resolver = use_signal(|| {
+        Arc::new(sns::SnsResolver::new(
+            "https://johna-k3cr1v-fast-mainnet.helius-rpc.com".to_string(), // Use your preferred RPC endpoint
+        ))
+    });
 
     // Provide SNS resolver to the entire app
-    use_context_provider(|| sns_resolver.clone());
+    use_context_provider({
+        let sns_resolver = sns_resolver();
+        move || sns_resolver.clone()
+    });
 
     // Provide a shared TransactionClient (no background TPU init to avoid iOS crash)
-    let transaction_client = Arc::new(transaction::TransactionClient::new(None));
-    use_context_provider(|| transaction_client.clone());
+    let transaction_client = use_signal(|| Arc::new(transaction::TransactionClient::new(None)));
+    use_context_provider({
+        let transaction_client = transaction_client();
+        move || transaction_client.clone()
+    });
 
-    // Start browser bridge on desktop only
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-    let bridge_handler = {
-        let handler = use_context_provider(|| init_bridge_handler());
-        handler
-    };
-    
-    let wallet = use_signal(|| None as Option<wallet::WalletInfo>);
-    
-    rsx! {
-        // For iOS/macOS builds, uncomment these lines and comment out the asset! lines below
-        document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
-        //document::Link { rel: "stylesheet", href: MAIN_CSS_URL }
-        //document::Link { rel: "stylesheet", href: PIN_CSS_URL }
-        
-        // For local/Android builds, use these lines (comment out for iOS/macOS)
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: PIN_CSS }
+    let _wallet = use_signal(|| None as Option<wallet::WalletInfo>);
 
-        document::Script { src: privacy_js_src.clone(), defer: true }
-        document::Script { src: liquid_metal_js_src.clone(), defer: true }
-        document::Script { src: liquid_metal_svg_js_src.clone(), defer: true }
-        document::Script { src: liquid_metal_border_js_src.clone(), defer: true }
-        document::Script { src: liquid_metal_circle_border_js_src.clone(), defer: true }
-        document::Script { src: liquid_metal_circle_js_src.clone(), defer: true }
-        
-        // Show PIN unlock if PIN is set and app is locked
-        if is_locked() {
-            PinUnlock {
-                on_unlock: move |pin: String| {
-                    is_locked.set(false);
-                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                    {
-                        match bridge_handler.load_wallet_with_pin(&pin) {
-                            Ok(_) => println!("✅ Bridge: Wallet loaded for browser"),
-                            Err(e) => eprintln!("❌ Bridge: Failed to load wallet: {}", e),
+    use_effect(move || {
+        spawn(async move {
+            let token_started = std::time::Instant::now();
+            let token_catalog = crate::config::tokens::load_verified_tokens_async().await;
+            println!(
+                "Prewarmed verified token catalog: {} entries in {}ms",
+                token_catalog.len(),
+                token_started.elapsed().as_millis()
+            );
+
+            let price_started = std::time::Instant::now();
+            match prices::get_cached_prices_and_changes().await {
+                Ok((prices, _)) => {
+                    println!(
+                        "Prewarmed price cache: {} tokens in {}ms",
+                        prices.len(),
+                        price_started.elapsed().as_millis()
+                    );
+                }
+                Err(e) => {
+                    println!("Failed to prewarm price cache: {}", e);
+                }
+            }
+        });
+    });
+
+    #[cfg(all(
+        not(target_arch = "wasm32"),
+        not(target_os = "android"),
+        not(target_os = "ios")
+    ))]
+    {
+        let mut desktop_lock_monitor_booted = use_signal(|| false);
+
+        use_effect(move || {
+            if desktop_lock_monitor_booted() {
+                return;
+            }
+
+            desktop_lock_monitor_booted.set(true);
+
+            let mut monitor = document::eval(DESKTOP_LOCK_MONITOR_SCRIPT);
+            spawn(async move {
+                while let Ok(event) = monitor.recv::<Value>().await {
+                    let event_type = event
+                        .get("type")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default();
+
+                    match event_type {
+                        "focus" => app_security.record_activity(),
+                        "blur" | "hidden" => {
+                            if storage::has_pin() && !show_onboarding() && !is_locked() {
+                                app_security.lock_now("window backgrounded");
+                            }
                         }
+                        _ => {}
+                    }
+                }
+            });
+        });
+    }
+
+    use_effect(move || {
+        let locked = is_locked();
+        let onboarding_visible = show_onboarding();
+        let generation = idle_monitor_generation.get().wrapping_add(1);
+        idle_monitor_generation.set(generation);
+
+        if onboarding_visible || locked || !storage::has_pin() {
+            return;
+        }
+
+        let idle_monitor_generation = idle_monitor_generation.clone();
+        spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+
+                if idle_monitor_generation.get() != generation {
+                    break;
+                }
+
+                if show_onboarding() || is_locked() || !storage::has_pin() {
+                    break;
+                }
+
+                let idle_for = current_timestamp_ms().saturating_sub(last_activity_ms());
+                if idle_for >= AUTO_LOCK_IDLE_MS {
+                    app_security.lock_now("idle timeout");
+                    break;
+                }
+            }
+        });
+    });
+
+    rsx! {
+        document::Link { rel: "preconnect", href: "https://cdn.jsdelivr.net" }
+        document::Link { rel: "stylesheet", href: main_css_href }
+        document::Link { rel: "stylesheet", href: pin_css_href }
+
+        // Show onboarding first while the flow is being tuned.
+        if show_onboarding() {
+            div {
+                style: PREAUTH_SHELL_STYLE,
+                // Show onboarding on first launch
+                OnboardingFlow {
+                    on_complete: move |_| {
+                        show_onboarding.set(false);
+                        app_security.unlock_now();
                     }
                 }
             }
-        } else if show_onboarding() {
-            // Show onboarding on first launch
-            OnboardingFlow {
-                on_complete: move |_| {
-                    show_onboarding.set(false);
+        } else if is_locked() {
+            div {
+                style: PREAUTH_SHELL_STYLE,
+                PinUnlock {
+                    on_unlock: move |_| {
+                        println!("App unlock signal received - hiding PIN screen");
+                        app_security.unlock_now();
+                    }
                 }
             }
         } else {
             // Show main app
-            Router::<Route> {}
+            div {
+                onmousedown: move |_| app_security.record_activity(),
+                onclick: move |_| app_security.record_activity(),
+                onkeydown: move |_| app_security.record_activity(),
+                onwheel: move |_| app_security.record_activity(),
+                ontouchstart: move |_| app_security.record_activity(),
+                Router::<Route> {}
+            }
         }
     }
 }

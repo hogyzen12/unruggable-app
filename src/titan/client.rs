@@ -1,14 +1,14 @@
 // Titan WebSocket client implementation
+#![allow(dead_code)]
 
-use tokio_tungstenite::{connect_async, tungstenite::Message, WebSocketStream, MaybeTlsStream};
-use tokio::net::TcpStream;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
+use tokio::net::TcpStream;
 use tokio::sync::Mutex;
-use futures_util::stream::Stream;
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use super::types::*;
 use super::codec::*;
+use super::types::*;
 
 /// Titan WebSocket client for swap quote streaming
 pub struct TitanClient {
@@ -24,7 +24,7 @@ pub struct TitanClient {
 
 impl TitanClient {
     /// Create a new Titan client
-    /// 
+    ///
     /// # Arguments
     /// * `endpoint` - Server endpoint (e.g., "de1.api.demo.titan.exchange")
     /// * `jwt_token` - JWT authentication token
@@ -51,7 +51,10 @@ impl TitanClient {
             .header("Connection", "Upgrade")
             .header("Upgrade", "websocket")
             .header("Sec-WebSocket-Version", "13")
-            .header("Sec-WebSocket-Key", tokio_tungstenite::tungstenite::handshake::client::generate_key())
+            .header(
+                "Sec-WebSocket-Key",
+                tokio_tungstenite::tungstenite::handshake::client::generate_key(),
+            )
             .header("Sec-WebSocket-Protocol", "v1.api.titan.ag") // Protocol negotiation
             .header("Authorization", format!("Bearer {}", self.jwt_token)) // JWT auth
             .body(())
@@ -63,15 +66,16 @@ impl TitanClient {
         println!("[TITAN-CLIENT] Request built successfully, attempting connection...");
 
         // Connect to WebSocket
-        let (ws_stream, response) = connect_async(request)
-            .await
-            .map_err(|e| {
-                println!("[TITAN-CLIENT] ❌ WebSocket connection failed: {}", e);
-                println!("[TITAN-CLIENT] Error details: {:?}", e);
-                format!("Failed to connect: {}", e)
-            })?;
+        let (ws_stream, response) = connect_async(request).await.map_err(|e| {
+            println!("[TITAN-CLIENT] ❌ WebSocket connection failed: {}", e);
+            println!("[TITAN-CLIENT] Error details: {:?}", e);
+            format!("Failed to connect: {}", e)
+        })?;
 
-        println!("[TITAN-CLIENT] ✓ Connected to Titan! Response: {:?}", response.status());
+        println!(
+            "[TITAN-CLIENT] ✓ Connected to Titan! Response: {:?}",
+            response.status()
+        );
 
         // Store the connection
         println!("[TITAN-CLIENT] Storing WebSocket connection...");
@@ -93,7 +97,7 @@ impl TitanClient {
             .map_err(|e| format!("Failed to encode request: {}", e))?;
 
         println!("Sending request {} ({} bytes)", request.id, encoded.len());
-        
+
         // Debug: Print hex dump of encoded message
         let preview_len = std::cmp::min(150, encoded.len());
         let hex_parts: Vec<String> = encoded[..preview_len]
@@ -128,12 +132,15 @@ impl TitanClient {
             let ws = ws_lock.as_mut().ok_or("Not connected")?;
 
             // Receive message
-            let msg = ws.next().await
+            let msg = ws
+                .next()
+                .await
                 .ok_or("Connection closed")?
                 .map_err(|e| format!("Failed to receive: {}", e))?;
 
             Ok::<_, String>(msg)
-        }).await
+        })
+        .await
         .map_err(|_| "Receive timeout (iOS network issue)".to_string())?;
 
         let msg = msg?;
@@ -142,8 +149,7 @@ impl TitanClient {
         match msg {
             Message::Binary(data) => {
                 println!("Received message ({} bytes)", data.len());
-                rmp_serde::from_slice(&data)
-                    .map_err(|e| format!("Failed to decode: {}", e))
+                rmp_serde::from_slice(&data).map_err(|e| format!("Failed to decode: {}", e))
             }
             Message::Close(_) => Err("Connection closed".to_string()),
             _ => Err("Unexpected message type".to_string()),
@@ -189,7 +195,8 @@ impl TitanClient {
                     }
                 }
             }
-        }).await;
+        })
+        .await;
 
         result.map_err(|_| "GetInfo timeout".to_string())?
     }
@@ -205,7 +212,7 @@ impl TitanClient {
         slippage_bps: Option<u16>,
     ) -> Result<(String, SwapRoute), String> {
         let request_id = self.next_request_id().await;
-        
+
         // Convert pubkeys to bytes
         let input_mint_bytes = base58_to_bytes(input_mint)?;
         let output_mint_bytes = base58_to_bytes(output_mint)?;
@@ -246,7 +253,10 @@ impl TitanClient {
             }),
         };
 
-        println!("Requesting swap quotes: {} -> {} (amount: {})", input_mint, output_mint, amount);
+        println!(
+            "Requesting swap quotes: {} -> {} (amount: {})",
+            input_mint, output_mint, amount
+        );
         self.send_request(request).await?;
 
         // Wait for initial response with stream ID (iOS-SAFE with timeout)
@@ -269,7 +279,8 @@ impl TitanClient {
                     _ => continue,
                 }
             }
-        }).await
+        })
+        .await
         .map_err(|_| "Stream start timeout (iOS)".to_string())??;
 
         // Wait for first quote data (iOS-SAFE with timeout)
@@ -277,14 +288,12 @@ impl TitanClient {
             loop {
                 let msg = self.receive_message().await?;
                 match msg {
-                    ServerMessage::StreamData(data) if data.id == stream_id => {
-                        match data.payload {
-                            StreamDataPayload::SwapQuotes(quotes) => {
-                                println!("Received quotes from {} providers", quotes.quotes.len());
-                                return Ok(quotes);
-                            }
+                    ServerMessage::StreamData(data) if data.id == stream_id => match data.payload {
+                        StreamDataPayload::SwapQuotes(quotes) => {
+                            println!("Received quotes from {} providers", quotes.quotes.len());
+                            return Ok(quotes);
                         }
-                    }
+                    },
                     ServerMessage::StreamEnd(end) if end.id == stream_id => {
                         if let Some(err_msg) = end.error_message {
                             return Err(format!("Stream ended with error: {}", err_msg));
@@ -294,18 +303,24 @@ impl TitanClient {
                     _ => continue,
                 }
             }
-        }).await
+        })
+        .await
         .map_err(|_| "Quote data timeout (iOS)".to_string())??;
 
         // Stop the stream (we only need one quote)
         self.stop_stream(stream_id).await?;
 
         // Find best route (highest out_amount for ExactIn)
-        let (best_provider, best_route) = quotes.quotes.iter()
+        let (best_provider, best_route) = quotes
+            .quotes
+            .iter()
             .max_by_key(|(_, route)| route.out_amount)
             .ok_or("No quotes available")?;
 
-        println!("Best quote from provider '{}': {} output tokens", best_provider, best_route.out_amount);
+        println!(
+            "Best quote from provider '{}': {} output tokens",
+            best_provider, best_route.out_amount
+        );
 
         Ok((best_provider.clone(), best_route.clone()))
     }
@@ -340,7 +355,8 @@ impl TitanClient {
                     _ => continue,
                 }
             }
-        }).await;
+        })
+        .await;
 
         result.map_err(|_| "Stop stream timeout (non-critical)".to_string())?
     }

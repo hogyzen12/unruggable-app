@@ -1,13 +1,11 @@
 // src/currency_utils.rs
-use dioxus::prelude::*;
-use dioxus::prelude::Readable; // Add this import to fix .read() method
+#![allow(dead_code)]
+
 use crate::currency::{
-    SELECTED_CURRENCY, 
-    EXCHANGE_RATES, 
-    convert_from_usd, 
-    get_current_currency_symbol,
-    format_currency_amount
+    convert_from_usd, format_currency_amount, get_current_currency_symbol, EXCHANGE_RATES,
+    SELECTED_CURRENCY,
 };
+use dioxus::prelude::*;
 
 /// Convert and format a USD price to the selected currency
 pub fn format_price_in_selected_currency(usd_price: f64) -> String {
@@ -21,8 +19,13 @@ pub fn format_price_with_precision(usd_price: f64, precision: usize) -> String {
     let selected_currency = SELECTED_CURRENCY.read().clone();
     let converted_amount = convert_from_usd(usd_price, &selected_currency);
     let symbol = get_current_currency_symbol();
-    
-    format!("{}{:.precision$}", symbol, converted_amount, precision = precision)
+
+    format!(
+        "{}{:.precision$}",
+        symbol,
+        converted_amount,
+        precision = precision
+    )
 }
 
 /// Format balance amount (SOL * price) in selected currency
@@ -42,7 +45,7 @@ pub fn format_price_change(usd_change: f64) -> String {
     let selected_currency = SELECTED_CURRENCY.read().clone();
     let converted_change = convert_from_usd(usd_change, &selected_currency);
     let symbol = get_current_currency_symbol();
-    
+
     let sign = if converted_change >= 0.0 { "+" } else { "" };
     format!("{}{}{:.2}", sign, symbol, converted_change)
 }
@@ -76,7 +79,7 @@ pub fn format_portfolio_balance(usd_amount: f64) -> String {
     let converted_amount = convert_from_usd(usd_amount, &selected_currency);
     let rounded_amount = converted_amount.round();
     let symbol = get_current_currency_symbol();
-    
+
     // Always format without decimals for portfolio balance
     format!("{}{:.0}", symbol, rounded_amount)
 }
@@ -86,7 +89,7 @@ pub fn format_large_currency_amount(usd_amount: f64) -> String {
     let selected_currency = SELECTED_CURRENCY.read().clone();
     let converted_amount = convert_from_usd(usd_amount, &selected_currency);
     let symbol = get_current_currency_symbol();
-    
+
     let (value, suffix) = if converted_amount >= 1_000_000_000.0 {
         (converted_amount / 1_000_000_000.0, "B")
     } else if converted_amount >= 1_000_000.0 {
@@ -96,13 +99,13 @@ pub fn format_large_currency_amount(usd_amount: f64) -> String {
     } else {
         (converted_amount, "")
     };
-    
+
     if suffix.is_empty() {
         // For amounts under 1000, check if it's a whole number
         if value.fract() == 0.0 {
-            format!("{}{:.0}", symbol, value)  // No decimals for whole numbers
+            format!("{}{:.0}", symbol, value) // No decimals for whole numbers
         } else {
-            format!("{}{:.2}", symbol, value)  // Keep decimals for fractional amounts
+            format!("{}{:.2}", symbol, value) // Keep decimals for fractional amounts
         }
     } else {
         format!("{}{:.1}{}", symbol, value, suffix)
@@ -114,7 +117,7 @@ pub fn use_currency_context() -> (String, String, f64) {
     let currency_code = SELECTED_CURRENCY.read().clone();
     let symbol = get_current_currency_symbol();
     let rate = get_current_exchange_rate();
-    
+
     (currency_code, symbol, rate)
 }
 
@@ -124,11 +127,11 @@ pub fn format_token_amount(amount: f64, symbol: &str) -> String {
     if amount == 0.0 {
         return format!("0 {}", symbol);
     }
-    
+
     if amount < 0.000001 {
         return format!("~0 {}", symbol);
     }
-    
+
     // For amounts >= 1 billion, use B suffix
     if amount >= 1_000_000_000.0 {
         let value = amount / 1_000_000_000.0;
@@ -140,7 +143,7 @@ pub fn format_token_amount(amount: f64, symbol: &str) -> String {
             return format!("{:.1}B {}", value, symbol); // e.g., "1.2B SOL"
         }
     }
-    
+
     // For amounts >= 1 million, use M suffix
     if amount >= 1_000_000.0 {
         let value = amount / 1_000_000.0;
@@ -152,7 +155,7 @@ pub fn format_token_amount(amount: f64, symbol: &str) -> String {
             return format!("{:.1}M {}", value, symbol); // e.g., "1.2M BONK"
         }
     }
-    
+
     // For amounts >= 1 thousand, use K suffix
     if amount >= 1_000.0 {
         let value = amount / 1_000.0;
@@ -164,31 +167,31 @@ pub fn format_token_amount(amount: f64, symbol: &str) -> String {
             return format!("{:.1}K {}", value, symbol); // e.g., "1.2K JUP"
         }
     }
-    
+
     // For amounts >= 100, show whole numbers
     if amount >= 100.0 {
         return format!("{:.0} {}", amount, symbol); // e.g., "150 USDC"
     }
-    
+
     // For amounts >= 10, show 1 decimal place
     if amount >= 10.0 {
         return format!("{:.1} {}", amount, symbol); // e.g., "12.5 SOL"
     }
-    
+
     // For amounts >= 1, show 2 decimal places
     if amount >= 1.0 {
         return format!("{:.2} {}", amount, symbol); // e.g., "9.53 JTO"
     }
-    
+
     // For amounts < 1, show up to 4 decimal places but trim trailing zeros
     if amount >= 0.01 {
         return format!("{:.2} {}", amount, symbol); // e.g., "0.12 SOL"
     }
-    
+
     if amount >= 0.001 {
         return format!("{:.3} {}", amount, symbol); // e.g., "0.001 BTC"
     }
-    
+
     // For very small amounts, show 4 decimal places
     format!("{:.4} {}", amount, symbol) // e.g., "0.0001 ETH"
 }
@@ -196,16 +199,16 @@ pub fn format_token_amount(amount: f64, symbol: &str) -> String {
 /// Format token value in USD with smart formatting and length limits
 pub fn format_token_value_smart(token_amount: f64, token_usd_price: f64) -> String {
     let usd_value = token_amount * token_usd_price;
-    
+
     // Handle zero value
     if usd_value == 0.0 {
         return "$0".to_string();
     }
-    
+
     // Get currency symbol (could be $, €, £, etc.)
     let symbol = get_current_currency_symbol();
     let converted_value = convert_from_usd(usd_value, &SELECTED_CURRENCY.read());
-    
+
     // For very large amounts, use B/M/K abbreviations
     if converted_value >= 1_000_000_000.0 {
         let value = converted_value / 1_000_000_000.0;
@@ -217,7 +220,7 @@ pub fn format_token_value_smart(token_amount: f64, token_usd_price: f64) -> Stri
             return format!("{}{:.1}B", symbol, value); // e.g., "$1.2B"
         }
     }
-    
+
     if converted_value >= 1_000_000.0 {
         let value = converted_value / 1_000_000.0;
         if value >= 100.0 {
@@ -228,7 +231,7 @@ pub fn format_token_value_smart(token_amount: f64, token_usd_price: f64) -> Stri
             return format!("{}{:.1}M", symbol, value); // e.g., "$1.2M"
         }
     }
-    
+
     if converted_value >= 1_000.0 {
         let value = converted_value / 1_000.0;
         if value >= 100.0 {
@@ -239,24 +242,24 @@ pub fn format_token_value_smart(token_amount: f64, token_usd_price: f64) -> Stri
             return format!("{}{:.1}K", symbol, value); // e.g., "$1.2K"
         }
     }
-    
+
     // For smaller amounts, show appropriate precision
     if converted_value >= 100.0 {
         return format!("{}{:.0}", symbol, converted_value); // e.g., "$150"
     }
-    
+
     if converted_value >= 10.0 {
         return format!("{}{:.1}", symbol, converted_value); // e.g., "$19.1"
     }
-    
+
     if converted_value >= 1.0 {
         return format!("{}{:.2}", symbol, converted_value); // e.g., "$4.49"
     }
-    
+
     if converted_value >= 0.01 {
         return format!("{}{:.2}", symbol, converted_value); // e.g., "$0.12"
     }
-    
+
     // For very small amounts
     format!("{}~0", symbol) // e.g., "$~0"
 }

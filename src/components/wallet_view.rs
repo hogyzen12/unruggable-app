@@ -1,71 +1,35 @@
-use dioxus::prelude::*;
-use dioxus::document::eval;
-use crate::wallet::{Wallet, WalletInfo};
-use crate::storage::{
-    load_wallets_from_storage, 
-    save_wallet_to_storage, 
-    load_rpc_from_storage,
-    save_rpc_to_storage,
-    clear_rpc_storage,
-    load_jito_settings_from_storage,
-    save_jito_settings_to_storage,
-    delete_wallet_from_storage,
-    load_bridge_settings_from_storage,
-    save_bridge_settings_to_storage,
-    load_integration_settings_from_storage,
-    save_integration_settings_to_storage,
-    JitoSettings,
-    BridgeSettings,
-    IntegrationSettings
-};
-use crate::currency::{
-    SELECTED_CURRENCY, 
-    EXCHANGE_RATES,
-    initialize_currency_system,
-    update_exchange_rates_loop,
-    get_current_currency_symbol
-};
-use crate::currency_utils::{
-    format_price_in_selected_currency,
-    format_balance_value,
-    format_token_value,
-    format_token_value_smart,
-    format_token_amount, 
-    format_price_change,
-    get_current_currency_code,
-    format_portfolio_balance
-};
 use crate::components::modals::currency_modal::CurrencyModal;
-use crate::components::{LiquidMetalButton, LiquidMetalStatus};
-use crate::privacycash;
-use crate::signing::{SignerType, TransactionSigner};
+use crate::currency::{initialize_currency_system, update_exchange_rates_loop};
+use crate::currency_utils::{
+    format_portfolio_balance, format_token_amount, format_token_value_smart,
+    get_current_currency_code,
+};
+use crate::storage::{
+    delete_wallet_from_storage, load_rpc_from_storage, load_wallets_from_storage,
+    save_wallet_to_storage,
+};
+use crate::wallet::{Wallet, WalletInfo};
+use dioxus::prelude::*;
 // Temporarily disabled integrations for Solana 3.x testing
-use crate::components::modals::{WalletModal, RpcModal, SendModalWithHardware, SendTokenModal, HardwareWalletModal, ReceiveModal, JitoModal, StakeModal, BulkSendModal, EjectModal, RetireModal, RetireResult, SwapModal, TransactionHistoryModal, LendModal, ExportWalletModal, DeleteWalletModal, PrivacyCashModal, CarrotModal, BonkStakingModal, SquadsModal, QuantumVaultModal};
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-use crate::components::modals::BridgeSignModal;
-use crate::components::modals::send_modal::HardwareWalletEvent;
-use crate::token_utils::process_tokens_for_display;
-use crate::components::common::TokenDisplayData;
-use crate::components::common::{Token, TokenSortConfig, TokenFilter, SortCriteria};
-use crate::rpc::{self, CollectibleInfo, fetch_collectibles, TokenAccountFilter};
-use crate::prices;
-use crate::hardware::HardwareWallet;
-use crate::hardware::HardwareDeviceType;
+use crate::clipboard::copy_text_to_clipboard;
 use crate::components::background_themes::BackgroundTheme;
-use crate::components::modals::BackgroundModal;
+use crate::components::common::{Token, TokenFilter, TokenSortConfig};
+use crate::components::modals::send_modal::HardwareWalletEvent;
+use crate::components::modals::{
+    DeleteWalletModal, ExportWalletModal, HardwareWalletModal, ReceiveModal, SendModalWithHardware,
+    SendTokenModal, StakeModal, SwapModal, WalletModal,
+};
+use crate::config::tokens::{get_verified_tokens_arc, VerifiedToken};
+use crate::hardware::HardwareDeviceType;
+use crate::hardware::HardwareWallet;
+use crate::prices;
 use crate::prices::CandlestickData;
-use crate::config::tokens::{get_verified_tokens, VerifiedToken};
-use std::sync::Arc;
-use std::cell::RefCell;
-use std::rc::Rc;
+use crate::prices::JupiterTokenInfo;
+use crate::rpc::{self, fetch_collectibles, CollectibleInfo};
+use crate::token_utils::process_tokens_for_display;
 use std::collections::HashMap;
-use std::time::Duration;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-use crate::bridge::BridgeHandler;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-use arboard::Clipboard as SystemClipboard;
 use std::collections::HashSet;
-use rand::{thread_rng, Rng};
+use std::sync::Arc;
 
 // Define the assets for icons
 //const ICON_32: Asset = asset!("/assets/icons/32x32.png");
@@ -90,117 +54,54 @@ use rand::{thread_rng, Rng};
 //const DEVICE_UNRGBL: Asset = asset!("assets/icons/unruggable_device.png");
 //const DEVICE_SOFTWARE: Asset = asset!("assets/icons/hot_wallet.png");
 
-const ICON_32:     &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
-const ICON_SOL:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
-const ICON_USDC:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/usdcLogo.png";
-const ICON_USDT:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/usdtLogo.png";
-const ICON_JTO:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jtoLogo.png";
-const ICON_JUP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jupLogo.png";
-const ICON_JLP:    &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jlpLogo.png";
-const ICON_BONK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
+const ICON_32: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/32x32.png";
+const ICON_SOL: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/solanaLogo.png";
+const ICON_USDC: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/usdcLogo.png";
+const ICON_USDT: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/usdtLogo.png";
+const ICON_JTO: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jtoLogo.png";
+const ICON_JUP: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jupLogo.png";
+const ICON_JLP: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/jlpLogo.png";
+const ICON_BONK: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/solana-mobile@main/assets/icons/bonkLogo.png";
 
-const ICON_RECEIVE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/receive.svg";
-const ICON_SEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/send.svg";
-const ICON_STAKE:  &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/stake.svg";
-const ICON_BULK:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/bulk.svg";
-const ICON_SWAP:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
-const ICON_LEND:   &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/jupLendLogo.svg";
-const ICON_SQUADS: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/squadsLogo.svg";
-const ICON_CARROT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/CARROT.svg";
-const ICON_BONK_STAKE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/BONK.svg";
-const ICON_QUANTUM: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/32x32.png";
-const ICON_WALLET: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/WALLETS.svg";
-const ICON_CREATE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ADD_wallet.svg";
-const ICON_IMPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/IMPORT_wallet.svg";
-const ICON_EXPORT: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/EXPORT_wallet.svg";
-const ICON_RETIRE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/DELETE_wallet.svg";
-const ICON_DELETE: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/DELETE_wallet.svg";
-const ICON_RPC: &str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/RPC.svg";
-const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
+const ICON_RECEIVE: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/receive.svg";
+const ICON_SEND: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/send.svg";
+const ICON_STAKE: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/stake.svg";
+const ICON_SWAP: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/swap.svg";
+const ICON_WALLET: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/WALLETS.svg";
+const ICON_CREATE: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ADD_wallet.svg";
+const ICON_IMPORT: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/IMPORT_wallet.svg";
+const ICON_EXPORT: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/EXPORT_wallet.svg";
+const ICON_DELETE: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/DELETE_wallet.svg";
 const USDC_MINT: &str = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const USDT_MINT: &str = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
-const ORE_MINT: &str = "oreoU2P8bN6jkk3jbaiVxYnG1dCXcYxwhwyK9jSybcp";
 
-const DEVICE_LEDGER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
-const DEVICE_UNRGBL:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
-const DEVICE_SOFTWARE:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/hot_wallet.png";
-const LOADING_SPINNER:&str = "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/infinite-spinner.svg";
-
-
-// JupiterToken struct with PartialEq and Eq for use_memo
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct JupiterToken {
-    address: String,
-    name: String,
-    symbol: String,
-    logo_uri: String,
-    tags: Vec<String>,
-}
-
+const DEVICE_LEDGER: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/ledger_device.webp";
+const DEVICE_UNRGBL: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/unruggable_device.png";
+const DEVICE_SOFTWARE: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/hot_wallet.png";
+const LOADING_SPINNER: &str =
+    "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/infinite-spinner.svg";
+const ENABLE_PRIVACY: bool = false;
 async fn fetch_token_prices(
-    mut token_prices: Signal<HashMap<String, f64>>,
-    mut prices_loading: Signal<bool>,
-    mut price_error: Signal<Option<String>>,
-    mut sol_price: Signal<f64>,
-    mut daily_change: Signal<f64>,
-    mut daily_change_percent: Signal<f64>,
-    mut token_changes: Signal<HashMap<String, (Option<f64>, Option<f64>)>>,
-    mut multi_timeframe_data: Signal<HashMap<String, prices::MultiTimeframePriceData>>, // NEW: Add this
-) {
-    prices_loading.set(true);
-    price_error.set(None);
-
-    // Use the new cached function
-    match prices::get_cached_prices_and_changes().await {
-        Ok((current_prices, multi_data)) => {
-            // println!("✅ Got prices and multi-timeframe data");
-            
-            // Convert to old format for backward compatibility
-            let mut old_format_changes = HashMap::new();
-            for (token, data) in &multi_data {
-                old_format_changes.insert(token.clone(), (data.change_1d_amount, data.change_1d_percentage));
-                
-                // Print all timeframes for debugging
-                // println!("📊 {}: 1D={:+.1}%, 3D={:+.1}%, 7D={:+.1}%", 
-                //          token,
-                //          data.change_1d_percentage.unwrap_or(0.0),
-                //          data.change_3d_percentage.unwrap_or(0.0),
-                //          data.change_7d_percentage.unwrap_or(0.0));
-            }
-            
-            // Set both signals
-            token_changes.set(old_format_changes);
-            token_prices.set(current_prices.clone());
-
-            // Update SOL price
-            if let Some(new_sol_price) = current_prices.get("SOL") {
-                let old_price = sol_price();
-                let price_diff = new_sol_price - old_price;
-                
-                if old_price > 0.0 {
-                    daily_change.set(price_diff);
-                    daily_change_percent.set((price_diff / old_price) * 100.0);
-                } else {
-                    daily_change.set(0.0);
-                    daily_change_percent.set(0.0);
-                }
-                
-                sol_price.set(*new_sol_price);
-            }
-            
-            // println!("✅ Successfully updated all price data with cache");
-        },
-        Err(e) => {
-            price_error.set(Some(format!("Failed to fetch prices: {}", e)));
-            log::error!("Error fetching prices: {}", e);
-        }
-    }
-    
-    prices_loading.set(false);
-}
-
-async fn fetch_token_prices_for_discovered_tokens(
-    discovered_tokens: HashMap<String, String>, // mint -> symbol mapping
     mut token_prices: Signal<HashMap<String, f64>>,
     mut prices_loading: Signal<bool>,
     mut price_error: Signal<Option<String>>,
@@ -213,37 +114,29 @@ async fn fetch_token_prices_for_discovered_tokens(
     prices_loading.set(true);
     price_error.set(None);
 
-    // println!("Fetching prices for discovered tokens: {:?}", discovered_tokens);
+    // Use the new cached function
+    match prices::get_cached_prices_and_changes().await {
+        Ok((current_prices, multi_data)) => {
+            // println!("✅ Got prices and multi-timeframe data");
 
-    // Use the corrected function name from prices.rs
-    match prices::get_prices_for_tokens(discovered_tokens).await {
-        Ok(current_prices) => {
-            // println!("Got dynamic prices: {:?}", current_prices);
-            
-            // Create dummy multi-timeframe data for backward compatibility
-            let mut multi_data = HashMap::new();
-            for (token, price) in &current_prices {
-                multi_data.insert(token.clone(), prices::MultiTimeframePriceData {
-                    current_price: *price,
-                    change_1d_amount: Some(0.0),
-                    change_1d_percentage: Some(0.0),
-                    change_3d_amount: Some(0.0),
-                    change_3d_percentage: Some(0.0),
-                    change_7d_amount: Some(0.0),
-                    change_7d_percentage: Some(0.0),
-                });
-            }
-            
-            // Set the multi-timeframe data signal
-            multi_timeframe_data.set(multi_data.clone());
-            
             // Convert to old format for backward compatibility
             let mut old_format_changes = HashMap::new();
             for (token, data) in &multi_data {
-                old_format_changes.insert(token.clone(), (data.change_1d_amount, data.change_1d_percentage));
+                old_format_changes.insert(
+                    token.clone(),
+                    (data.change_1d_amount, data.change_1d_percentage),
+                );
+
+                // Print all timeframes for debugging
+                // println!("📊 {}: 1D={:+.1}%, 3D={:+.1}%, 7D={:+.1}%",
+                //          token,
+                //          data.change_1d_percentage.unwrap_or(0.0),
+                //          data.change_3d_percentage.unwrap_or(0.0),
+                //          data.change_7d_percentage.unwrap_or(0.0));
             }
-            
+
             // Set both signals
+            multi_timeframe_data.set(multi_data.clone());
             token_changes.set(old_format_changes);
             token_prices.set(current_prices.clone());
 
@@ -251,7 +144,7 @@ async fn fetch_token_prices_for_discovered_tokens(
             if let Some(new_sol_price) = current_prices.get("SOL") {
                 let old_price = sol_price();
                 let price_diff = new_sol_price - old_price;
-                
+
                 if old_price > 0.0 {
                     daily_change.set(price_diff);
                     daily_change_percent.set((price_diff / old_price) * 100.0);
@@ -259,18 +152,18 @@ async fn fetch_token_prices_for_discovered_tokens(
                     daily_change.set(0.0);
                     daily_change_percent.set(0.0);
                 }
-                
+
                 sol_price.set(*new_sol_price);
             }
-            
-            // println!("Successfully updated all price data for {} tokens", current_prices.len());
-        },
+
+            // println!("✅ Successfully updated all price data with cache");
+        }
         Err(e) => {
             price_error.set(Some(format!("Failed to fetch prices: {}", e)));
             log::error!("Error fetching prices: {}", e);
         }
     }
-    
+
     prices_loading.set(false);
 }
 
@@ -288,14 +181,136 @@ fn get_fallback_icon(symbol: &str) -> String {
     }
 }
 
+#[derive(Clone, Debug)]
+struct WalletSnapshot {
+    balance: f64,
+    tokens: Vec<Token>,
+}
+
+fn wallet_snapshot_key(address: &str, rpc_url: Option<&str>) -> String {
+    format!("{}|{}", address, rpc_url.unwrap_or_default())
+}
+
+fn aggregate_token_accounts_by_mint(
+    accounts: Vec<rpc::TokenAccountInfo>,
+) -> Vec<rpc::TokenAccountInfo> {
+    let mut aggregated = HashMap::<String, rpc::TokenAccountInfo>::new();
+
+    for account in accounts.into_iter().filter(|account| account.amount > 0.0) {
+        aggregated
+            .entry(account.mint.clone())
+            .and_modify(|existing| {
+                existing.amount += account.amount;
+                existing.decimals = existing.decimals.max(account.decimals);
+                if existing.state != "initialized" && account.state == "initialized" {
+                    existing.state = account.state.clone();
+                }
+            })
+            .or_insert(account);
+    }
+
+    aggregated.into_values().collect()
+}
+
+fn is_clean_token_symbol(symbol: &str) -> bool {
+    let symbol = symbol.trim();
+    if symbol.is_empty() || symbol.len() > 16 {
+        return false;
+    }
+
+    let lower = symbol.to_ascii_lowercase();
+    if lower.contains("http")
+        || lower.contains("www")
+        || lower.starts_with("unknown_")
+        || symbol.contains("...")
+    {
+        return false;
+    }
+
+    symbol
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '$'))
+        && symbol.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+fn is_clean_token_name(name: &str) -> bool {
+    let name = name.trim();
+    if name.is_empty() || name.len() > 48 {
+        return false;
+    }
+
+    let lower = name.to_ascii_lowercase();
+    let spam_markers = [
+        "http", "www.", ".com", ".io", ".xyz", "claim", "airdrop", "bonus", "free", "visit",
+        "telegram", "t.me", "discord", "@", " dm ",
+    ];
+
+    !spam_markers.iter().any(|marker| lower.contains(marker))
+}
+
+fn has_curated_token_tag(tags: &[String]) -> bool {
+    tags.iter().any(|tag| {
+        matches!(
+            tag.as_str(),
+            "strict" | "verified" | "major" | "community" | "lst" | "stablecoin"
+        )
+    })
+}
+
+fn should_display_wallet_token(
+    account: &rpc::TokenAccountInfo,
+    verified_tokens_map: &HashMap<String, VerifiedToken>,
+    token_metadata: &HashMap<String, JupiterTokenInfo>,
+) -> bool {
+    if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
+        return is_clean_token_symbol(&verified_token.symbol)
+            && is_clean_token_name(&verified_token.name);
+    }
+
+    let Some(metadata) = token_metadata.get(&account.mint) else {
+        return false;
+    };
+
+    if !is_clean_token_symbol(&metadata.symbol) || !is_clean_token_name(&metadata.name) {
+        return false;
+    }
+
+    if metadata.is_verified.unwrap_or(false) {
+        return true;
+    }
+
+    if metadata
+        .tags
+        .as_ref()
+        .map(|tags| has_curated_token_tag(tags))
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let organic_ok =
+        metadata.organic_score >= 70.0 || metadata.organic_score_label.eq_ignore_ascii_case("high");
+    let liquidity_ok = metadata.liquidity.unwrap_or(0.0) >= 50_000.0;
+    let mcap_ok = metadata.mcap.unwrap_or(0.0) >= 1_000_000.0;
+    let holders_ok = metadata.holder_count.unwrap_or(0) >= 500;
+    let meaningful_value = metadata.usd_price.unwrap_or(0.0) * account.amount >= 1.0;
+
+    organic_ok && meaningful_value && (liquidity_ok || mcap_ok || holders_ok)
+}
+
 #[component]
 fn CandlestickChart(
     data: Vec<CandlestickData>,
     symbol: String,
     timeframe: String, // Just pass the timeframe as a simple string
 ) -> Element {
-    println!("🎯 Rendering candlestick chart for {} with {} candles ({})", symbol, data.len(), timeframe);
-    
+    println!(
+        "🎯 Rendering candlestick chart for {} with {} candles ({})",
+        symbol,
+        data.len(),
+        timeframe
+    );
+
     if data.is_empty() {
         return rsx! {
             div {
@@ -306,9 +321,9 @@ fn CandlestickChart(
     }
 
     // Chart dimensions
-    let width = 350.0;  // Increase from 300.0
+    let width = 350.0; // Increase from 300.0
     let height = 160.0; // Increase from 120.0
-    let margin = 15.0;  // Increase margin slightly
+    let margin = 15.0; // Increase margin slightly
     let chart_width = width - (margin * 2.0);
     let chart_height = height - (margin * 2.0);
 
@@ -345,7 +360,7 @@ fn CandlestickChart(
                 height: "{height}",
                 view_box: "0 0 {width} {height}",
                 style: "background: rgba(0, 0, 0, 0.3); border-radius: 8px;",
-                
+
                 // Background grid lines (optional)
                 defs {
                     pattern {
@@ -366,7 +381,7 @@ fn CandlestickChart(
                     height: "{height}",
                     fill: "url(#grid-{symbol})",
                 }
-                
+
                 // Draw candlesticks
                 for (i, candle) in data.iter().enumerate() {
                     {
@@ -375,14 +390,14 @@ fn CandlestickChart(
                         let close_y = price_to_y(candle.close);
                         let high_y = price_to_y(candle.high);
                         let low_y = price_to_y(candle.low);
-                        
+
                         let is_bullish = candle.close >= candle.open;
                         let body_top = if is_bullish { close_y } else { open_y };
                         let body_bottom = if is_bullish { open_y } else { close_y };
                         let body_height = (body_bottom - body_top).abs().max(1.0);
-                        
+
                         let color = if is_bullish { "#22c55e" } else { "#ef4444" };
-                        
+
                         rsx! {
                             g {
                                 key: "{i}",
@@ -411,7 +426,7 @@ fn CandlestickChart(
                         }
                     }
                 }
-                
+
                 // Price labels (min/max)
                 text {
                     x: "{margin}",
@@ -430,7 +445,7 @@ fn CandlestickChart(
                     "${min_price:.2}"
                 }
             }
-            
+
             // Chart summary below
             div {
                 class: "chart-summary",
@@ -444,7 +459,7 @@ fn CandlestickChart(
                         let change_pct = (change / data.first().unwrap().close) * 100.0;
                         let period_label = match timeframe.as_str() {
                             "1H" => "3D",
-                            "1D" => "30D", 
+                            "1D" => "30D",
                             _ => "Period",
                         };
                         if change >= 0.0 {
@@ -468,24 +483,10 @@ pub fn WalletView() -> Element {
     let mut show_dropdown = use_signal(|| false);
     let mut show_wallet_modal = use_signal(|| false);
     let mut modal_mode = use_signal(|| "create".to_string());
-    let mut show_rpc_modal = use_signal(|| false);
     let mut show_send_modal = use_signal(|| false);
-    let mut send_modal_private = use_signal(|| false);
     let mut show_receive_modal = use_signal(|| false);
-    let mut show_history_modal = use_signal(|| false);
     let mut show_stake_modal = use_signal(|| false);
     let mut show_swap_modal = use_signal(|| false);
-    let mut show_privacycash_modal = use_signal(|| false);
-    // Temporarily disabled for Solana 3.x testing
-    let mut show_squads_modal = use_signal(|| false);
-    let mut show_carrot_modal = use_signal(|| false);
-    let mut show_bonk_staking_modal = use_signal(|| false);
-    let mut show_quantum_vault_modal = use_signal(|| false);
-    
-    // Integrations collapse/expand state
-    let mut show_integrations = use_signal(|| false);
-    let mut integration_settings = use_signal(|| load_integration_settings_from_storage());
-    let integration_settings_value = integration_settings();
 
     // Hardware wallet state
     let mut hardware_wallet = use_signal(|| None as Option<Arc<HardwareWallet>>);
@@ -494,31 +495,8 @@ pub fn WalletView() -> Element {
     let mut hardware_connected = use_signal(|| false);
     let mut hardware_pubkey = use_signal(|| None as Option<String>);
 
-    // Bridge handler (desktop only)
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-    let bridge_handler = use_context::<Arc<BridgeHandler>>();
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-    let mut pending_bridge_requests = use_signal(|| Vec::<crate::bridge::PendingBridgeRequest>::new());
-    let mut bridge_settings = use_signal(|| load_bridge_settings_from_storage());
-
     // RPC management
-    let mut custom_rpc = use_signal(|| load_rpc_from_storage());
-    let mut rpc_input = use_signal(|| custom_rpc().unwrap_or_default());
-
-    // Privacy Cash balance
-    let mut private_balance_sol = use_signal(|| None as Option<u64>);
-    let mut private_balance_loading = use_signal(|| false);
-    let mut private_balance_usdc = use_signal(|| None as Option<u64>);
-    let mut private_balance_usdc_loading = use_signal(|| false);
-    let mut private_balance_usdt = use_signal(|| None as Option<u64>);
-    let mut private_balance_usdt_loading = use_signal(|| false);
-    let mut private_balance_ore = use_signal(|| None as Option<u64>);
-    let mut private_balance_ore_loading = use_signal(|| false);
-    let mut last_privacy_wallet = use_signal(|| None as Option<String>);
-
-    //JITO Stuff
-    let mut show_jito_modal = use_signal(|| false);
-    let mut jito_settings = use_signal(|| load_jito_settings_from_storage());
+    let custom_rpc = use_signal(|| load_rpc_from_storage());
 
     //Additional Wallet features
     let mut show_export_modal = use_signal(|| false);
@@ -526,33 +504,27 @@ pub fn WalletView() -> Element {
 
     // Balance management
     let mut balance = use_signal(|| 0.0);
-    let mut sol_price = use_signal(|| 50.0); // Default price - will be updated from Pyth
-    let mut token_changes = use_signal(|| HashMap::<String, (Option<f64>, Option<f64>)>::new());
-    
+    let sol_price = use_signal(|| 50.0); // Default price - will be updated from Pyth
+    let token_changes = use_signal(|| HashMap::<String, (Option<f64>, Option<f64>)>::new());
+
     // Change these to ref signals for holding dynamic values
-    let mut daily_change = use_signal(|| 0.0);
-    let mut daily_change_percent = use_signal(|| 0.0);
+    let daily_change = use_signal(|| 0.0);
+    let daily_change_percent = use_signal(|| 0.0);
 
     // Token management
     let mut tokens = use_signal(|| Vec::<Token>::new());
     // Add these after existing signals
-    let mut token_sort_config = use_signal(|| TokenSortConfig::default());
-    let mut token_filter = use_signal(|| TokenFilter::default());
-    let mut show_sort_menu = use_signal(|| false);
-    
+    let token_sort_config = use_signal(|| TokenSortConfig::default());
+    let token_filter = use_signal(|| TokenFilter::default());
     // Add a new signal for token prices
-    let mut token_prices = use_signal(|| HashMap::<String, f64>::new());
-    let mut prices_loading = use_signal(|| false);
-    let mut price_error = use_signal(|| None as Option<String>);
+    let token_prices = use_signal(|| HashMap::<String, f64>::new());
+    let prices_loading = use_signal(|| false);
+    let price_error = use_signal(|| None as Option<String>);
 
-    let verified_tokens = use_memo(move || {
-        get_verified_tokens().clone()
-    });
+    let verified_tokens = use_signal(get_verified_tokens_arc);
 
     // Background Selections
-    let mut selected_background = use_signal(|| BackgroundTheme::get_presets()[0].clone());
-    let mut show_background_modal = use_signal(|| false);
-
+    let selected_background = use_signal(|| BackgroundTheme::get_presets()[0].clone());
     //Currency
     let mut show_currency_modal = use_signal(|| false);
 
@@ -566,28 +538,16 @@ pub fn WalletView() -> Element {
     //Wallet address expand
     let mut address_expanded = use_signal(|| false);
 
-    // Bulk send state management
-    let mut bulk_send_mode = use_signal(|| false);
-    let mut selected_tokens = use_signal(|| HashSet::<String>::new()); // Using mint addresses as keys
-    let mut show_bulk_send_modal = use_signal(|| false);
-
-    // Eject mode state management (separate from bulk send)
-    let mut eject_mode = use_signal(|| false);
-    let mut show_eject_modal = use_signal(|| false);
-    let mut show_retire_modal = use_signal(|| false);
-
-    let mut multi_timeframe_data = use_signal(|| HashMap::<String, prices::MultiTimeframePriceData>::new());
+    let multi_timeframe_data =
+        use_signal(|| HashMap::<String, prices::MultiTimeframePriceData>::new());
     let mut expanded_tokens = use_signal(|| HashSet::<String>::new());
-    let mut portfolio_expanded = use_signal(|| false);
 
     // Dropdown charts on price tap
     // Dropdown charts on price tap
-    let mut chart_data = use_signal(|| HashMap::<String, Vec<CandlestickData>>::new());
-    let mut chart_loading = use_signal(|| HashSet::<String>::new());
+    let chart_data = use_signal(|| HashMap::<String, Vec<CandlestickData>>::new());
+    let chart_loading = use_signal(|| HashSet::<String>::new());
     let mut selected_timeframe = use_signal(|| HashMap::<String, String>::new()); // Per-token timeframe
-    let mut chart_timeframe_data = use_signal(|| HashMap::<String, HashMap<String, Vec<CandlestickData>>>::new());
 
-    let mut show_lend_modal = use_signal(|| false);
     let mut active_tab = use_signal(|| "tokens".to_string());
     let mut collectibles = use_signal(|| Vec::<CollectibleInfo>::new());
     let mut collectibles_loading = use_signal(|| false);
@@ -596,657 +556,59 @@ pub fn WalletView() -> Element {
     let mut hardware_device_type = use_signal(|| None as Option<HardwareDeviceType>);
     let mut refresh_trigger = use_signal(|| 0u32);
     let mut is_refreshing = use_signal(|| false);
+    let mut last_wallet_fetch_key = use_signal(|| None as Option<String>);
+    let mut active_wallet_fetch_key = use_signal(|| None as Option<String>);
+    let mut wallet_snapshots = use_signal(|| HashMap::<String, WalletSnapshot>::new());
+    let mut last_collectibles_owner = use_signal(|| None as Option<String>);
+    let mut last_collectibles_request_key = use_signal(|| None as Option<String>);
+    let mut runtime_hidden_collectible_ids = use_signal(HashSet::<String>::new);
 
-    let update_bridge_settings = {
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-        let handler = bridge_handler.clone();
-        move |enabled: bool| {
-            let new_settings = BridgeSettings { enabled };
-            bridge_settings.set(new_settings);
-            save_bridge_settings_to_storage(&new_settings);
-            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-            {
-                handler.set_enabled(enabled);
-            }
-        }
-    };
+    use_effect(move || {
+        println!(
+            "Wallet view mounted - verified token catalog ready with {} entries",
+            verified_tokens().len()
+        );
+    });
 
-    let update_integration_settings = {
-        let mut integration_settings = integration_settings.clone();
-        move |new_settings: IntegrationSettings| {
-            integration_settings.set(new_settings);
-            save_integration_settings_to_storage(&new_settings);
-        }
-    };
-    
-    // Initialize liquid metal shader for wallet icon (initial load)
     use_effect(move || {
-        spawn(async move {
-            // Wait for DOM and scripts to load
-            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let _ = eval(
-                r#"
-                console.log('🌊 [Initial] Initializing liquid metal shader...');
-                
-                if (window.liquidMetalInstance) {
-                    console.log('🧹 Disposing old instance');
-                    window.liquidMetalInstance.dispose();
-                    window.liquidMetalInstance = null;
-                }
-                
-                const element = document.getElementById('liquid-metal-wallet-icon');
-                if (window.LiquidMetalSVG && element) {
-                    try {
-                        window.liquidMetalInstance = window.LiquidMetalSVG.create('liquid-metal-wallet-icon', 'https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/icons/unruggable_icon.svg', 98);
-                        console.log('✅ Liquid metal SVG logo initialized');
-                    } catch (e) {
-                        console.error('❌ Failed to init liquid metal:', e);
-                    }
-                } else {
-                    console.log('⏳ Component or element not ready yet');
-                }
-                "#
-            );
-        });
-    });
-    
-    // Reinitialize liquid metal shader after refresh completes
-    use_effect(move || {
-        let is_refreshing_value = is_refreshing();
-        
-        if !is_refreshing_value {
-            spawn(async move {
-                // Wait for DOM to stabilize after refresh
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                let _ = eval(
-                    r#"
-                    console.log('🔄 [Refresh] Reinitializing liquid metal shader...');
-                    
-                    // Dispose old instance if it exists
-                    if (window.liquidMetalInstance) {
-                        try {
-                            window.liquidMetalInstance.dispose();
-                            window.liquidMetalInstance = null;
-                            console.log('🧹 Disposed old shader instance');
-                        } catch (e) {
-                            console.warn('⚠️ Error disposing old instance:', e);
-                        }
-                    }
-                    
-                    // Create new instance
-                    const element = document.getElementById('liquid-metal-wallet-icon');
-                    if (window.LiquidMetalSVG && element) {
-                        try {
-                            window.liquidMetalInstance = window.LiquidMetalSVG.create('liquid-metal-wallet-icon', 'https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@solana-3x-tpu-test/assets/icons/unruggable_icon.svg', 98);
-                            console.log('✅ Liquid metal SVG logo reinitialized after refresh');
-                        } catch (e) {
-                            console.error('❌ Failed to reinit liquid metal:', e);
-                        }
-                    } else {
-                        console.error('❌ Cannot reinit - component or element missing');
-                    }
-                    "#
-                );
-            });
+        let wallets_list = wallets.read();
+        let index = current_wallet_index();
+        let owner = if hardware_connected() {
+            hardware_pubkey()
+        } else {
+            wallets_list.get(index).map(|wallet| wallet.address.clone())
+        };
+
+        if owner.is_some() && last_collectibles_owner() != owner {
+            last_collectibles_owner.set(owner);
+            collectibles.set(Vec::new());
+            collectibles_loading.set(false);
+            last_collectibles_request_key.set(None);
+            runtime_hidden_collectible_ids.set(HashSet::new());
         }
     });
-    
-    // Initialize liquid metal border on balance section
-    use_effect(move || {
-        spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-            let _ = eval(
-                r#"
-                console.log('🌊 [Border] Initializing liquid metal border on balance section...');
-                
-                if (window.LiquidMetalBorder && document.getElementById('balance-section-with-border')) {
-                    try {
-                        window.balanceBorderInstance = window.LiquidMetalBorder.create('balance-section-with-border', {
-                            borderWidth: 5,
-                        });
-                        console.log('✅ Liquid metal border initialized on balance section');
-                    } catch (e) {
-                        console.error('❌ Failed to init balance border:', e);
-                    }
-                } else {
-                    console.warn('⏳ LiquidMetalBorder not loaded or balance element not found');
-                }
-                
-                // Initialize action buttons border
-                if (window.LiquidMetalBorder && document.getElementById('action-buttons-with-border')) {
-                    try {
-                        window.actionButtonsBorderInstance = window.LiquidMetalBorder.create('action-buttons-with-border', {
-                            borderWidth: 5,
-                        });
-                        console.log('✅ Liquid metal border initialized on action buttons container');
-                    } catch (e) {
-                        console.error('❌ Failed to init action buttons border:', e);
-                    }
-                } else {
-                    console.warn('⏳ LiquidMetalBorder not loaded or action buttons element not found');
-                }
-                
-                // Initialize individual action button icon borders
-                if (window.LiquidMetalBorder) {
-                    // Primary button icons (always visible)
-                    const primaryIcons = [
-                        'action-icon-receive',
-                        'action-icon-send',
-                        'action-icon-stake',
-                        'action-icon-swap',
-                        'action-icon-integrations'
-                    ];
-                    
-                    // Integration button icons (conditional)
-                    const integrationIcons = [
-                        'action-icon-lend',
-                        'action-icon-squads',
-                        'action-icon-carrot',
-                        'action-icon-bonk',
-                        'action-icon-quantum',
-                        'action-icon-eject',
-                        'action-icon-privacy',
-                        'action-icon-retire'
-                    ];
-                    
-                    // Initialize instances map
-                    if (!window.actionIconBorderInstances) {
-                        window.actionIconBorderInstances = {};
-                    }
-                    
-                    // Initialize primary button icons
-                    primaryIcons.forEach(iconId => {
-                        const elem = document.getElementById(iconId);
-                        if (elem) {
-                            try {
-                                if (window.actionIconBorderInstances[iconId]) {
-                                    window.actionIconBorderInstances[iconId].dispose();
-                                }
-                                window.actionIconBorderInstances[iconId] = window.LiquidMetalBorder.create(iconId, {
-                                    borderWidth: 2,
-                                });
-                                console.log(`Liquid metal border initialized on ${iconId}`);
-                            } catch (e) {
-                                console.error(`Failed to init border on ${iconId}:`, e);
-                            }
-                        }
-                    });
-                    
-                    // Initialize integration button icons with retry logic (they may appear later)
-                    const initIntegrationIcons = () => {
-                        integrationIcons.forEach(iconId => {
-                            const elem = document.getElementById(iconId);
-                            if (elem && !window.actionIconBorderInstances[iconId]) {
-                                try {
-                                    window.actionIconBorderInstances[iconId] = window.LiquidMetalBorder.create(iconId, {
-                                        borderWidth: 2,
-                                    });
-                                    console.log(`Liquid metal border initialized on ${iconId}`);
-                                } catch (e) {
-                                    console.error(`Failed to init border on ${iconId}:`, e);
-                                }
-                            }
-                        });
-                    };
-                    
-                    // Try to initialize integration icons
-                    initIntegrationIcons();
-                    
-                    // Retry after delays in case integrations row expands
-                    setTimeout(initIntegrationIcons, 500);
-                    setTimeout(initIntegrationIcons, 1000);
-                    setTimeout(initIntegrationIcons, 1500);
-                } else {
-                    console.warn('LiquidMetalBorder not loaded for action buttons');
-                }
-                "#
-            );
-        });
-    });
-    
+
     // Load wallets from storage on component mount
     use_effect(move || {
         let stored_wallets = load_wallets_from_storage();
         if stored_wallets.is_empty() {
             let new_wallet = Wallet::new("Main Wallet".to_string());
-            let wallet_info = new_wallet.to_wallet_info();
-            save_wallet_to_storage(&wallet_info);
-            wallets.set(vec![wallet_info]);
+            match new_wallet.to_wallet_info() {
+                Ok(wallet_info) => {
+                    if let Err(e) = save_wallet_to_storage(&wallet_info) {
+                        log::error!("Failed to save initial wallet securely: {}", e);
+                    } else {
+                        wallets.set(vec![wallet_info]);
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to encrypt initial wallet for storage: {}", e);
+                }
+            }
         } else {
             wallets.set(stored_wallets);
         }
     });
-
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-    {
-        let handler = bridge_handler.clone();
-        use_effect({
-            let handler = handler.clone();
-            move || {
-                let handler = handler.clone();
-                spawn(async move {
-                    loop {
-                        if bridge_settings().enabled {
-                            pending_bridge_requests.set(handler.pending_requests());
-                        } else {
-                            pending_bridge_requests.set(Vec::new());
-                        }
-                        tokio::time::sleep(Duration::from_millis(300)).await;
-                    }
-                });
-            }
-        });
-    }
-
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-    {
-        let handler = bridge_handler.clone();
-        use_effect({
-            let handler = handler.clone();
-            move || {
-                if bridge_settings().enabled {
-                    if let Some(wallet_info) = wallets.read().get(current_wallet_index()) {
-                        if let Ok(wallet) = Wallet::from_wallet_info(wallet_info) {
-                            handler.update_wallet(wallet);
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    let bridge_modal: Option<Element> = {
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-        {
-            if bridge_settings().enabled {
-                if let Some(request) = pending_bridge_requests().first().cloned() {
-                    let handler_for_approve = bridge_handler.clone();
-                    let handler_for_reject = bridge_handler.clone();
-                    Some(rsx!(
-                        BridgeSignModal {
-                            request: request.clone(),
-                            onapprove: move |id| {
-                                let handler = handler_for_approve.clone();
-                                spawn(async move {
-                                    if let Err(err) = handler.approve_request(id).await {
-                                        log::error!("Bridge approve failed: {}", err);
-                                    }
-                                });
-                            },
-                            onreject: move |id| {
-                                let handler = handler_for_reject.clone();
-                                spawn(async move {
-                                    if let Err(err) = handler.reject_request(id, "User rejected".to_string()).await {
-                                        log::error!("Bridge reject failed: {}", err);
-                                    }
-                                });
-                            }
-                        }
-                    ))
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        }
-        #[cfg(not(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios"))))]
-        {
-            None
-        }
-    };
-
-    let bridge_settings_row: Option<Element> = {
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-        {
-            let mut toggle_click = update_bridge_settings.clone();
-            let mut toggle_change = update_bridge_settings.clone();
-            Some(rsx!(
-                button {
-                    class: "dropdown-item",
-                    onclick: move |_| {
-                        let enabled = !bridge_settings().enabled;
-                        toggle_click(enabled);
-                    },
-                    div {
-                        class: "dropdown-icon action-icon",
-                        "🧩"
-                    }
-                    div {
-                        style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                        span { "Browser Extension" }
-                        label {
-                            class: "toggle-switch",
-                            input {
-                                r#type: "checkbox",
-                                checked: bridge_settings().enabled,
-                                onchange: move |e| {
-                                    toggle_change(e.checked());
-                                },
-                            }
-                            span { class: "toggle-slider" }
-                        }
-                    }
-                }
-            ))
-        }
-        #[cfg(not(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios"))))]
-        {
-            None
-        }
-    };
-
-    let integration_settings_menu = {
-        let mut lend_click = update_integration_settings.clone();
-        let mut lend_change = update_integration_settings.clone();
-        let mut lend_click_settings = integration_settings.clone();
-        let mut lend_change_settings = integration_settings.clone();
-
-        let mut squads_click = update_integration_settings.clone();
-        let mut squads_change = update_integration_settings.clone();
-        let mut squads_click_settings = integration_settings.clone();
-        let mut squads_change_settings = integration_settings.clone();
-
-        let mut carrot_click = update_integration_settings.clone();
-        let mut carrot_change = update_integration_settings.clone();
-        let mut carrot_click_settings = integration_settings.clone();
-        let mut carrot_change_settings = integration_settings.clone();
-
-        let mut bonk_click = update_integration_settings.clone();
-        let mut bonk_change = update_integration_settings.clone();
-        let mut bonk_click_settings = integration_settings.clone();
-        let mut bonk_change_settings = integration_settings.clone();
-
-        let mut quantum_click = update_integration_settings.clone();
-        let mut quantum_change = update_integration_settings.clone();
-        let mut quantum_click_settings = integration_settings.clone();
-        let mut quantum_change_settings = integration_settings.clone();
-
-        let mut eject_click = update_integration_settings.clone();
-        let mut eject_change = update_integration_settings.clone();
-        let mut eject_click_settings = integration_settings.clone();
-        let mut eject_change_settings = integration_settings.clone();
-
-        let mut privacy_click = update_integration_settings.clone();
-        let mut privacy_change = update_integration_settings.clone();
-        let mut privacy_click_settings = integration_settings.clone();
-        let mut privacy_change_settings = integration_settings.clone();
-
-        let mut retire_click = update_integration_settings.clone();
-        let mut retire_change = update_integration_settings.clone();
-        let mut retire_click_settings = integration_settings.clone();
-        let mut retire_change_settings = integration_settings.clone();
-
-        rsx!(
-            button {
-                class: "dropdown-item",
-                onclick: move |_| {
-                    let mut settings = lend_click_settings();
-                    settings.lend = !settings.lend;
-                    lend_click(settings);
-                },
-                div {
-                    class: "dropdown-icon action-icon",
-                    img {
-                        src: "{ICON_LEND}",
-                        alt: "Lend",
-                        style: "width: 20px; height: 20px;"
-                    }
-                }
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                    span { "Lend" }
-                    label {
-                        class: "toggle-switch",
-                        input {
-                            r#type: "checkbox",
-                            checked: integration_settings().lend,
-                            onchange: move |e| {
-                                let mut settings = lend_change_settings();
-                                settings.lend = e.checked();
-                                lend_change(settings);
-                            },
-                        }
-                        span { class: "toggle-slider" }
-                    }
-                }
-            }
-
-            button {
-                class: "dropdown-item",
-                onclick: move |_| {
-                    let mut settings = squads_click_settings();
-                    settings.squads = !settings.squads;
-                    squads_click(settings);
-                },
-                div {
-                    class: "dropdown-icon action-icon",
-                    img {
-                        src: "{ICON_SQUADS}",
-                        alt: "Squads",
-                        style: "width: 20px; height: 20px;"
-                    }
-                }
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                    span { "Squads" }
-                    label {
-                        class: "toggle-switch",
-                        input {
-                            r#type: "checkbox",
-                            checked: integration_settings().squads,
-                            onchange: move |e| {
-                                let mut settings = squads_change_settings();
-                                settings.squads = e.checked();
-                                squads_change(settings);
-                            },
-                        }
-                        span { class: "toggle-slider" }
-                    }
-                }
-            }
-
-            button {
-                class: "dropdown-item",
-                onclick: move |_| {
-                    let mut settings = carrot_click_settings();
-                    settings.carrot = !settings.carrot;
-                    carrot_click(settings);
-                },
-                div {
-                    class: "dropdown-icon action-icon",
-                    img {
-                        src: "{ICON_CARROT}",
-                        alt: "Carrot",
-                        style: "width: 20px; height: 20px;"
-                    }
-                }
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                    span { "Carrot" }
-                    label {
-                        class: "toggle-switch",
-                        input {
-                            r#type: "checkbox",
-                            checked: integration_settings().carrot,
-                            onchange: move |e| {
-                                let mut settings = carrot_change_settings();
-                                settings.carrot = e.checked();
-                                carrot_change(settings);
-                            },
-                        }
-                        span { class: "toggle-slider" }
-                    }
-                }
-            }
-
-            button {
-                class: "dropdown-item",
-                onclick: move |_| {
-                    let mut settings = bonk_click_settings();
-                    settings.bonk_stake = !settings.bonk_stake;
-                    bonk_click(settings);
-                },
-                div {
-                    class: "dropdown-icon action-icon",
-                    img {
-                        src: "{ICON_BONK_STAKE}",
-                        alt: "BONK Stake",
-                        style: "width: 20px; height: 20px;"
-                    }
-                }
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                    span { "BONK Stake" }
-                    label {
-                        class: "toggle-switch",
-                        input {
-                            r#type: "checkbox",
-                            checked: integration_settings().bonk_stake,
-                            onchange: move |e| {
-                                let mut settings = bonk_change_settings();
-                                settings.bonk_stake = e.checked();
-                                bonk_change(settings);
-                            },
-                        }
-                        span { class: "toggle-slider" }
-                    }
-                }
-            }
-
-            button {
-                class: "dropdown-item",
-                onclick: move |_| {
-                    let mut settings = quantum_click_settings();
-                    settings.quantum = !settings.quantum;
-                    quantum_click(settings);
-                },
-                div {
-                    class: "dropdown-icon action-icon",
-                    img {
-                        src: "{ICON_QUANTUM}",
-                        alt: "Quantum Vault",
-                        style: "width: 20px; height: 20px;"
-                    }
-                }
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                    span { "Quantum" }
-                    label {
-                        class: "toggle-switch",
-                        input {
-                            r#type: "checkbox",
-                            checked: integration_settings().quantum,
-                            onchange: move |e| {
-                                let mut settings = quantum_change_settings();
-                                settings.quantum = e.checked();
-                                quantum_change(settings);
-                            },
-                        }
-                        span { class: "toggle-slider" }
-                    }
-                }
-            }
-
-            button {
-                class: "dropdown-item",
-                onclick: move |_| {
-                    let mut settings = eject_click_settings();
-                    settings.eject = !settings.eject;
-                    eject_click(settings);
-                },
-                div {
-                    class: "dropdown-icon action-icon",
-                    img {
-                        src: "{ICON_EXPORT}",
-                        alt: "EJECT",
-                        style: "width: 20px; height: 20px;"
-                    }
-                }
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                    span { "EJECT" }
-                    label {
-                        class: "toggle-switch",
-                        input {
-                            r#type: "checkbox",
-                            checked: integration_settings().eject,
-                            onchange: move |e| {
-                                let mut settings = eject_change_settings();
-                                settings.eject = e.checked();
-                                eject_change(settings);
-                            },
-                        }
-                        span { class: "toggle-slider" }
-                    }
-                }
-            }
-
-            button {
-                class: "dropdown-item",
-                onclick: move |_| {
-                    let mut settings = privacy_click_settings();
-                    settings.privacy = !settings.privacy;
-                    privacy_click(settings);
-                },
-                div {
-                    class: "dropdown-icon action-icon",
-                    span { "🔒" }
-                }
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                    span { "Privacy" }
-                    label {
-                        class: "toggle-switch",
-                        input {
-                            r#type: "checkbox",
-                            checked: integration_settings().privacy,
-                            onchange: move |e| {
-                                let mut settings = privacy_change_settings();
-                                settings.privacy = e.checked();
-                                privacy_change(settings);
-                            },
-                        }
-                        span { class: "toggle-slider" }
-                    }
-                }
-            }
-
-            button {
-                class: "dropdown-item",
-                onclick: move |_| {
-                    let mut settings = retire_click_settings();
-                    settings.retire = !settings.retire;
-                    retire_click(settings);
-                },
-                div {
-                    class: "dropdown-icon action-icon",
-                    img {
-                        src: "{ICON_RETIRE}",
-                        alt: "RETIRE",
-                        style: "width: 20px; height: 20px;"
-                    }
-                }
-                div {
-                    style: "display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 12px;",
-                    span { "RETIRE" }
-                    label {
-                        class: "toggle-switch",
-                        input {
-                            r#type: "checkbox",
-                            checked: integration_settings().retire,
-                            onchange: move |e| {
-                                let mut settings = retire_change_settings();
-                                settings.retire = e.checked();
-                                retire_change(settings);
-                            },
-                        }
-                        span { class: "toggle-slider" }
-                    }
-                }
-            }
-        )
-    };
 
     // Monitor hardware wallet presence - check every 2 seconds
     use_effect(move || {
@@ -1254,76 +616,28 @@ pub fn WalletView() -> Element {
             loop {
                 let is_present = HardwareWallet::is_device_present();
                 let was_present = hardware_device_present();
-                
+
                 if is_present != was_present {
-                    log::info!("🔍 Hardware device presence changed: {} -> {}", was_present, is_present);
+                    log::info!(
+                        "🔍 Hardware device presence changed: {} -> {}",
+                        was_present,
+                        is_present
+                    );
                 }
-                
+
                 hardware_device_present.set(is_present);
-                
+
                 if !is_present && hardware_connected() {
                     log::info!("🔌 Hardware device removed, disconnecting...");
                     hardware_connected.set(false);
                     hardware_wallet.set(None);
                     hardware_pubkey.set(None);
                 }
-                
+
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
             }
         });
     });
-    
-    async fn fetch_chart_data(
-        symbol: String,
-        mut chart_data: Signal<HashMap<String, Vec<CandlestickData>>>,
-        mut chart_loading: Signal<HashSet<String>>,
-    ) {
-        println!("🚀 Starting chart data fetch for {}", symbol);
-        
-        // Add to loading set
-        {
-            let mut loading_set = chart_loading();
-            loading_set.insert(symbol.clone());
-            chart_loading.set(loading_set);
-            println!("📊 Added {} to loading set", symbol);
-        }
-
-        match prices::get_candlestick_data(&symbol, 30).await { // Get 30 days of data
-            Ok(data) => {
-                println!("✅ Got {} candlesticks for {}", data.len(), symbol);
-                
-                // Log first few candlesticks for debugging
-                for (i, candle) in data.iter().take(3).enumerate() {
-                    println!("🕯️  Candle {}: O=${:.2} H=${:.2} L=${:.2} C=${:.2} T={}", 
-                            i, candle.open, candle.high, candle.low, candle.close, candle.timestamp);
-                }
-                
-                // Validate data quality
-                let valid_candles = data.iter().filter(|c| c.open > 0.0 && c.high > 0.0 && c.low > 0.0 && c.close > 0.0).count();
-                println!("📈 Valid candles: {}/{}", valid_candles, data.len());
-                
-                if valid_candles > 0 {
-                    let mut chart_map = chart_data();
-                    chart_map.insert(symbol.clone(), data);
-                    chart_data.set(chart_map);
-                    println!("💾 Saved chart data for {} to state", symbol);
-                } else {
-                    println!("❌ No valid candlestick data for {}", symbol);
-                }
-            },
-            Err(e) => {
-                println!("❌ Error fetching chart data for {}: {}", symbol, e);
-            }
-        }
-
-        // Remove from loading set
-        {
-            let mut loading_set = chart_loading();
-            loading_set.remove(&symbol);
-            chart_loading.set(loading_set);
-            println!("✅ Removed {} from loading set", symbol);
-        }
-    }
 
     async fn fetch_chart_data_with_timeframe(
         symbol: String,
@@ -1331,10 +645,13 @@ pub fn WalletView() -> Element {
         mut chart_data: Signal<HashMap<String, Vec<CandlestickData>>>,
         mut chart_loading: Signal<HashSet<String>>,
     ) {
-        println!("🚀 Starting chart data fetch for {} ({})", symbol, timeframe);
-        
+        println!(
+            "🚀 Starting chart data fetch for {} ({})",
+            symbol, timeframe
+        );
+
         let cache_key = format!("{}_{}", symbol, timeframe);
-        
+
         // Add to loading set
         {
             let mut loading_set = chart_loading();
@@ -1343,24 +660,35 @@ pub fn WalletView() -> Element {
         }
 
         let (days, resolution) = match timeframe.as_str() {
-            "1H" => (3, "60"),   // 7 days of hourly data
-            "1D" => (30, "1D"),  // 30 days of daily data
-            _ => (30, "1D"),     // Default fallback
+            "1H" => (3, "60"),  // 7 days of hourly data
+            "1D" => (30, "1D"), // 30 days of daily data
+            _ => (30, "1D"),    // Default fallback
         };
 
         match prices::get_candlestick_data_with_resolution(&symbol, days, resolution).await {
             Ok(data) => {
-                println!("✅ Got {} candlesticks for {} ({})", data.len(), symbol, timeframe);
-                
+                println!(
+                    "✅ Got {} candlesticks for {} ({})",
+                    data.len(),
+                    symbol,
+                    timeframe
+                );
+
                 if !data.is_empty() {
                     let mut chart_map = chart_data();
                     chart_map.insert(cache_key.clone(), data);
                     chart_data.set(chart_map);
-                    println!("💾 Saved chart data for {} ({}) to state", symbol, timeframe);
+                    println!(
+                        "💾 Saved chart data for {} ({}) to state",
+                        symbol, timeframe
+                    );
                 }
-            },
+            }
             Err(e) => {
-                println!("❌ Error fetching chart data for {} ({}): {}", symbol, timeframe, e);
+                println!(
+                    "❌ Error fetching chart data for {} ({}): {}",
+                    symbol, timeframe, e
+                );
             }
         }
 
@@ -1372,55 +700,35 @@ pub fn WalletView() -> Element {
         }
     }
 
-    fn get_token_price_change(
-        symbol: &str, 
-        changes_map: &HashMap<String, (Option<f64>, Option<f64>)>
-    ) -> f64 {
-        // println!("Looking up price change for {}", symbol);
-        // println!("Available tokens in changes_map: {:?}", changes_map.keys().collect::<Vec<_>>());
-        
-        // Try exact match first - get the PERCENTAGE (second value in tuple)
-        if let Some((_, Some(percentage))) = changes_map.get(symbol) {
-            // println!("✅ Found exact match for {}: {:.4}%", symbol, percentage);
-            return *percentage;
-        }
-        
-        // Try uppercase
-        let uppercase = symbol.to_uppercase();
-        if let Some((_, Some(percentage))) = changes_map.get(&uppercase) {
-            // println!("✅ Found uppercase match for {}: {:.4}%", symbol, percentage);
-            return *percentage;
-        }
-        
-        // Try lowercase
-        let lowercase = symbol.to_lowercase();
-        if let Some((_, Some(percentage))) = changes_map.get(&lowercase) {
-            // println!("✅ Found lowercase match for {}: {:.4}%", symbol, percentage);
-            return *percentage;
-        }
-        
-        // Check if we have the data but it's None
-        if changes_map.contains_key(symbol) {
-            // println!("❌ {} found in map but percentage is None", symbol);
-            return 0.0; // Return 0% instead of random
-        }
-        
-        // println!("❌ {} not found in changes_map at all", symbol);
-        
-        // Instead of random values, return 0.0 and log the issue
-        // This will make it obvious when historical data is missing
-        0.0
-    }
-
     use_effect(move || {
         spawn(async move {
             // Initial fetch
-            fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent, token_changes, multi_timeframe_data).await;
-            
+            fetch_token_prices(
+                token_prices,
+                prices_loading,
+                price_error,
+                sol_price,
+                daily_change,
+                daily_change_percent,
+                token_changes,
+                multi_timeframe_data,
+            )
+            .await;
+
             // Then fetch every 2 minutes (120 seconds)
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(120)).await;
-                fetch_token_prices(token_prices, prices_loading, price_error, sol_price, daily_change, daily_change_percent, token_changes, multi_timeframe_data).await;
+                fetch_token_prices(
+                    token_prices,
+                    prices_loading,
+                    price_error,
+                    sol_price,
+                    daily_change,
+                    daily_change_percent,
+                    token_changes,
+                    multi_timeframe_data,
+                )
+                .await;
             }
         });
     });
@@ -1428,13 +736,13 @@ pub fn WalletView() -> Element {
     // 5. Helper function to extract multi-timeframe data
     fn get_multi_timeframe_changes(
         symbol: &str,
-        multi_data: &HashMap<String, prices::MultiTimeframePriceData>
+        multi_data: &HashMap<String, prices::MultiTimeframePriceData>,
     ) -> (f64, f64, f64) {
         if let Some(data) = multi_data.get(symbol) {
             (
                 data.change_1d_percentage.unwrap_or(0.0),
                 data.change_3d_percentage.unwrap_or(0.0),
-                data.change_7d_percentage.unwrap_or(0.0)
+                data.change_7d_percentage.unwrap_or(0.0),
             )
         } else {
             (0.0, 0.0, 0.0)
@@ -1447,8 +755,7 @@ pub fn WalletView() -> Element {
         let index = current_wallet_index();
         let hw_connected = hardware_connected();
         let hw_pubkey = hardware_pubkey();
-        let _ = refresh_trigger();
-        
+        let refresh_nonce = refresh_trigger();
         let address = if hw_connected && hw_pubkey.is_some() {
             hw_pubkey.clone().unwrap()
         } else if let Some(wallet) = wallets_list.get(index) {
@@ -1456,193 +763,325 @@ pub fn WalletView() -> Element {
         } else {
             return;
         };
-        
+
         let rpc_url = custom_rpc();
-        let token_prices_snapshot = token_prices.read().clone();
-        
+        let cache_key = wallet_snapshot_key(&address, rpc_url.as_deref());
+        let fetch_key = format!("{}|{}", cache_key, refresh_nonce);
+        if last_wallet_fetch_key() == Some(fetch_key.clone()) {
+            return;
+        }
+        last_wallet_fetch_key.set(Some(fetch_key.clone()));
+        active_wallet_fetch_key.set(Some(fetch_key.clone()));
+
+        if let Some(snapshot) = wallet_snapshots().get(&cache_key).cloned() {
+            println!("⚡ Applying cached wallet snapshot for {}", cache_key);
+            balance.set(snapshot.balance);
+            tokens.set(snapshot.tokens);
+        } else {
+            balance.set(0.0);
+            tokens.set(Vec::new());
+        }
+
         // Clone verified_tokens for use in the async closure
-        let verified_tokens_clone = verified_tokens.clone();
-        
+        let verified_tokens_clone = verified_tokens;
+
         spawn(async move {
-            // Fetch SOL balance
-            match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                Ok(sol_balance) => {
-                    balance.set(sol_balance);
-                    println!("Fetched SOL balance: {} SOL for address: {}", sol_balance, address);
+            println!("🔄 Wallet bootstrap started for {}", fetch_key);
+            let token_prices_snapshot = token_prices.read().clone();
+            let multi_data_snapshot = multi_timeframe_data.read().clone();
+
+            let sol_balance = match tokio::time::timeout(
+                std::time::Duration::from_secs(12),
+                rpc::get_balance(&address, rpc_url.as_deref()),
+            )
+            .await
+            {
+                Ok(Ok(sol_balance)) => {
+                    println!(
+                        "Fetched SOL balance: {} SOL for address: {}",
+                        sol_balance, address
+                    );
+                    sol_balance
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     println!("Failed to fetch balance for address {}: {}", address, e);
-                    balance.set(0.0);
+                    0.0
                 }
+                Err(_) => {
+                    println!("Timed out fetching SOL balance for address {}", address);
+                    0.0
+                }
+            };
+
+            if active_wallet_fetch_key() == Some(fetch_key.clone()) {
+                balance.set(sol_balance);
             }
-            
-            
+
+            // Paint the wallet immediately with SOL so wallet switching/importing stays responsive.
+            let current_sol_price = token_prices_snapshot
+                .get("SOL")
+                .copied()
+                .unwrap_or(sol_price());
+            let (sol_change_1d, sol_change_3d, sol_change_7d) =
+                get_multi_timeframe_changes("SOL", &multi_data_snapshot);
+
+            let sol_only_tokens = vec![Token {
+                mint: "So11111111111111111111111111111111111111112".to_string(),
+                symbol: "SOL".to_string(),
+                name: "Solana".to_string(),
+                icon_type: ICON_SOL.to_string(),
+                balance: sol_balance,
+                value_usd: sol_balance * current_sol_price,
+                price: current_sol_price,
+                price_change: sol_change_1d,
+                price_change_1d: sol_change_1d,
+                price_change_3d: sol_change_3d,
+                price_change_7d: sol_change_7d,
+                decimals: 9,
+            }];
+
+            {
+                let mut snapshots = wallet_snapshots();
+                snapshots.insert(
+                    cache_key.clone(),
+                    WalletSnapshot {
+                        balance: sol_balance,
+                        tokens: sol_only_tokens.clone(),
+                    },
+                );
+                wallet_snapshots.set(snapshots);
+            }
+
+            if active_wallet_fetch_key() == Some(fetch_key.clone()) {
+                tokens.set(sol_only_tokens.clone());
+            }
+
             // Fetch token accounts from BOTH Token and Token-2022 programs
             // println!("Fetching token accounts from both Token and Token-2022 programs...");
-            
+
             // Fetch from standard Token program
             let filter_token = Some(rpc::TokenAccountFilter::ProgramId(
-                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string()
+                "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA".to_string(),
             ));
-            let token_accounts = rpc::get_token_accounts_by_owner(&address, filter_token, rpc_url.as_deref()).await
-                .unwrap_or_else(|e| {
+            let token_accounts = match tokio::time::timeout(
+                std::time::Duration::from_secs(12),
+                rpc::get_token_accounts_by_owner(&address, filter_token, rpc_url.as_deref()),
+            )
+            .await
+            {
+                Ok(Ok(accounts)) => accounts,
+                Ok(Err(e)) => {
                     log::warn!("Failed to fetch Token program accounts: {}", e);
                     vec![]
-                });
-            
+                }
+                Err(_) => {
+                    log::warn!("Timed out fetching Token program accounts for {}", address);
+                    vec![]
+                }
+            };
+
             // Fetch from Token-2022 program
             let filter_token22 = Some(rpc::TokenAccountFilter::ProgramId(
-                "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb".to_string()
+                "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb".to_string(),
             ));
-            let token22_accounts = rpc::get_token_accounts_by_owner(&address, filter_token22, rpc_url.as_deref()).await
-                .unwrap_or_else(|e| {
+            let token22_accounts = match tokio::time::timeout(
+                std::time::Duration::from_secs(12),
+                rpc::get_token_accounts_by_owner(&address, filter_token22, rpc_url.as_deref()),
+            )
+            .await
+            {
+                Ok(Ok(accounts)) => accounts,
+                Ok(Err(e)) => {
                     log::warn!("Failed to fetch Token-2022 program accounts: {}", e);
                     vec![]
-                });
-            
+                }
+                Err(_) => {
+                    log::warn!(
+                        "Timed out fetching Token-2022 program accounts for {}",
+                        address
+                    );
+                    vec![]
+                }
+            };
+
             // Merge both sets of token accounts
             let mut all_token_accounts = token_accounts;
-            let token22_count = token22_accounts.len();
             all_token_accounts.extend(token22_accounts);
-            
-            // println!("Found {} token accounts total ({} Token + {} Token-2022)", 
-            //     all_token_accounts.len(), 
+
+            // println!("Found {} token accounts total ({} Token + {} Token-2022)",
+            //     all_token_accounts.len(),
             //     all_token_accounts.len() - token22_count,
             //     token22_count
             // );
-            
+
             if !all_token_accounts.is_empty() {
-                    // println!("Raw token accounts for address {}: {:?}", address, all_token_accounts);
-                    
-                    // Access the HashMap inside the Memo using read()
-                    let verified_tokens_map = &verified_tokens_clone();
-                    
-                    // Get snapshots of current prices and historical changes
-                    let token_prices_snapshot = token_prices_snapshot.clone();
-                    let token_changes_snapshot = token_changes.read().clone();
-                    // println!("PRICE DEBUG: token_changes_snapshot in token creation: {:#?}", token_changes_snapshot);
-                    
-                    let all_non_zero_accounts: Vec<_> = all_token_accounts
-                        .into_iter()
-                        .filter(|account| {
-                            let is_non_zero = account.amount > 0.0;
-                            // println!(
-                            //     "Token {}: amount={}, will_include={}",
-                            //     account.mint,
-                            //     account.amount,
-                            //     is_non_zero
-                            // );
-                            is_non_zero  // <- INCLUDE ALL NON-ZERO TOKENS
-                        })
-                        .collect();
+                // println!("Raw token accounts for address {}: {:?}", address, all_token_accounts);
 
-                    // println!("All non-zero token accounts: {} tokens", all_non_zero_accounts.len());
+                // Access the HashMap inside the Memo using read()
+                let verified_tokens_map = verified_tokens_clone();
 
-                    // STEP 2: Fetch token metadata from Jupiter Token API
-                    let mint_addresses: Vec<String> = all_non_zero_accounts.iter()
-                        .map(|account| account.mint.clone())
-                        .collect();
+                // Get snapshots of current prices and historical changes
+                let token_prices_snapshot = token_prices_snapshot.clone();
+                let all_non_zero_accounts = aggregate_token_accounts_by_mint(all_token_accounts);
+                let total_candidate_count = all_non_zero_accounts.len();
 
-                    let token_metadata = if !mint_addresses.is_empty() {
-                        match prices::get_token_metadata(mint_addresses).await {
-                            Ok(metadata) => {
-                                // println!("Successfully fetched metadata for {} tokens", metadata.len());
-                                metadata
-                            },
-                            Err(e) => {
-                                log::warn!("Error fetching token metadata: {}", e);
-                                HashMap::new()
-                            }
+                // println!("All non-zero token accounts: {} tokens", all_non_zero_accounts.len());
+
+                // STEP 2: Fetch token metadata from Jupiter Token API
+                let mint_addresses: Vec<String> = all_non_zero_accounts
+                    .iter()
+                    .map(|account| account.mint.clone())
+                    .collect();
+
+                let token_metadata = if !mint_addresses.is_empty() {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        prices::get_token_metadata(mint_addresses),
+                    )
+                    .await
+                    {
+                        Ok(Ok(metadata)) => metadata,
+                        Ok(Err(e)) => {
+                            log::warn!("Error fetching token metadata: {}", e);
+                            HashMap::new()
                         }
-                    } else {
-                        HashMap::new()
-                    };
-
-                    // STEP 3: Build mint->symbol mapping for price fetching (updated)
-                    let mut mint_to_symbol_map = HashMap::new();
-                    for account in &all_non_zero_accounts {
-                        let symbol = if let Some(metadata) = token_metadata.get(&account.mint) {
-                            // Use metadata from Jupiter Token API
-                            metadata.symbol.clone()
-                        } else if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
-                            // Use verified token name
-                            verified_token.symbol.clone()
-                        } else {
-                            // Use truncated mint address as symbol for unknown tokens
-                            if account.mint.len() >= 8 {
-                                format!("{}...{}", &account.mint[..4], &account.mint[account.mint.len()-4..])
-                            } else {
-                                account.mint.clone()
-                            }
-                        };
-                        mint_to_symbol_map.insert(account.mint.clone(), symbol);
+                        Err(_) => {
+                            log::warn!("Timed out fetching token metadata for {}", address);
+                            HashMap::new()
+                        }
                     }
+                } else {
+                    HashMap::new()
+                };
 
-                    // STEP 4: Fetch prices by mint address to avoid symbol collisions.
-                    let mint_addresses_for_prices: Vec<String> = mint_to_symbol_map.keys().cloned().collect();
-                    let dynamic_mint_prices = if !mint_addresses_for_prices.is_empty() {
-                        match prices::get_jupiter_prices_for_mints(mint_addresses_for_prices).await {
-                            Ok(prices) => prices,
-                            Err(e) => {
-                                log::warn!("Error fetching dynamic token prices by mint: {}", e);
-                                HashMap::new()
-                            }
-                        }
+                let visible_accounts: Vec<_> = all_non_zero_accounts
+                    .into_iter()
+                    .filter(|account| {
+                        should_display_wallet_token(
+                            account,
+                            verified_tokens_map.as_ref(),
+                            &token_metadata,
+                        )
+                    })
+                    .collect();
+
+                let hidden_count = total_candidate_count.saturating_sub(visible_accounts.len());
+                if hidden_count > 0 {
+                    println!(
+                        "🧹 Filtered out {} suspicious or unverified token entries for {}",
+                        hidden_count, address
+                    );
+                }
+
+                // STEP 3: Build mint->symbol mapping for price fetching (updated)
+                let mut mint_to_symbol_map = HashMap::new();
+                for account in &visible_accounts {
+                    let symbol = if let Some(metadata) = token_metadata.get(&account.mint) {
+                        // Use metadata from Jupiter Token API
+                        metadata.symbol.clone()
+                    } else if let Some(verified_token) =
+                        verified_tokens_map.as_ref().get(&account.mint)
+                    {
+                        // Use verified token name
+                        verified_token.symbol.clone()
                     } else {
-                        HashMap::new()
+                        // Use truncated mint address as symbol for unknown tokens
+                        if account.mint.len() >= 8 {
+                            format!(
+                                "{}...{}",
+                                &account.mint[..4],
+                                &account.mint[account.mint.len() - 4..]
+                            )
+                        } else {
+                            account.mint.clone()
+                        }
                     };
+                    mint_to_symbol_map.insert(account.mint.clone(), symbol);
+                }
 
-                    // STEP 5: Create tokens for display with metadata
-                    let new_tokens = all_non_zero_accounts
-                        .into_iter()
-                        .map(|account| {
-                            let symbol = mint_to_symbol_map.get(&account.mint)
-                                .cloned()
-                                .unwrap_or_else(|| format!("UNKNOWN_{}", &account.mint[..6]));
-                            
-                            // Get token metadata from Jupiter API or verified tokens
-                            let (token_name, icon_url) = if let Some(metadata) = token_metadata.get(&account.mint) {
+                // STEP 4: Fetch prices by mint address to avoid symbol collisions.
+                let mint_addresses_for_prices: Vec<String> =
+                    mint_to_symbol_map.keys().cloned().collect();
+                let dynamic_mint_prices = if !mint_addresses_for_prices.is_empty() {
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(10),
+                        prices::get_jupiter_prices_for_mints(mint_addresses_for_prices),
+                    )
+                    .await
+                    {
+                        Ok(Ok(prices)) => prices,
+                        Ok(Err(e)) => {
+                            log::warn!("Error fetching dynamic token prices by mint: {}", e);
+                            HashMap::new()
+                        }
+                        Err(_) => {
+                            log::warn!("Timed out fetching dynamic token prices for {}", address);
+                            HashMap::new()
+                        }
+                    }
+                } else {
+                    HashMap::new()
+                };
+
+                // STEP 5: Create tokens for display with metadata
+                let new_tokens = visible_accounts
+                    .into_iter()
+                    .map(|account| {
+                        let symbol = mint_to_symbol_map
+                            .get(&account.mint)
+                            .cloned()
+                            .unwrap_or_else(|| format!("UNKNOWN_{}", &account.mint[..6]));
+
+                        // Get token metadata from Jupiter API or verified tokens
+                        let (token_name, icon_url) =
+                            if let Some(metadata) = token_metadata.get(&account.mint) {
                                 (metadata.name.clone(), metadata.icon.clone())
-                            } else if let Some(verified_token) = verified_tokens_map.get(&account.mint) {
-                                (verified_token.name.clone(), Some(verified_token.logo_uri.clone()))
+                            } else if let Some(verified_token) =
+                                verified_tokens_map.as_ref().get(&account.mint)
+                            {
+                                (
+                                    verified_token.name.clone(),
+                                    Some(verified_token.logo_uri.clone()),
+                                )
                             } else {
                                 (format!("Token {}", &symbol), None)
                             };
-                            
-                            // Get price by mint first, then fallback to symbol snapshot and stablecoin defaults.
-                            let price = dynamic_mint_prices.get(&account.mint)
-                                .copied()
-                                .or_else(|| token_prices_snapshot.get(&symbol).copied())
-                                .unwrap_or_else(|| {
-                                    if account.mint == USDC_MINT || symbol == "USDC" {
-                                        1.0
-                                    } else if account.mint == USDT_MINT || symbol == "USDT" {
-                                        1.0
-                                    } else {
-                                        0.0 // Show $0 for unknown token prices
-                                    }
-                                });
-                            
-                            // Get multi-timeframe changes
-                            let multi_data_snapshot = multi_timeframe_data.read().clone();
-                            let (change_1d, change_3d, change_7d) = get_multi_timeframe_changes(&symbol, &multi_data_snapshot);
-                            
-                            // println!("Creating token {}: price=${:.4}, 1D={:.1}%, 3D={:.1}%, 7D={:.1}%", 
-                            //         symbol, price, change_1d, change_3d, change_7d);
-                            
-                            let value_usd = account.amount * price;
-                            
-                            // Determine icon to use - prioritize real icons from metadata
-                            let icon_type = if let Some(icon_url) = icon_url {
-                                if !icon_url.is_empty() {
-                                    icon_url  // Use real icon from Jupiter Token API
+
+                        // Get price by mint first, then fallback to symbol snapshot and stablecoin defaults.
+                        let price = dynamic_mint_prices
+                            .get(&account.mint)
+                            .copied()
+                            .or_else(|| token_prices_snapshot.get(&symbol).copied())
+                            .unwrap_or_else(|| {
+                                if account.mint == USDC_MINT || symbol == "USDC" {
+                                    1.0
+                                } else if account.mint == USDT_MINT || symbol == "USDT" {
+                                    1.0
                                 } else {
-                                    get_fallback_icon(&symbol)  // Use fallback for empty URLs
+                                    0.0 // Show $0 for unknown token prices
                                 }
+                            });
+
+                        // Get multi-timeframe changes
+                        let (change_1d, change_3d, change_7d) =
+                            get_multi_timeframe_changes(&symbol, &multi_data_snapshot);
+
+                        // println!("Creating token {}: price=${:.4}, 1D={:.1}%, 3D={:.1}%, 7D={:.1}%",
+                        //         symbol, price, change_1d, change_3d, change_7d);
+
+                        let value_usd = account.amount * price;
+
+                        // Determine icon to use - prioritize real icons from metadata
+                        let icon_type = if let Some(icon_url) = icon_url {
+                            if !icon_url.is_empty() {
+                                icon_url // Use real icon from Jupiter Token API
                             } else {
-                                get_fallback_icon(&symbol)  // Use fallback for no metadata
-                            };
-                            
+                                get_fallback_icon(&symbol) // Use fallback for empty URLs
+                            }
+                        } else {
+                            get_fallback_icon(&symbol) // Use fallback for no metadata
+                        };
+
                         Token {
                             mint: account.mint.clone(),
                             symbol: symbol.clone(),
@@ -1657,24 +1096,17 @@ pub fn WalletView() -> Element {
                             price_change_7d: change_7d,
                             decimals: account.decimals,
                         }
-                        })
-                        .collect::<Vec<Token>>();
-                        
-                    // Get the most recent SOL price
-                    let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
+                    })
+                    .collect::<Vec<Token>>();
 
-                    // Get multi-timeframe changes  
-                    let multi_data_snapshot = multi_timeframe_data.read().clone();
-                    let (sol_change_1d, sol_change_3d, sol_change_7d) = get_multi_timeframe_changes("SOL", &multi_data_snapshot);
-
-                    let mut all_tokens_raw = {
+                let all_tokens_raw = {
                     let mut raw_tokens = vec![Token {
                         mint: "So11111111111111111111111111111111111111112".to_string(),
                         symbol: "SOL".to_string(),
                         name: "Solana".to_string(),
                         icon_type: ICON_SOL.to_string(),
-                        balance: balance(),
-                        value_usd: balance() * current_sol_price,
+                        balance: sol_balance,
+                        value_usd: sol_balance * current_sol_price,
                         price: current_sol_price,
                         price_change: sol_change_1d,
                         price_change_1d: sol_change_1d,
@@ -1695,37 +1127,43 @@ pub fn WalletView() -> Element {
                 );
 
                 // Convert back to Token structs for compatibility
-                let final_tokens: Vec<Token> = processed_tokens
-                    .into_iter()
-                    .map(|td| td.token)
-                    .collect();
+                let final_tokens: Vec<Token> =
+                    processed_tokens.into_iter().map(|td| td.token).collect();
 
-                tokens.set(final_tokens);
+                {
+                    let mut snapshots = wallet_snapshots();
+                    snapshots.insert(
+                        cache_key.clone(),
+                        WalletSnapshot {
+                            balance: sol_balance,
+                            tokens: final_tokens.clone(),
+                        },
+                    );
+                    wallet_snapshots.set(snapshots);
+                }
+
+                if active_wallet_fetch_key() == Some(fetch_key.clone()) {
+                    tokens.set(final_tokens);
+                } else {
+                    println!("⏭️ Skipping stale wallet token update for {}", fetch_key);
+                }
             } else {
                 println!("No token accounts found for address {}", address);
-                
-                // Get the most recent SOL price
-                let current_sol_price = token_prices_snapshot.get("SOL").copied().unwrap_or(sol_price());
-                
-                // Get multi-timeframe changes
-                let multi_data_snapshot = multi_timeframe_data.read().clone();
-                let (sol_change_1d, sol_change_3d, sol_change_7d) = get_multi_timeframe_changes("SOL", &multi_data_snapshot);
-                
-                tokens.set(vec![Token {
-                    mint: "So11111111111111111111111111111111111111112".to_string(),
-                    symbol: "SOL".to_string(),
-                    name: "Solana".to_string(),
-                    icon_type: ICON_SOL.to_string(),
-                    balance: balance(),
-                    value_usd: balance() * current_sol_price,
-                    price: current_sol_price,
-                    price_change: sol_change_1d,
-                    price_change_1d: sol_change_1d,
-                    price_change_3d: sol_change_3d,
-                    price_change_7d: sol_change_7d,
-                    decimals: 9, // SOL has 9 decimals
-                }]);
+
+                {
+                    let mut snapshots = wallet_snapshots();
+                    snapshots.insert(
+                        cache_key.clone(),
+                        WalletSnapshot {
+                            balance: sol_balance,
+                            tokens: sol_only_tokens.clone(),
+                        },
+                    );
+                    wallet_snapshots.set(snapshots);
+                }
             }
+
+            println!("✅ Wallet bootstrap finished for {}", fetch_key);
         });
     });
 
@@ -1733,196 +1171,61 @@ pub fn WalletView() -> Element {
         spawn(async move {
             // Initialize currency system
             initialize_currency_system().await;
-            
+
             // Start exchange rate update loop
             update_exchange_rates_loop().await;
         });
     });
 
     use_effect(move || {
-        if active_tab() == "collectibles" && collectibles().is_empty() && !collectibles_loading() {
-            collectibles_loading.set(true);
-            
-            // Get the wallet address - CORRECTED to use .address instead of .public_key
-            let wallet_address = if let Some(hw_pubkey) = hardware_pubkey() {
-                hw_pubkey
-            } else if !wallets().is_empty() {
-                wallets()[current_wallet_index()].address.clone()  // ← FIXED: use .address
-            } else {
-                collectibles_loading.set(false);
-                return; // No wallet available
-            };
-            
-            let rpc_url = custom_rpc();
-            
-            spawn(async move {
-                match fetch_collectibles(&wallet_address, rpc_url.as_deref()).await {
-                    Ok(nfts) => {
-                        println!("✅ Fetched {} collectibles", nfts.len());
-                        collectibles.set(nfts);
-                    },
-                    Err(e) => {
-                        println!("❌ Failed to fetch collectibles: {}", e);
-                        collectibles.set(vec![]);
-                    }
-                }
-                collectibles_loading.set(false);
-            });
+        if active_tab() != "collectibles" || collectibles_loading() {
+            return;
         }
+
+        let current_wallet_address = wallets()
+            .get(current_wallet_index())
+            .map(|wallet| wallet.address.clone());
+        let wallet_address = if let Some(hw_pubkey) = hardware_pubkey() {
+            hw_pubkey
+        } else if let Some(wallet_address) = current_wallet_address {
+            wallet_address
+        } else {
+            return;
+        };
+
+        let rpc_url = custom_rpc();
+        let request_key = format!(
+            "{}||{}",
+            wallet_address,
+            rpc_url.clone().unwrap_or_default()
+        );
+
+        if last_collectibles_request_key() == Some(request_key.clone()) {
+            return;
+        }
+
+        last_collectibles_request_key.set(Some(request_key));
+        collectibles_loading.set(true);
+
+        spawn(async move {
+            match fetch_collectibles(&wallet_address, rpc_url.as_deref()).await {
+                Ok(nfts) => {
+                    println!("✅ Fetched {} filtered collectibles", nfts.len());
+                    runtime_hidden_collectible_ids.set(HashSet::new());
+                    collectibles.set(nfts);
+                }
+                Err(e) => {
+                    println!("❌ Failed to fetch collectibles: {}", e);
+                    runtime_hidden_collectible_ids.set(HashSet::new());
+                    collectibles.set(vec![]);
+                }
+            }
+            collectibles_loading.set(false);
+        });
     });
 
     let current_wallet = wallets.read().get(current_wallet_index()).cloned();
 
-    let refresh_private_balance: Rc<RefCell<dyn FnMut()>> = {
-        let wallets_signal = wallets.clone();
-        let current_wallet_index_signal = current_wallet_index.clone();
-        let rpc_signal = custom_rpc.clone();
-        let hw_signal = hardware_wallet.clone();
-        let mut private_balance_sol = private_balance_sol.clone();
-        let mut private_balance_loading = private_balance_loading.clone();
-        let mut private_balance_usdc = private_balance_usdc.clone();
-        let mut private_balance_usdc_loading = private_balance_usdc_loading.clone();
-        let mut private_balance_usdt = private_balance_usdt.clone();
-        let mut private_balance_usdt_loading = private_balance_usdt_loading.clone();
-        let mut private_balance_ore = private_balance_ore.clone();
-        let mut private_balance_ore_loading = private_balance_ore_loading.clone();
-        Rc::new(RefCell::new(move || {
-            if hw_signal().is_some() {
-                private_balance_sol.set(None);
-                private_balance_usdc.set(None);
-                private_balance_usdt.set(None);
-                private_balance_ore.set(None);
-                private_balance_loading.set(false);
-                private_balance_usdc_loading.set(false);
-                private_balance_usdt_loading.set(false);
-                private_balance_ore_loading.set(false);
-                return;
-            }
-            private_balance_loading.set(true);
-            private_balance_usdc_loading.set(true);
-            private_balance_usdt_loading.set(true);
-            private_balance_ore_loading.set(true);
-            let rpc_url = rpc_signal().unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
-            let wallet_info = wallets_signal()
-                .get(current_wallet_index_signal())
-                .cloned();
-            let mut private_balance_sol = private_balance_sol.clone();
-            let mut private_balance_loading = private_balance_loading.clone();
-            let mut private_balance_usdc = private_balance_usdc.clone();
-            let mut private_balance_usdc_loading = private_balance_usdc_loading.clone();
-            let mut private_balance_usdt = private_balance_usdt.clone();
-            let mut private_balance_usdt_loading = private_balance_usdt_loading.clone();
-            let mut private_balance_ore = private_balance_ore.clone();
-            let mut private_balance_ore_loading = private_balance_ore_loading.clone();
-            spawn(async move {
-                let Some(wallet_info) = wallet_info else {
-                    private_balance_loading.set(false);
-                    private_balance_usdc_loading.set(false);
-                    private_balance_usdt_loading.set(false);
-                    private_balance_ore_loading.set(false);
-                    return;
-                };
-                let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) else {
-                    private_balance_loading.set(false);
-                    private_balance_usdc_loading.set(false);
-                    private_balance_usdt_loading.set(false);
-                    private_balance_ore_loading.set(false);
-                    return;
-                };
-                let signer = SignerType::from_wallet(wallet);
-                let Ok(authority) = signer.get_public_key().await else {
-                    private_balance_loading.set(false);
-                    private_balance_usdc_loading.set(false);
-                    private_balance_usdt_loading.set(false);
-                    private_balance_ore_loading.set(false);
-                    return;
-                };
-                let Ok(signature) = privacycash::sign_auth_message(&signer).await else {
-                    private_balance_loading.set(false);
-                    private_balance_usdc_loading.set(false);
-                    private_balance_usdt_loading.set(false);
-                    private_balance_ore_loading.set(false);
-                    return;
-                };
-                match privacycash::get_private_balance(&authority, &signature, Some(rpc_url.as_str())).await {
-                    Ok(balance) => {
-                        private_balance_sol.set(Some(balance));
-                    }
-                    Err(_) => {
-                        private_balance_sol.set(None);
-                    }
-                }
-                private_balance_loading.set(false);
-
-                match privacycash::get_private_balance_spl(
-                    &authority,
-                    &signature,
-                    USDC_MINT,
-                    Some(rpc_url.as_str()),
-                )
-                .await
-                {
-                    Ok(balance) => {
-                        private_balance_usdc.set(Some(balance));
-                    }
-                    Err(_) => {
-                        private_balance_usdc.set(None);
-                    }
-                }
-                private_balance_usdc_loading.set(false);
-
-                match privacycash::get_private_balance_spl(
-                    &authority,
-                    &signature,
-                    USDT_MINT,
-                    Some(rpc_url.as_str()),
-                )
-                .await
-                {
-                    Ok(balance) => {
-                        private_balance_usdt.set(Some(balance));
-                    }
-                    Err(_) => {
-                        private_balance_usdt.set(None);
-                    }
-                }
-                private_balance_usdt_loading.set(false);
-
-                match privacycash::get_private_balance_spl(
-                    &authority,
-                    &signature,
-                    ORE_MINT,
-                    Some(rpc_url.as_str()),
-                )
-                .await
-                {
-                    Ok(balance) => {
-                        private_balance_ore.set(Some(balance));
-                    }
-                    Err(_) => {
-                        private_balance_ore.set(None);
-                    }
-                }
-                private_balance_ore_loading.set(false);
-            });
-        }))
-    };
-
-    {
-        let refresh_private_balance = Rc::clone(&refresh_private_balance);
-        use_effect(move || {
-            let _ = wallets();
-            let _ = current_wallet_index();
-            let current_addr = wallets()
-                .get(current_wallet_index())
-                .map(|w| w.address.clone());
-            if current_addr != last_privacy_wallet() {
-                last_privacy_wallet.set(current_addr);
-                refresh_private_balance.borrow_mut()();
-            }
-        });
-    }
-    
     // Get full address for display
     let full_address = if hardware_connected() && hardware_pubkey().is_some() {
         hardware_pubkey().unwrap()
@@ -1933,27 +1236,6 @@ pub fn WalletView() -> Element {
     };
 
     // Truncated address for dropdown
-    let wallet_address = if hardware_connected() && hardware_pubkey().is_some() {
-        let addr = hardware_pubkey().unwrap();
-        if addr.len() >= 8 {
-            format!("{}...{}", &addr[..4], &addr[addr.len()-4..])
-        } else {
-            addr
-        }
-    } else if let Some(wallet) = current_wallet.as_ref() {
-        let addr = &wallet.address;
-        if addr.len() >= 8 {
-            format!("{}...{}", &addr[..4], &addr[addr.len()-4..])
-        } else {
-            addr.clone()
-        }
-    } else {
-        "No wallet".to_string()
-    };
-
-    // Calculate USD value using current SOL price
-    let usd_balance = balance() * sol_price();
-
     let (start, middle, end) = if full_address != "No Wallet" && full_address.len() > 8 {
         (
             &full_address[..4],
@@ -1968,15 +1250,6 @@ pub fn WalletView() -> Element {
 
     let hw_connected = hardware_connected();
     let hw_device_present = hardware_device_present();
-
-    let hardware_button_status = if hw_connected {
-        LiquidMetalStatus::Ok
-    } else if hw_device_present {
-        LiquidMetalStatus::Warn
-    } else {
-        LiquidMetalStatus::Neutral
-    };
-
     let hardware_button_interactive = hw_device_present || hw_connected;
     let hardware_button_label = if hw_connected {
         "Hardware wallet connected"
@@ -1985,28 +1258,13 @@ pub fn WalletView() -> Element {
     } else {
         "No hardware wallet detected"
     };
-
-    // Enhanced logging for hardware button state
-    let status_debug = format!("{:?}", hardware_button_status);
-    use_effect(move || {
-        let status_str = status_debug.clone();
-        spawn(async move {
-            let _ = eval(&format!(
-                r#"
-                console.log('=== HARDWARE BUTTON STATUS ===');
-                console.log('Connected: {}');
-                console.log('Present: {}');
-                console.log('Status: {}');
-                console.log('Interactive: {}');
-                console.log('===============================');
-                "#,
-                hw_connected, hw_device_present, status_str, hardware_button_interactive
-            ));
-        });
-    });
-
-    let refresh_for_success = Rc::clone(&refresh_private_balance);
-    let refresh_for_privacy = Rc::clone(&refresh_private_balance);
+    let hardware_button_class = if hw_connected {
+        "hardware-wallet-button hardware-wallet-connected"
+    } else if hw_device_present {
+        "hardware-wallet-button hardware-wallet-detected"
+    } else {
+        "hardware-wallet-button hardware-wallet-idle"
+    };
 
     rsx! {
         div {
@@ -2022,29 +1280,75 @@ pub fn WalletView() -> Element {
                     show_dropdown.set(false);
                 }
             },
-            
+
             // Header
             div {
                 class: "wallet-header-enhanced",
-                // Left side - Liquid metal hardware button
+                // Left side - hardware button
                 div {
                     class: "hardware-button-wrapper",
-                    LiquidMetalButton {
-                        status: hardware_button_status,
-                        animated: true,
-                        interactive: hardware_button_interactive,
-                        aria_label: Some(hardware_button_label.to_string()),
-                        class: Some("hardware-wallet-button".to_string()),
-                        onclick: move |_| {
+                    button {
+                        class: "{hardware_button_class}",
+                        r#type: "button",
+                        disabled: !hardware_button_interactive,
+                        "aria-label": "{hardware_button_label}",
+                        style: {
+                            let border = if hw_connected {
+                                "1px solid rgba(34, 197, 94, 0.8)"
+                            } else if hw_device_present {
+                                "1px solid rgba(245, 158, 11, 0.8)"
+                            } else {
+                                "1px solid rgba(148, 163, 184, 0.35)"
+                            };
+                            let background = if hw_connected {
+                                "rgba(3, 18, 11, 0.84)"
+                            } else if hw_device_present {
+                                "rgba(38, 24, 5, 0.82)"
+                            } else {
+                                "rgba(15, 23, 42, 0.78)"
+                            };
+                            let shadow = if hw_connected {
+                                "0 0 0 1px rgba(34, 197, 94, 0.18), 0 14px 30px rgba(34, 197, 94, 0.16), 0 10px 24px rgba(0, 0, 0, 0.32)"
+                            } else if hw_device_present {
+                                "0 0 0 1px rgba(245, 158, 11, 0.16), 0 14px 30px rgba(245, 158, 11, 0.14), 0 10px 24px rgba(0, 0, 0, 0.32)"
+                            } else {
+                                "0 10px 24px rgba(0, 0, 0, 0.28)"
+                            };
+                            let cursor = if hardware_button_interactive { "pointer" } else { "default" };
+                            format!(
+                                "width: 100%; height: 100%; border-radius: 999px; border: {}; background: {}; display: flex; align-items: center; justify-content: center; padding: 0; cursor: {}; box-shadow: {};",
+                                border,
+                                background,
+                                cursor
+                                ,
+                                shadow
+                            )
+                        },
+                        onclick: move |e| {
+                            e.stop_propagation();
                             if hardware_button_interactive {
                                 show_hardware_modal.set(true);
                             }
                         },
-                        img {
-                            src: ICON_32,
-                            alt: "Hardware wallet",
-                            width: "24",
-                            height: "24"
+                        span { class: "hardware-button-aura" }
+                        div {
+                            class: "hardware-button-icon-frame",
+                            img {
+                                src: ICON_32,
+                                alt: "Hardware wallet",
+                                width: "24",
+                                height: "24",
+                                style: "filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.2));"
+                            }
+                        }
+                        span {
+                            class: if hw_connected {
+                                "hardware-button-led connected"
+                            } else if hw_device_present {
+                                "hardware-button-led detected"
+                            } else {
+                                "hardware-button-led idle"
+                            }
                         }
                     }
                 }
@@ -2062,7 +1366,7 @@ pub fn WalletView() -> Element {
                             "No Wallet"
                         }
                     }
-                
+
                     div {
                         class: {
                             let mut class = "header-address-display expandable".to_string();
@@ -2073,28 +1377,12 @@ pub fn WalletView() -> Element {
                         },
                         onclick: move |_| {
                             address_expanded.set(!address_expanded());
-                        
+
                             let address_to_copy = full_address.clone();
-                        
-                            #[cfg(target_arch = "wasm32")]
-                            {
-                                log::info!("Clipboard copy not supported on web platform.");
+                            if let Err(error) = copy_text_to_clipboard(&address_to_copy) {
+                                log::error!("Failed to copy wallet address: {}", error);
                             }
-                        
-                            #[cfg(target_os = "android")]
-                            {
-                                log::info!("Clipboard copy not supported on Android platform.");
-                            }
-                        
-                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-                            {
-                                std::thread::spawn(move || {
-                                    if let Ok(mut clipboard) = SystemClipboard::new() {
-                                        let _ = clipboard.set_text(address_to_copy);
-                                    }
-                                });
-                            }
-                        },                                                                                                                                                                             
+                        },
                         div {
                             class: "short-address",
                             hidden: address_expanded(),
@@ -2108,7 +1396,7 @@ pub fn WalletView() -> Element {
                             span { class: "highlight", "{end}" }
                         }
                     }
-                    
+
                 }
 
                 // Right side - Menu icon
@@ -2124,7 +1412,7 @@ pub fn WalletView() -> Element {
                     div {
                         class: "dropdown-menu",
                         onclick: move |e| e.stop_propagation(),
-                        
+
                         // Current wallet display
                         //if let Some(ref wallet) = current_wallet {
                         //    div {
@@ -2140,7 +1428,7 @@ pub fn WalletView() -> Element {
                         //        }
                         //    }
                         //}
-                        
+
                         // Hardware wallet display (unchanged)
                         if hardware_connected() && hardware_pubkey().is_some() {
                             div {
@@ -2156,7 +1444,7 @@ pub fn WalletView() -> Element {
                                 div {
                                     class: "wallet-info",
                                     div { class: "wallet-name", "Hardware Wallet" }
-                                    div { 
+                                    div {
                                         class: "wallet-address",
                                         {
                                             match hardware_pubkey() {
@@ -2174,33 +1462,30 @@ pub fn WalletView() -> Element {
                                 }
                             }
                         }
-                        
+
                         div { class: "dropdown-divider" }
-                        
+
                         for (index, wallet) in wallets.read().iter().enumerate() {
                             button {
-                                class: if index == current_wallet_index() { 
-                                    "dropdown-item wallet-list-item active" 
-                                } else { 
-                                    "dropdown-item wallet-list-item" 
+                                class: if index == current_wallet_index() {
+                                    "dropdown-item wallet-list-item active"
+                                } else {
+                                    "dropdown-item wallet-list-item"
                                 },
                                 onclick: {
-                                    let wallet_info_clone = wallet.clone();
-                                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                                    let handler = bridge_handler.clone();
-
                                     move |_| {
+                                    if let Some(hw) = hardware_wallet() {
+                                        spawn(async move {
+                                            let _ = hw.disconnect().await;
+                                        });
+                                    }
+                                    hardware_wallet.set(None);
                                     current_wallet_index.set(index);
                                     show_dropdown.set(false);
                                     hardware_connected.set(false);
                                     hardware_pubkey.set(None);
-
-                                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                                    {
-                                        if let Ok(wallet) = Wallet::from_wallet_info(&wallet_info_clone) {
-                                            handler.update_wallet(wallet);
-                                        }
-                                    }
+                                    hardware_device_type.set(None);
+                                    address_expanded.set(false);
                                 }
                                 },
                                 div {
@@ -2214,7 +1499,7 @@ pub fn WalletView() -> Element {
                                 div {
                                     class: "wallet-info",
                                     div { class: "wallet-name", "{wallet.name}" }
-                                    div { 
+                                    div {
                                         class: "wallet-address",
                                         {
                                             let addr = &wallet.address;
@@ -2228,7 +1513,7 @@ pub fn WalletView() -> Element {
                                 }
                             }
                         }
-                        
+
                         div { class: "dropdown-divider" }
 
                         // NEW: Currency Selector
@@ -2251,13 +1536,9 @@ pub fn WalletView() -> Element {
                                 }
                             }
                         }
-                        
-                        div { class: "dropdown-divider" }
-
-                        {integration_settings_menu}
 
                         div { class: "dropdown-divider" }
-                        
+
                         // Existing action buttons (unchanged)
                         button {
                             class: "dropdown-item",
@@ -2276,7 +1557,7 @@ pub fn WalletView() -> Element {
                             }
                             "Create Wallet"
                         }
-                        
+
                         button {
                             class: "dropdown-item",
                             onclick: move |_| {
@@ -2333,7 +1614,7 @@ pub fn WalletView() -> Element {
                                 "Delete Wallet"
                             }
                         }
-                        
+
                         //if hardware_device_present() && !hardware_connected() {
                         //    button {
                         //        class: "dropdown-item",
@@ -2348,30 +1629,7 @@ pub fn WalletView() -> Element {
                         //        "Connect Hardware Wallet"
                         //    }
                         //}
-                        
-                        div { class: "dropdown-divider" }
-                        
-                        button {
-                            class: "dropdown-item",
-                            onclick: move |_| {
-                                show_rpc_modal.set(true);
-                                show_dropdown.set(false);
-                            },
-                            div {
-                                class: "dropdown-icon action-icon",
-                                img {
-                                    src: "{ICON_RPC}",
-                                    alt: "RPC",
-                                    style: "width: 24px; height: 24px;"
-                                }
-                            }
-                            "RPC Settings"
-                        }
 
-                        if let Some(row) = bridge_settings_row {
-                            {row}
-                        }
-                
                         //button {
                         //    class: "dropdown-item",
                         //    onclick: move |_| {
@@ -2400,28 +1658,29 @@ pub fn WalletView() -> Element {
                     }
                 }
             }
-            
+
             if show_wallet_modal() {
                 WalletModal {
                     mode: modal_mode(),
                     onclose: move |_| show_wallet_modal.set(false),
                     onsave: {
-                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                        let handler_for_save = bridge_handler.clone();
-
                         move |wallet_info| {
-                            save_wallet_to_storage(&wallet_info);
-
-                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                        {
-                            if let Ok(wallet) = Wallet::from_wallet_info(&wallet_info) {
-                                handler_for_save.update_wallet(wallet);
-                            }
-                        }
-
-                            wallets.write().push(wallet_info);
-                            current_wallet_index.set(wallets.read().len() - 1);
                             show_wallet_modal.set(false);
+                            if let Some(hw) = hardware_wallet() {
+                                spawn(async move {
+                                    let _ = hw.disconnect().await;
+                                });
+                            }
+                            hardware_wallet.set(None);
+                            hardware_connected.set(false);
+                            hardware_pubkey.set(None);
+                            hardware_device_type.set(None);
+                            let new_index = {
+                                let mut wallets_mut = wallets.write();
+                                wallets_mut.push(wallet_info);
+                                wallets_mut.len() - 1
+                            };
+                            current_wallet_index.set(new_index);
                         }
                     }
                 }
@@ -2435,29 +1694,37 @@ pub fn WalletView() -> Element {
                 }
             }
 
-            // Delete Wallet Confirmation Modal  
+            // Delete Wallet Confirmation Modal
             if show_delete_confirmation() {
                 DeleteWalletModal {
                     wallet: wallets.read().get(current_wallet_index()).cloned(),
                     onconfirm: {
-                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                        let handler_for_delete = bridge_handler.clone();
-
                         move |_| {
+                            if let Some(hw) = hardware_wallet() {
+                                spawn(async move {
+                                    let _ = hw.disconnect().await;
+                                });
+                            }
+                            hardware_wallet.set(None);
+                            hardware_connected.set(false);
+                            hardware_pubkey.set(None);
+                            hardware_device_type.set(None);
+                            hardware_device_present.set(HardwareWallet::is_device_present());
+
                             // Get the current wallet info for deletion - separate the read operation
                             let current_index = current_wallet_index();
                             let wallet_address_to_delete = {
                                 // This scope ensures the read lock is dropped before we try to write
                                 wallets.read().get(current_index).map(|w| w.address.clone())
                             };
-                        
+
                             if let Some(wallet_address) = wallet_address_to_delete {
                                 // Delete the wallet from storage
                                 delete_wallet_from_storage(&wallet_address);
-                            
+
                                 // Reload wallets from storage (now we can safely write)
                                 wallets.set(load_wallets_from_storage());
-                            
+
                                 // Reset current index if needed
                                 let wallet_count = wallets.read().len();
                                 if wallet_count == 0 {
@@ -2466,16 +1733,6 @@ pub fn WalletView() -> Element {
                                     current_wallet_index.set(wallet_count - 1);
                                 }
 
-                                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                                {
-                                    let new_index = current_wallet_index();
-                                    if let Some(wallet_info) = wallets.read().get(new_index) {
-                                        if let Ok(wallet) = Wallet::from_wallet_info(wallet_info) {
-                                            handler_for_delete.update_wallet(wallet);
-                                        }
-                                    }
-                                }
-                            
                                 // Reset balance
                                 balance.set(0.0);
                             }
@@ -2483,56 +1740,6 @@ pub fn WalletView() -> Element {
                         }
                     },
                     onclose: move |_| show_delete_confirmation.set(false)
-                }
-            }
-
-            if let Some(modal) = bridge_modal {
-                {modal}
-            }
-            
-            if show_rpc_modal() {
-                RpcModal {
-                    current_rpc: custom_rpc(),
-                    onclose: move |_| show_rpc_modal.set(false),
-                    onsave: move |new_rpc: String| {
-                        if new_rpc.is_empty() {
-                            custom_rpc.set(None);
-                            clear_rpc_storage();
-                        } else {
-                            custom_rpc.set(Some(new_rpc.clone()));
-                            save_rpc_to_storage(&new_rpc);
-                        }
-                        show_rpc_modal.set(false);
-                        
-                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
-                            let address = wallet.address.clone();
-                            let rpc_url = custom_rpc();
-                            
-                            spawn(async move {
-                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                    Ok(sol_balance) => {
-                                        balance.set(sol_balance);
-                                    }
-                                    Err(e) => {
-                                        println!("Failed to fetch balance: {}", e);
-                                        balance.set(0.0);
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-
-            if show_jito_modal() {
-                JitoModal {
-                    current_settings: jito_settings(),
-                    onclose: move |_| show_jito_modal.set(false),
-                    onsave: move |new_settings| {
-                        jito_settings.set(new_settings);
-                        save_jito_settings_to_storage(&new_settings);
-                        show_jito_modal.set(false);
-                    }
                 }
             }
 
@@ -2544,7 +1751,7 @@ pub fn WalletView() -> Element {
                     log::info!("🔌 Hardware modal: disconnect callback fired");
                     hardware_wallet.set(None);
                     hardware_connected.set(false);
-                    hardware_device_present.set(false);
+                    hardware_device_present.set(HardwareWallet::is_device_present());
                     hardware_pubkey.set(None);
                     hardware_device_type.set(None);
                     show_hardware_modal.set(false);
@@ -2555,13 +1762,13 @@ pub fn WalletView() -> Element {
                     hardware_connected.set(true);
                     hardware_device_present.set(true);
                     show_hardware_modal.set(false);
-                        
+
                         let hw_clone = hw_wallet.clone();
                         spawn(async move {
                             if let Ok(pubkey) = hw_wallet.get_public_key().await {
                                 hardware_pubkey.set(Some(pubkey));
                             }
-                            
+
                             // Get and set the device type - clone it for the println
                             if let Some(dev_type) = hw_clone.get_device_type().await {
                                 println!("🔧 Set device type to: {:?}", dev_type); // Use it first
@@ -2571,28 +1778,26 @@ pub fn WalletView() -> Element {
                     }
                 }
             }
-            
+
             if show_send_modal() {
                 SendModalWithHardware {
                     wallet: current_wallet.clone(),
                     hardware_wallet: hardware_wallet(),
                     current_balance: balance(),
                     custom_rpc: custom_rpc(),
-                    initial_privacy_enabled: send_modal_private(),
+                    initial_privacy_enabled: false,
+                    enable_privacy: ENABLE_PRIVACY,
                     onclose: move |_| {
                         show_send_modal.set(false);
-                        send_modal_private.set(false);
                         // Don't reset hardware_wallet here
                     },
                     onsuccess: move |_| {
                         show_send_modal.set(false);
-                        send_modal_private.set(false);
                         // Don't reset hardware_wallet here either
-                        refresh_for_success.borrow_mut()();
                         if let Some(wallet) = wallets.read().get(current_wallet_index()) {
                             let address = wallet.address.clone();
                             let rpc_url = custom_rpc();
-                            
+
                             spawn(async move {
                                 match rpc::get_balance(&address, rpc_url.as_deref()).await {
                                     Ok(sol_balance) => {
@@ -2611,41 +1816,18 @@ pub fn WalletView() -> Element {
                         // Update the hardware wallet connection state in the parent component
                         hardware_connected.set(event.connected);
                         hardware_pubkey.set(event.pubkey);
-                        
+                        hardware_device_present.set(HardwareWallet::is_device_present());
+
                         // If disconnected, also set the hardware_wallet to None
                         if !event.connected {
                             hardware_wallet.set(None);
+                            hardware_device_type.set(None);
                         }
                     },
-                    on_privacy_refresh: move |_| {
-                        refresh_for_privacy.borrow_mut()();
-                    }
+                    on_privacy_refresh: move |_| {}
                 }
             }
 
-            if show_privacycash_modal() {
-                PrivacyCashModal {
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| {
-                        show_privacycash_modal.set(false);
-                    }
-                }
-            }
-
-            // Show Transaction History modal
-            if show_history_modal() {
-                TransactionHistoryModal {
-                    // Use the already-computed address that respects hardware wallet overrides
-                    address: full_address.clone(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| {
-                        show_history_modal.set(false);
-                    }
-                }
-            }
-            
             if show_send_token_modal() {
                 SendTokenModal {
                     wallet: current_wallet.clone(),
@@ -2655,6 +1837,7 @@ pub fn WalletView() -> Element {
                     token_balance: selected_token_balance(),
                     token_decimals: selected_token_decimals(),
                     custom_rpc: custom_rpc(),
+                    enable_privacy: ENABLE_PRIVACY,
                     onclose: move |_| {
                         show_send_token_modal.set(false);
                         selected_token_symbol.set("".to_string());
@@ -2669,12 +1852,12 @@ pub fn WalletView() -> Element {
                         selected_token_balance.set(0.0);
                         selected_token_decimals.set(None);
                         println!("Token transaction successful: {}", signature);
-                        
+
                         // Refresh balances after successful transaction
                         if let Some(wallet) = wallets.read().get(current_wallet_index()) {
                             let address = wallet.address.clone();
                             let rpc_url = custom_rpc();
-                            
+
                             spawn(async move {
                                 match rpc::get_balance(&address, rpc_url.as_deref()).await {
                                     Ok(sol_balance) => {
@@ -2690,143 +1873,14 @@ pub fn WalletView() -> Element {
                     onhardware: move |event: HardwareWalletEvent| {
                         hardware_connected.set(event.connected);
                         hardware_pubkey.set(event.pubkey);
-                        
+                        hardware_device_present.set(HardwareWallet::is_device_present());
+
                         // If disconnected, also set the hardware_wallet to None
                         if !event.connected {
                             hardware_wallet.set(None);
+                            hardware_device_type.set(None);
                         }
                     },
-                }
-            }
-
-            if show_bulk_send_modal() {
-                BulkSendModal {
-                    selected_token_mints: selected_tokens(),
-                    all_tokens: tokens(),
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    current_balance: balance(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| {
-                        show_bulk_send_modal.set(false);
-                        bulk_send_mode.set(false);
-                        selected_tokens.set(HashSet::new());
-                    },
-                    onsuccess: move |signature| {
-                        show_bulk_send_modal.set(false);
-                        bulk_send_mode.set(false);
-                        selected_tokens.set(HashSet::new());
-                        println!("Bulk send transaction successful: {}", signature);
-                        
-                        // Refresh balances after successful transaction
-                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
-                            let address = wallet.address.clone();
-                            let rpc_url = custom_rpc();
-                            
-                            spawn(async move {
-                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                    Ok(sol_balance) => {
-                                        balance.set(sol_balance);
-                                    }
-                                    Err(e) => {
-                                        println!("Failed to refresh balance after bulk send: {}", e);
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-
-            if show_eject_modal() {
-                EjectModal {
-                    selected_token_mints: selected_tokens(),
-                    all_tokens: tokens(),
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    current_balance: balance(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| {
-                        show_eject_modal.set(false);
-                        eject_mode.set(false);
-                        selected_tokens.set(HashSet::new());
-                    },
-                    onsuccess: move |signature| {
-                        show_eject_modal.set(false);
-                        eject_mode.set(false);
-                        selected_tokens.set(HashSet::new());
-                        println!("EJECT transaction successful: {}", signature);
-
-                        // Refresh balances after successful transaction
-                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
-                            let address = wallet.address.clone();
-                            let rpc_url = custom_rpc();
-
-                            spawn(async move {
-                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                    Ok(sol_balance) => {
-                                        balance.set(sol_balance);
-                                    }
-                                    Err(e) => {
-                                        println!("Failed to refresh balance after EJECT: {}", e);
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-            }
-
-            if show_retire_modal() {
-                RetireModal {
-                    all_tokens: tokens(),
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    current_balance: balance(),
-                    sol_price: sol_price(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| show_retire_modal.set(false),
-                    onsuccess: move |result: RetireResult| {
-                        show_retire_modal.set(false);
-                        println!("RETIRE completed: {}", result.signature);
-                        println!("RETIRE residual balance: {:.8} SOL", result.residual_balance);
-
-                        if result.remove_from_storage {
-                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                            let handler_for_delete = bridge_handler.clone();
-
-                            let current_index = current_wallet_index();
-                            let wallet_address_to_delete = {
-                                wallets.read().get(current_index).map(|w| w.address.clone())
-                            };
-
-                            if let Some(wallet_address) = wallet_address_to_delete {
-                                delete_wallet_from_storage(&wallet_address);
-                                wallets.set(load_wallets_from_storage());
-
-                                let wallet_count = wallets.read().len();
-                                if wallet_count == 0 {
-                                    current_wallet_index.set(0);
-                                } else if current_index >= wallet_count {
-                                    current_wallet_index.set(wallet_count - 1);
-                                }
-
-                                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android"), not(target_os = "ios")))]
-                                {
-                                    let new_index = current_wallet_index();
-                                    if let Some(wallet_info) = wallets.read().get(new_index) {
-                                        if let Ok(wallet) = Wallet::from_wallet_info(wallet_info) {
-                                            handler_for_delete.update_wallet(wallet);
-                                        }
-                                    }
-                                }
-
-                                balance.set(0.0);
-                            }
-                        } else {
-                            refresh_trigger.set(refresh_trigger() + 1);
-                        }
-                    }
                 }
             }
 
@@ -2853,7 +1907,7 @@ pub fn WalletView() -> Element {
                         if let Some(wallet) = wallets.read().get(current_wallet_index()) {
                             let address = wallet.address.clone();
                             let rpc_url = custom_rpc();
-                            
+
                             spawn(async move {
                                 match rpc::get_balance(&address, rpc_url.as_deref()).await {
                                     Ok(sol_balance) => {
@@ -2885,115 +1939,28 @@ pub fn WalletView() -> Element {
                 }
             }
 
-            if show_lend_modal() {
-                LendModal {
-                    tokens: tokens(),
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| show_lend_modal.set(false),
-                    onsuccess: {
-                        let wallet_for_refresh = current_wallet.clone();
-                        move |signature| {
-                            println!("✅ Lend completed with signature: {}", signature);
-                            show_lend_modal.set(false);
-                            // Refresh balances after successful lend
-                            if let Some(wallet) = wallet_for_refresh.clone() {
-                                let address = wallet.address.clone();
-                                let rpc_url = custom_rpc();
-                                
-                                spawn(async move {
-                                    match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                        Ok(sol_balance) => {
-                                            balance.set(sol_balance);
-                                        }
-                                        Err(e) => {
-                                            println!("Failed to refresh balance after lend: {}", e);
-                                        }
-                                    }
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Temporarily disabled for Solana 3.x testing
-            if show_squads_modal() {
-                SquadsModal {
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| show_squads_modal.set(false),
-                }
-            }
-            // 
-            if show_carrot_modal() {
-                CarrotModal {
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| show_carrot_modal.set(false),
-                }
-            }
-            // 
-            if show_bonk_staking_modal() {
-                BonkStakingModal {
-                    tokens: tokens(),
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| show_bonk_staking_modal.set(false),
-                    onsuccess: move |sig| {
-                        println!("BONK stake successful: {}", sig);
-                        // Trigger wallet refresh
-                        refresh_trigger.set(refresh_trigger() + 1);
-                    },
-                }
-            }
-
-            if show_quantum_vault_modal() {
-                QuantumVaultModal {
-                    wallet: current_wallet.clone(),
-                    hardware_wallet: hardware_wallet(),
-                    custom_rpc: custom_rpc(),
-                    onclose: move |_| show_quantum_vault_modal.set(false),
-                }
-            }
-            
-            if show_background_modal() {
-                BackgroundModal {
-                    current_background: selected_background(),
-                    onclose: move |_| show_background_modal.set(false),
-                    onselect: move |theme: BackgroundTheme| {
-                        selected_background.set(theme);
-                        show_background_modal.set(false);
-                    }
-                }
-            }
-
             if show_currency_modal() {
                 CurrencyModal {
                     onclose: move |_| show_currency_modal.set(false)
                 }
             }
-                                    
+
             // Main content container for balance, address, and actions
             div {
                 class: "main-content",
                 div {
                     id: "balance-section-with-border",
                     class: "balance-section-segmented",
-                    
+
                     // Left side - Balance content
                     div {
                         class: "balance-content",
-                        
+
                         div {
                             class: "balance-label",
                             "Your Balance"
                         }
-                        
+
                         div {
                             class: "balance-amount-large",
                             if prices_loading() {
@@ -3007,31 +1974,31 @@ pub fn WalletView() -> Element {
                             }
                         }
                     }
-                    
+
                     // Right side - Device/Wallet indicator
                     div {
                         class: "device-indicator",
                         onclick: move |e| {
                             e.stop_propagation();
-                            
+
                             if is_refreshing() {
                                 println!("⏳ Already refreshing, please wait...");
                                 return;
                             }
-                            
+
                             println!("🔄 Tapped device indicator - showing spinner...");
                             is_refreshing.set(true);
                             refresh_trigger.set(refresh_trigger() + 1);
-                            
+
                             spawn(async move {
                                 tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
                                 is_refreshing.set(false);
                                 println!("✅ Refresh animation complete");
                             });
                         },
-                        
+
                         if is_refreshing() {
-                            img { 
+                            img {
                                 src: LOADING_SPINNER,
                                 alt: "Refreshing...",
                                 style: "cursor: pointer;"
@@ -3039,21 +2006,21 @@ pub fn WalletView() -> Element {
                         } else if hardware_connected() {
                             match hardware_device_type() {
                                 Some(HardwareDeviceType::ESP32) => rsx! {
-                                    img { 
+                                    img {
                                         src: DEVICE_UNRGBL,
                                         alt: "Unruggable Hardware Wallet - Tap to Refresh",
                                         style: "cursor: pointer;"
                                     }
                                 },
                                 Some(HardwareDeviceType::Ledger) => rsx! {
-                                    img { 
+                                    img {
                                         src: DEVICE_LEDGER,
                                         alt: "Ledger Hardware Wallet - Tap to Refresh",
                                         style: "cursor: pointer;"
                                     }
                                 },
                                 None => rsx! {
-                                    img { 
+                                    img {
                                         src: DEVICE_UNRGBL,
                                         alt: "Hardware Wallet - Tap to Refresh",
                                         style: "cursor: pointer;"
@@ -3061,374 +2028,92 @@ pub fn WalletView() -> Element {
                                 }
                             }
                         } else {
-                            div {
-                                id: "liquid-metal-wallet-icon",
-                                style: "width: 64px; height: 64px; cursor: pointer;",
+                            img {
+                                src: DEVICE_SOFTWARE,
+                                alt: "Software wallet - tap to refresh",
+                                style: "cursor: pointer;"
                             }
                         }
                     }
                 }
-                
-                // Replace the current action-buttons div with this segmented version
+
                 div {
-                    id: "action-buttons-with-border",
                     class: "action-buttons-segmented",
-                    
-                    // Primary action buttons row (always visible)
                     div {
                         class: "action-buttons-grid",
-                        
                         button {
-                            id: "action-button-receive",
                             class: "action-button-segmented",
                             onclick: move |_| show_receive_modal.set(true),
-                            
                             div {
-                                id: "action-icon-receive",
                                 class: "action-icon-segmented",
-                                img { 
+                                img {
                                     src: "{ICON_RECEIVE}",
                                     alt: "Receive"
                                 }
                             }
-                            
+
                             div {
                                 class: "action-label-segmented",
                                 "Receive"
                             }
                         }
-                        
+
                         button {
-                            id: "action-button-send",
                             class: "action-button-segmented",
-                            onclick: move |_| {
-                                if bulk_send_mode() {
-                                    // Exit bulk mode
-                                    bulk_send_mode.set(false);
-                                    selected_tokens.set(HashSet::new());
-                                } else {
-                                    // Enter bulk send mode
-                                    bulk_send_mode.set(true);
-                                    eject_mode.set(false); // Ensure eject mode is off
-                                    selected_tokens.set(HashSet::new()); // Clear previous selections
-                                }
-                            },
-                            
+                            onclick: move |_| show_send_modal.set(true),
                             div {
-                                id: "action-icon-send",
                                 class: "action-icon-segmented",
-                                if bulk_send_mode() {
-                                    div {
-                                        style: "font-size: 24px; color: white;",
-                                        "❌" // Keep cancel emoji
-                                    }
-                                } else {
-                                    img {
-                                        src: "{ICON_BULK}",
-                                        alt: "Send"
-                                    }
+                                img {
+                                    src: "{ICON_SEND}",
+                                    alt: "Send"
                                 }
                             }
-                            
                             div {
                                 class: "action-label-segmented",
-                                if bulk_send_mode() {
-                                    "Cancel"
-                                } else {
-                                    "Send"
-                                }
+                                "Send"
                             }
                         }
 
                         button {
-                            id: "action-button-stake",
                             class: "action-button-segmented",
                             onclick: move |_| show_stake_modal.set(true),
-                            
                             div {
-                                id: "action-icon-stake",
                                 class: "action-icon-segmented",
-                                img { 
+                                img {
                                     src: "{ICON_STAKE}",
                                     alt: "Stake"
                                 }
                             }
-                            
+
                             div {
                                 class: "action-label-segmented",
                                 "Stake"
                             }
                         }
-                        
+
                         button {
-                            id: "action-button-swap",
                             class: "action-button-segmented",
                             onclick: move |_| show_swap_modal.set(true),
-                            
                             div {
-                                id: "action-icon-swap",
                                 class: "action-icon-segmented",
-                                img { 
+                                img {
                                     src: "{ICON_SWAP}",
                                     alt: "Swap"
                                 }
                             }
-                            
+
                             div {
                                 class: "action-label-segmented",
                                 "Swap"
                             }
                         }
-                        
-                        // Integrations button (replaces Lend in primary row)
-                        button {
-                            id: "action-button-integrations",
-                            class: "action-button-segmented",
-                            onclick: move |_| {
-                                show_integrations.set(!show_integrations());
-                                println!("Integrations button clicked - showing: {}", !show_integrations());
-                            },
-                            
-                            div {
-                                id: "action-icon-integrations",
-                                class: "action-icon-segmented",
-                                div {
-                                    style: "font-size: 20px; color: white;",
-                                    if show_integrations() {
-                                        "▼"
-                                    } else {
-                                        "▶"
-                                    }
-                                }
-                            }
-                            
-                            div {
-                                class: "action-label-segmented",
-                                "Integrations"
-                            }
-                        }
-                    }
-                    
-                    // Integrations row (conditional - only shown when integrations are expanded)
-                    if show_integrations() {
-                        div {
-                            class: "integrations-row",
-                            
-                            if integration_settings_value.lend {
-                                button {
-                                    id: "action-button-lend",
-                                    class: "action-button-segmented",
-                                    onclick: move |_| {
-                                        println!("Lend button clicked!");
-                                        show_lend_modal.set(true);
-                                    },
-                                    
-                                    div {
-                                        id: "action-icon-lend",
-                                        class: "action-icon-segmented",
-                                        img { 
-                                            src: "{ICON_LEND}",
-                                            alt: "Lend"
-                                        }
-                                    }
-                                    
-                                    div {
-                                        class: "action-label-segmented",
-                                        "Lend"
-                                    }
-                                }
-                            }
-                            
-                            // Temporarily disabled for Solana 3.x testing
-                            if integration_settings_value.squads {
-                                button {
-                                    id: "action-button-squads",
-                                    class: "action-button-segmented",
-                                    onclick: move |_| {
-                                        println!("Squads button clicked!");
-                                        show_squads_modal.set(true);
-                                    },
-                                    
-                                    div {
-                                        id: "action-icon-squads",
-                                        class: "action-icon-segmented",
-                                        img { 
-                                            src: "{ICON_SQUADS}",
-                                            alt: "Squads"
-                                        }
-                                    }
-                                    
-                                    div {
-                                        class: "action-label-segmented",
-                                        "Squads"
-                                    }
-                                }
-                            }
-                            // 
-                            if integration_settings_value.carrot {
-                                button {
-                                    id: "action-button-carrot",
-                                    class: "action-button-segmented",
-                                    onclick: move |_| {
-                                        println!("Carrot button clicked!");
-                                        show_carrot_modal.set(true);
-                                    },
-                                    
-                                    div {
-                                        id: "action-icon-carrot",
-                                        class: "action-icon-segmented",
-                                        img { 
-                                            src: "{ICON_CARROT}",
-                                            alt: "Carrot"
-                                        }
-                                    }
-                                    
-                                    div {
-                                        class: "action-label-segmented",
-                                        "Carrot"
-                                    }
-                                }
-                            }
-                            // 
-                            if integration_settings_value.bonk_stake {
-                                button {
-                                    id: "action-button-bonk",
-                                    class: "action-button-segmented",
-                                    onclick: move |_| {
-                                        println!("BONK Stake button clicked!");
-                                        show_bonk_staking_modal.set(true);
-                                    },
-
-                                    div {
-                                        id: "action-icon-bonk",
-                                        class: "action-icon-segmented",
-                                        img {
-                                            src: "{ICON_BONK_STAKE}",
-                                            alt: "BONK Stake"
-                                        }
-                                    }
-
-                                    div {
-                                        class: "action-label-segmented",
-                                        "BONK Stake"
-                                    }
-                                }
-                            }
-
-                            if integration_settings_value.quantum {
-                                button {
-                                    id: "action-button-quantum",
-                                    class: "action-button-segmented",
-                                    onclick: move |_| {
-                                        println!("Quantum Vault button clicked!");
-                                        show_quantum_vault_modal.set(true);
-                                    },
-
-                                    div {
-                                        id: "action-icon-quantum",
-                                        class: "action-icon-segmented",
-                                        img {
-                                            src: "{ICON_QUANTUM}",
-                                            alt: "Quantum Vault"
-                                        }
-                                    }
-
-                                    div {
-                                        class: "action-label-segmented",
-                                        "Quantum"
-                                    }
-                                }
-                            }
-
-                            if integration_settings_value.eject {
-                                button {
-                                    id: "action-button-eject",
-                                    class: "action-button-segmented",
-                                    onclick: move |_| {
-                                        if eject_mode() {
-                                            // Exit eject mode
-                                            eject_mode.set(false);
-                                            selected_tokens.set(HashSet::new());
-                                        } else {
-                                            // Enter eject mode
-                                            eject_mode.set(true);
-                                            bulk_send_mode.set(false); // Ensure bulk send is off
-                                            selected_tokens.set(HashSet::new()); // Clear previous selections
-                                        }
-                                    },
-
-                                    div {
-                                        id: "action-icon-eject",
-                                        class: "action-icon-segmented",
-                                        if eject_mode() {
-                                            div {
-                                                style: "font-size: 24px; color: white;",
-                                                "✕"
-                                            }
-                                        } else {
-                                            img {
-                                                src: "{ICON_EXPORT}",
-                                                alt: "EJECT"
-                                            }
-                                        }
-                                    }
-
-                                    div {
-                                        class: "action-label-segmented",
-                                        if eject_mode() {
-                                            "Cancel"
-                                        } else {
-                                            "EJECT"
-                                        }
-                                    }
-                                }
-                            }
-
-                            if integration_settings_value.privacy {
-                                button {
-                                    id: "action-button-privacy",
-                                    class: "action-button-segmented",
-                                    onclick: move |_| show_privacycash_modal.set(true),
-                                    div {
-                                        id: "action-icon-privacy",
-                                        class: "action-icon-segmented",
-                                        span { "🔒" }
-                                    }
-                                    div {
-                                        class: "action-label-segmented",
-                                        "Privacy"
-                                    }
-                                }
-                            }
-
-                            if integration_settings_value.retire {
-                                button {
-                                    id: "action-button-retire",
-                                    class: "action-button-segmented",
-                                    onclick: move |_| show_retire_modal.set(true),
-                                    div {
-                                        id: "action-icon-retire",
-                                        class: "action-icon-segmented",
-                                        img {
-                                            src: "{ICON_RETIRE}",
-                                            alt: "RETIRE"
-                                        }
-                                    }
-                                    div {
-                                        class: "action-label-segmented",
-                                        "RETIRE"
-                                    }
-                                }
-                            }
-                        }
                     }
                 }
             }
-            
+
             div {
                 class: "tokens-section",
-                
-                // Tab headers with existing bulk send functionality
+
                 div {
                     class: "tokens-tabs-header",
                     div {
@@ -3436,43 +2121,11 @@ pub fn WalletView() -> Element {
                         button {
                             class: if active_tab() == "tokens" { "tab-button active" } else { "tab-button" },
                             onclick: move |_| active_tab.set("tokens".to_string()),
-                            if (bulk_send_mode() || eject_mode()) && active_tab() == "tokens" {
-                                "Select Tokens"
-                            } else {
-                                "Your Tokens"
-                            }
-                        }
-                        button {
-                            class: if active_tab() == "collectibles" { "tab-button active" } else { "tab-button" },
-                            onclick: move |_| active_tab.set("collectibles".to_string()),
-                            "Collectibles"
-                        }
-                    }
-                    
-                    // Show bulk send button only when on tokens tab and in bulk mode with selections
-                    if active_tab() == "tokens" && bulk_send_mode() && !selected_tokens().is_empty() {
-                        button {
-                            class: "bulk-send-confirm-button",
-                            onclick: move |_| {
-                                show_bulk_send_modal.set(true);
-                            },
-                            "Send ({selected_tokens().len()})"
-                        }
-                    }
-
-                    // Show eject button only when on tokens tab and in eject mode with selections
-                    if active_tab() == "tokens" && eject_mode() && !selected_tokens().is_empty() {
-                        button {
-                            class: "bulk-send-confirm-button",
-                            style: "background: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);",
-                            onclick: move |_| {
-                                show_eject_modal.set(true);
-                            },
-                            "EJECT ({selected_tokens().len()})"
+                            "Your Tokens"
                         }
                     }
                 }
-                
+
                 // Tab content
                 match active_tab().as_str() {
                     "tokens" => rsx! {
@@ -3487,49 +2140,15 @@ pub fn WalletView() -> Element {
                                     let token_icon = token.icon_type.clone();
                                     let token_price = token.price;
                                     let token_balance = token.balance;
-                                    let token_value_usd = token.value_usd;
-                                    
+                                    let token_decimals = token.decimals;
+
                                     rsx! {
                                         div {
                                             key: "{token_mint}",
-                                            class: if (bulk_send_mode() || eject_mode()) && selected_tokens().contains(&token_mint) {
-                                                "token-item token-item-selected"
-                                            } else {
-                                                "token-item"
-                                            },
-                                            // Add click handler for bulk selection or eject selection
-                                            onclick: {
-                                                let mint_clone = token_mint.clone();
-                                                let is_selection_mode = bulk_send_mode() || eject_mode();
-                                                move |_| {
-                                                    if is_selection_mode {
-                                                        let mut current_selected = selected_tokens();
-                                                        if current_selected.contains(&mint_clone) {
-                                                            current_selected.remove(&mint_clone);
-                                                        } else {
-                                                            current_selected.insert(mint_clone.clone());
-                                                        }
-                                                        selected_tokens.set(current_selected);
-                                                    }
-                                                }
-                                            },
-
-                                            // Main token row
+                                            class: "token-item",
                                             div {
                                                 class: "token-row-main",
 
-                                                // Add selection checkbox when in bulk send or eject mode
-                                                if bulk_send_mode() || eject_mode() {
-                                                    div {
-                                                        class: "token-selection-checkbox",
-                                                        input {
-                                                            r#type: "checkbox",
-                                                            checked: selected_tokens().contains(&token_mint),
-                                                            onclick: move |e| e.stop_propagation(),
-                                                        }
-                                                    }
-                                                }
-                                                
                                                 div {
                                                     class: "token-info",
                                                     div {
@@ -3570,12 +2189,12 @@ pub fn WalletView() -> Element {
                                                                         if !is_stablecoin {
                                                                             let mut current_expanded = expanded_tokens();
                                                                             let is_expanding = !current_expanded.contains(&mint_clone);
-                                                                            
+
                                                                             if current_expanded.contains(&mint_clone) {
                                                                                 current_expanded.remove(&mint_clone);
                                                                             } else {
                                                                                 current_expanded.insert(mint_clone.clone());
-                                                                                
+
                                                                                 // Fetch chart data when expanding
                                                                                 if is_expanding {
                                                                                     let cache_key = format!("{}_1D", symbol_clone);
@@ -3607,77 +2226,55 @@ pub fn WalletView() -> Element {
                                                         }
                                                     }
                                                 }
-                                                
-                                                // Individual send button - ONLY show when NOT in bulk mode
-                                                if !bulk_send_mode() {
-                                                    if token_symbol == "SOL" {
-                                                        button {
-                                                            class: "token-send-button",
-                                                            onclick: move |e| {
-                                                                e.stop_propagation();
-                                                                send_modal_private.set(false);
-                                                                show_send_modal.set(true);
-                                                            },
-                                                            title: "Send SOL",
-                                                            div {
-                                                                class: "token-send-icon",
-                                                                img {
-                                                                    src: "{ICON_SEND}",
-                                                                    alt: "Send",
-                                                                    width: "14",
-                                                                    height: "14",
-                                                                }
+
+                                                if token_symbol == "SOL" {
+                                                    button {
+                                                        class: "token-send-button",
+                                                        onclick: move |e| {
+                                                            e.stop_propagation();
+                                                            show_send_modal.set(true);
+                                                        },
+                                                        title: "Send SOL",
+                                                        div {
+                                                            class: "token-send-icon",
+                                                            img {
+                                                                src: "{ICON_SEND}",
+                                                                alt: "Send",
+                                                                width: "14",
+                                                                height: "14",
                                                             }
                                                         }
-                                                        button {
-                                                            class: "token-send-button",
-                                                            onclick: move |e| {
+                                                    }
+                                                } else {
+                                                    button {
+                                                        class: "token-send-button",
+                                                        onclick: {
+                                                            let symbol_clone = token_symbol.clone();
+                                                            let mint_clone = token_mint.clone();
+                                                            let token_decimals = Some(token_decimals);
+
+                                                            move |e| {
                                                                 e.stop_propagation();
-                                                                send_modal_private.set(false);
-                                                                show_send_modal.set(true);
-                                                            },
-                                                            title: "Private Send SOL",
-                                                            div {
-                                                                class: "token-send-icon",
-                                                                span { "🔒" }
+                                                                selected_token_symbol.set(symbol_clone.clone());
+                                                                selected_token_mint.set(mint_clone.clone());
+                                                                selected_token_balance.set(token_balance);
+                                                                selected_token_decimals.set(token_decimals);
+                                                                show_send_token_modal.set(true);
                                                             }
-                                                        }
-                                                    } else {
-                                                        button {
-                                                            class: "token-send-button",
-                                                            onclick: {
-                                                                let symbol_clone = token_symbol.clone();
-                                                                let mint_clone = token_mint.clone();
-                                                                let token_decimals = match token_symbol.as_str() {
-                                                                    "SOL" => Some(9),
-                                                                    "USDC" | "USDT" => Some(6),
-                                                                    "ORE" => Some(11),
-                                                                    _ => Some(9),
-                                                                };
-                                                                
-                                                                move |e| {
-                                                                    e.stop_propagation();
-                                                                    selected_token_symbol.set(symbol_clone.clone());
-                                                                    selected_token_mint.set(mint_clone.clone());
-                                                                    selected_token_balance.set(token_balance);
-                                                                    selected_token_decimals.set(token_decimals);
-                                                                    show_send_token_modal.set(true);
-                                                                }
-                                                            },
-                                                            title: "Send {token_symbol}",
-                                                            div {
-                                                                class: "token-send-icon",
-                                                                img {
-                                                                    src: "{ICON_SEND}",
-                                                                    alt: "Send",
-                                                                    width: "14",
-                                                                    height: "14",
-                                                                }
+                                                        },
+                                                        title: "Send {token_symbol}",
+                                                        div {
+                                                            class: "token-send-icon",
+                                                            img {
+                                                                src: "{ICON_SEND}",
+                                                                alt: "Send",
+                                                                width: "14",
+                                                                height: "14",
                                                             }
                                                         }
                                                     }
                                                 }
-                                                
+
                                                 div {
                                                     class: "token-values",
                                                     div {
@@ -3688,69 +2285,29 @@ pub fn WalletView() -> Element {
                                                         class: "token-amount",
                                                         "{format_token_amount(token_balance, &token_symbol)}"
                                                     }
-                                                    if token_symbol == "SOL" {
-                                                        if let Some(balance) = private_balance_sol() {
-                                                            if balance > 0 {
-                                                                div {
-                                                                    class: "token-amount",
-                                                                    "Private: {(balance as f64) / 1_000_000_000.0:.2} SOL"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    if token_symbol == "USDC" {
-                                                        if let Some(balance) = private_balance_usdc() {
-                                                            if balance > 0 {
-                                                                div {
-                                                                    class: "token-amount",
-                                                                    "Private: {(balance as f64) / 1_000_000.0:.2} USDC"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    if token_symbol == "USDT" {
-                                                        if let Some(balance) = private_balance_usdt() {
-                                                            if balance > 0 {
-                                                                div {
-                                                                    class: "token-amount",
-                                                                    "Private: {(balance as f64) / 1_000_000.0:.2} USDT"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    if token_symbol == "ORE" || token_mint == ORE_MINT {
-                                                        if let Some(balance) = private_balance_ore() {
-                                                            if balance > 0 {
-                                                                div {
-                                                                    class: "token-amount",
-                                                                    "Private: {(balance as f64) / 100_000_000_000.0:.2} ORE"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
                                                 }
                                             }
-                                            
+
                                             // Chart section (spans full width BELOW the token row)
                                             if !matches!(token_symbol.as_str(), "USDC" | "USDT") && expanded_tokens().contains(&token_mint) {
                                                 div {
                                                     class: "token-chart-expanded-fullwidth",
-                                                    
+
                                                     {
                                                         let current_timeframe = selected_timeframe.read().get(&token_symbol).cloned().unwrap_or("1D".to_string());
                                                         let cache_key = format!("{}_{}", token_symbol, current_timeframe);
                                                         let has_chart_data = chart_data().contains_key(&cache_key);
                                                         let chart_data_clone = chart_data().get(&cache_key).cloned();
-                                                        
+
                                                         // Clone the timeframe for multiple uses
                                                         let timeframe_for_buttons = current_timeframe.clone();
                                                         let timeframe_for_chart = current_timeframe.clone();
-                                                        
+
                                                         rsx! {
                                                             // Timeframe selector buttons
                                                             div {
                                                                 class: "chart-timeframe-selector",
-                                                                
+
                                                                 button {
                                                                     class: if timeframe_for_buttons == "1H" { "timeframe-btn active" } else { "timeframe-btn" },
                                                                     onclick: {
@@ -3759,7 +2316,7 @@ pub fn WalletView() -> Element {
                                                                             let mut timeframes = selected_timeframe();
                                                                             timeframes.insert(symbol_clone.clone(), "1H".to_string());
                                                                             selected_timeframe.set(timeframes);
-                                                                            
+
                                                                             let symbol_for_fetch = symbol_clone.clone();
                                                                             spawn(async move {
                                                                                 fetch_chart_data_with_timeframe(symbol_for_fetch, "1H".to_string(), chart_data, chart_loading).await;
@@ -3768,7 +2325,7 @@ pub fn WalletView() -> Element {
                                                                     },
                                                                     "1H"
                                                                 }
-                                                                
+
                                                                 button {
                                                                     class: if timeframe_for_buttons == "1D" { "timeframe-btn active" } else { "timeframe-btn" },
                                                                     onclick: {
@@ -3777,7 +2334,7 @@ pub fn WalletView() -> Element {
                                                                             let mut timeframes = selected_timeframe();
                                                                             timeframes.insert(symbol_clone.clone(), "1D".to_string());
                                                                             selected_timeframe.set(timeframes);
-                                                                            
+
                                                                             let symbol_for_fetch = symbol_clone.clone();
                                                                             spawn(async move {
                                                                                 fetch_chart_data_with_timeframe(symbol_for_fetch, "1D".to_string(), chart_data, chart_loading).await;
@@ -3787,7 +2344,7 @@ pub fn WalletView() -> Element {
                                                                     "1D"
                                                                 }
                                                             }
-                                                            
+
                                                             // Show loading state
                                                             if chart_loading().contains(&cache_key) {
                                                                 div {
@@ -3825,94 +2382,19 @@ pub fn WalletView() -> Element {
                     "collectibles" => rsx! {
                         div {
                             class: "collectibles-list",
-                            if collectibles_loading() {
+                            div {
+                                class: "empty-state collectibles-empty-state",
                                 div {
-                                    class: "empty-state",
-                                    div {
-                                        class: "empty-icon",
-                                        "⏳"
-                                    }
-                                    div {
-                                        class: "empty-message",
-                                        "Loading collectibles..."
-                                    }
-                                    div {
-                                        class: "empty-description",
-                                        "Fetching your NFTs and digital assets"
-                                    }
+                                    class: "empty-icon",
+                                    "🎨"
                                 }
-                            } else if collectibles().is_empty() {
                                 div {
-                                    class: "empty-state",
-                                    div {
-                                        class: "empty-icon",
-                                        "🎨"
-                                    }
-                                    div {
-                                        class: "empty-message",
-                                        "No collectibles found"
-                                    }
-                                    div {
-                                        class: "empty-description",
-                                        "Your NFTs and collectibles will appear here"
-                                    }
+                                    class: "empty-message",
+                                    "Collectibles Coming Soon"
                                 }
-                            } else {
                                 div {
-                                    class: "collectibles-grid",
-                                    for collectible in collectibles() {
-                                        {
-                                            // Clone the values we need to avoid borrow checker issues
-                                            let collectible_mint = collectible.mint.clone();
-                                            let collectible_name = collectible.name.clone();
-                                            let collectible_collection = collectible.collection.clone();
-                                            let collectible_image = collectible.image.clone();
-                                            let collectible_verified = collectible.verified;
-                                            
-                                            rsx! {
-                                                div {
-                                                    key: "{collectible_mint}",
-                                                    class: "collectible-item",
-                                                    onclick: {
-                                                        let name_clone = collectible_name.clone();
-                                                        move |_| {
-                                                            println!("Clicked collectible: {}", name_clone);
-                                                        }
-                                                    },
-                                                    div {
-                                                        class: "collectible-image",
-                                                        img {
-                                                            src: "{collectible_image}",
-                                                            alt: "{collectible_name}",
-                                                            onerror: {
-                                                                let name_clone = collectible_name.clone();
-                                                                move |_| {
-                                                                    println!("Failed to load collectible image: {}", name_clone);
-                                                                }
-                                                            },
-                                                        }
-                                                    }
-                                                    div {
-                                                        class: "collectible-info",
-                                                        div {
-                                                            class: "collectible-name",
-                                                            "{collectible_name}"
-                                                        }
-                                                        div {
-                                                            class: "collectible-collection",
-                                                            "{collectible_collection}"
-                                                        }
-                                                        if collectible_verified {
-                                                            div {
-                                                                class: "collectible-verified",
-                                                                "✅"
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    class: "empty-description",
+                                    "Collectibles are temporarily disabled while we tighten NFT filtering and image validation so the experience stays clean and trustworthy."
                                 }
                             }
                         }

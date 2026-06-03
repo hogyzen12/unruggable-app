@@ -1,8 +1,9 @@
 // src/wallet.rs
-use ed25519_dalek::{SigningKey, VerifyingKey, Signer, Signature};
+use crate::pin;
+use bs58;
+use ed25519_dalek::{Signature, Signer, SigningKey};
 use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
-use bs58;
 
 /// Persistable wallet info for storage or serialization
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -29,10 +30,7 @@ impl Wallet {
     }
 
     /// Reconstruct from a raw private key (32 or 64 bytes)
-    pub fn from_private_key(
-        private_key_bytes: &[u8],
-        name: String,
-    ) -> Result<Self, String> {
+    pub fn from_private_key(private_key_bytes: &[u8], name: String) -> Result<Self, String> {
         match private_key_bytes.len() {
             32 => {
                 let mut key_bytes = [0u8; 32];
@@ -76,41 +74,74 @@ impl Wallet {
     }
 
     /// Serialize into `WalletInfo`
-    pub fn to_wallet_info(&self) -> WalletInfo {
-        WalletInfo {
+    pub fn to_wallet_info(&self) -> Result<WalletInfo, String> {
+        Ok(WalletInfo {
             name: self.name.clone(),
             address: self.get_public_key(),
-            encrypted_key: self.get_private_key(),
-        }
+            encrypted_key: pin::encrypt_secret_string(&self.get_private_key())?,
+        })
     }
 
     /// Deserialize from `WalletInfo`
     pub fn from_wallet_info(info: &WalletInfo) -> Result<Self, String> {
-        let bytes = bs58::decode(&info.encrypted_key)
+        let decrypted_key = pin::decrypt_secret_string(&info.encrypted_key)?;
+        let bytes = bs58::decode(&decrypted_key)
             .into_vec()
             .map_err(|e| format!("Decode error: {}", e))?;
         Self::from_private_key(&bytes, info.name.clone())
-    }
-
-    /// Sign a transaction message (serialized transaction)
-    pub fn sign_transaction(&self, message: &[u8]) -> String {
-        let signature = self.signing_key.sign(message);
-        bs58::encode(signature.to_bytes()).into_string()
     }
 
     /// Sign a message with ed25519
     pub fn sign_message(&self, message: &[u8]) -> Signature {
         self.signing_key.sign(message)
     }
+}
 
-    /// Get the verifying key (public key)
-    pub fn get_verifying_key(&self) -> VerifyingKey {
-        self.signing_key.verifying_key()
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pin::{clear_session, generate_salt, is_encrypted_secret, unlock_session};
+
+    #[test]
+    fn wallet_info_serialization_requires_unlocked_session() {
+        clear_session();
+
+        let wallet = Wallet::new("Test Wallet".to_string());
+        let err = wallet.to_wallet_info().unwrap_err();
+
+        assert!(err.contains("locked"));
     }
 
-    /// Sign a message and return the signature bytes
-    pub fn sign_message_bytes(&self, message: &[u8]) -> Vec<u8> {
-        let signature = self.signing_key.sign(message);
-        signature.to_bytes().to_vec()
+    #[test]
+    fn wallet_info_round_trip_encrypts_private_key() {
+        clear_session();
+
+        let wallet = Wallet::new("Test Wallet".to_string());
+        let salt = generate_salt();
+        unlock_session("123456", &salt).unwrap();
+
+        let wallet_info = wallet.to_wallet_info().unwrap();
+        assert!(is_encrypted_secret(&wallet_info.encrypted_key));
+        assert_ne!(wallet_info.encrypted_key, wallet.get_private_key());
+
+        let restored = Wallet::from_wallet_info(&wallet_info).unwrap();
+        assert_eq!(restored.get_public_key(), wallet.get_public_key());
+        assert_eq!(restored.get_private_key(), wallet.get_private_key());
+
+        clear_session();
+    }
+
+    #[test]
+    fn wallet_info_decryption_fails_after_relocking() {
+        clear_session();
+
+        let wallet = Wallet::new("Test Wallet".to_string());
+        let salt = generate_salt();
+        unlock_session("123456", &salt).unwrap();
+        let wallet_info = wallet.to_wallet_info().unwrap();
+
+        clear_session();
+        let err = Wallet::from_wallet_info(&wallet_info).unwrap_err();
+        assert!(err.contains("locked"));
     }
 }

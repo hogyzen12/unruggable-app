@@ -1,6 +1,6 @@
-use std::collections::HashMap;
-use std::sync::LazyLock;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VerifiedToken {
@@ -8,8 +8,9 @@ pub struct VerifiedToken {
     pub address: String,
     pub name: String,
     pub symbol: String,
-    #[serde(rename = "icon")]
+    #[serde(default, rename = "icon")]
     pub logo_uri: String,
+    #[serde(default)]
     pub tags: Vec<String>,
 }
 
@@ -28,13 +29,11 @@ pub struct TokenCatalogEntry {
 static TOKENS_JSON: &str = include_str!("../../assets/tokens.json");
 
 // Parse JSON only once when first accessed - mobile-friendly!
-static VERIFIED_TOKENS: LazyLock<HashMap<String, VerifiedToken>> = LazyLock::new(|| {
-    parse_tokens_from_json(TOKENS_JSON)
-});
+static VERIFIED_TOKENS: LazyLock<Arc<HashMap<String, VerifiedToken>>> =
+    LazyLock::new(|| Arc::new(parse_tokens_from_json(TOKENS_JSON)));
 
-static TOKEN_CATALOG: LazyLock<Vec<TokenCatalogEntry>> = LazyLock::new(|| {
-    parse_catalog_from_json(TOKENS_JSON)
-});
+static TOKEN_CATALOG: LazyLock<Vec<TokenCatalogEntry>> =
+    LazyLock::new(|| parse_catalog_from_json(TOKENS_JSON));
 
 /// Parse tokens from JSON string (used by both local and remote loading)
 fn parse_tokens_from_json(json_str: &str) -> HashMap<String, VerifiedToken> {
@@ -45,15 +44,18 @@ fn parse_tokens_from_json(json_str: &str) -> HashMap<String, VerifiedToken> {
                 // Use the address (id) as the key
                 map.insert(token.address.clone(), token);
             }
-            println!("Successfully loaded {} verified tokens from JSON", map.len());
+            println!(
+                "Successfully loaded {} verified tokens from JSON",
+                map.len()
+            );
             map
         }
         Err(e) => {
             eprintln!("Failed to parse tokens JSON: {}", e);
-            
+
             // Return minimal fallback tokens for critical functionality
             let mut fallback_map = HashMap::new();
-            
+
             // SOL - most critical
             fallback_map.insert(
                 "So11111111111111111111111111111111111111112".to_string(),
@@ -65,7 +67,7 @@ fn parse_tokens_from_json(json_str: &str) -> HashMap<String, VerifiedToken> {
                     tags: vec!["verified".to_string(), "fallback".to_string()],
                 },
             );
-            
+
             // USDC - second most critical
             fallback_map.insert(
                 "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v".to_string(),
@@ -77,7 +79,7 @@ fn parse_tokens_from_json(json_str: &str) -> HashMap<String, VerifiedToken> {
                     tags: vec!["verified".to_string(), "fallback".to_string()],
                 },
             );
-            
+
             println!("Using fallback tokens due to JSON parse error");
             fallback_map
         }
@@ -104,7 +106,10 @@ fn parse_catalog_from_json(json_str: &str) -> Vec<TokenCatalogEntry> {
 
     match serde_json::from_str::<Vec<TokenCatalogEntry>>(json_str) {
         Ok(tokens) => {
-            println!("Successfully loaded {} token catalog entries from JSON", tokens.len());
+            println!(
+                "Successfully loaded {} token catalog entries from JSON",
+                tokens.len()
+            );
             tokens
         }
         Err(e) => {
@@ -130,17 +135,29 @@ fn parse_catalog_from_json(json_str: &str) -> Vec<TokenCatalogEntry> {
 }
 
 /// Get reference to the verified tokens HashMap (mobile-safe)
+#[allow(dead_code)]
 pub fn get_verified_tokens() -> &'static HashMap<String, VerifiedToken> {
     &VERIFIED_TOKENS
 }
 
-pub fn get_token_catalog() -> &'static Vec<TokenCatalogEntry> {
-    &TOKEN_CATALOG
+pub fn get_verified_tokens_arc() -> Arc<HashMap<String, VerifiedToken>> {
+    Arc::clone(&VERIFIED_TOKENS)
 }
 
-/// Get a cloned copy of the verified tokens HashMap
-pub fn get_verified_tokens_cloned() -> HashMap<String, VerifiedToken> {
-    VERIFIED_TOKENS.clone()
+#[cfg(feature = "web")]
+pub async fn load_verified_tokens_async() -> Arc<HashMap<String, VerifiedToken>> {
+    get_verified_tokens_arc()
+}
+
+#[cfg(not(feature = "web"))]
+pub async fn load_verified_tokens_async() -> Arc<HashMap<String, VerifiedToken>> {
+    tokio::task::spawn_blocking(get_verified_tokens_arc)
+        .await
+        .unwrap_or_else(|_| get_verified_tokens_arc())
+}
+
+pub fn get_token_catalog() -> &'static Vec<TokenCatalogEntry> {
+    &TOKEN_CATALOG
 }
 
 // ============================================================================
@@ -155,7 +172,7 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 // For dynamic loading from URL (optional)
-static REMOTE_TOKENS: LazyLock<Arc<RwLock<Option<HashMap<String, VerifiedToken>>>>> = 
+static REMOTE_TOKENS: LazyLock<Arc<RwLock<Option<HashMap<String, VerifiedToken>>>>> =
     LazyLock::new(|| Arc::new(RwLock::new(None)));
 
 /// Fetch and update tokens from a remote URL (async)
@@ -164,15 +181,15 @@ pub async fn fetch_tokens_from_url(url: &str) -> Result<HashMap<String, Verified
     // Use your HTTP client of choice (reqwest, surf, etc.)
     let response = reqwest::get(url).await?;
     let json_text = response.text().await?;
-    
+
     let tokens_map = parse_tokens_from_json(&json_text);
-    
+
     // Update the global cache
     {
         let mut remote_tokens = REMOTE_TOKENS.write().await;
         *remote_tokens = Some(tokens_map.clone());
     }
-    
+
     println!("Successfully fetched {} tokens from URL: {}", tokens_map.len(), url);
     Ok(tokens_map)
 }
@@ -180,7 +197,7 @@ pub async fn fetch_tokens_from_url(url: &str) -> Result<HashMap<String, Verified
 /// Get tokens from remote cache if available, otherwise use local
 pub async fn get_tokens_with_remote_fallback() -> HashMap<String, VerifiedToken> {
     let remote_tokens = REMOTE_TOKENS.read().await;
-    
+
     if let Some(ref remote_map) = *remote_tokens {
         println!("Using remote tokens ({} tokens)", remote_map.len());
         remote_map.clone()
@@ -201,13 +218,13 @@ pub fn update_tokens_from_url_background(url: String) {
 }
 
 // Example usage in your app:
-// 
+//
 // // On app startup (optional background refresh):
 // update_tokens_from_url_background("https://api.yourservice.com/tokens.json".to_string());
-// 
+//
 // // In your component:
 // let tokens = get_tokens_with_remote_fallback().await;
-// 
+//
 // // Or force refresh:
 // let fresh_tokens = fetch_tokens_from_url("https://api.yourservice.com/tokens.json").await?;
 */

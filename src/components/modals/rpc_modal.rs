@@ -1,21 +1,25 @@
-use dioxus::prelude::*;
 use crate::rpc;
+use dioxus::prelude::*;
 
 #[component]
-pub fn RpcModal(current_rpc: Option<String>, onclose: EventHandler<()>, onsave: EventHandler<String>) -> Element {
+pub fn RpcModal(
+    current_rpc: Option<String>,
+    onclose: EventHandler<()>,
+    onsave: EventHandler<String>,
+) -> Element {
     let mut rpc_url = use_signal(|| current_rpc.clone().unwrap_or_default());
     let mut error_message = use_signal(|| None as Option<String>);
     let mut testing = use_signal(|| false);
-    
+
     rsx! {
         div {
             class: "modal-backdrop",
             onclick: move |_| onclose.call(()),
-            
+
             div {
                 class: "modal-content",
                 onclick: move |e| e.stop_propagation(),
-                
+
                 div {
                     class: "modal-header",
                     h2 { class: "modal-title", "RPC Settings" }
@@ -25,7 +29,7 @@ pub fn RpcModal(current_rpc: Option<String>, onclose: EventHandler<()>, onsave: 
                         "×"
                     }
                 }
-                
+
                 // Show error if any
                 if let Some(error) = error_message() {
                     div {
@@ -33,7 +37,7 @@ pub fn RpcModal(current_rpc: Option<String>, onclose: EventHandler<()>, onsave: 
                         "{error}"
                     }
                 }
-                
+
                 div {
                     class: "wallet-field",
                     label { "RPC URL:" }
@@ -47,14 +51,14 @@ pub fn RpcModal(current_rpc: Option<String>, onclose: EventHandler<()>, onsave: 
                         "Leave empty to use default RPC"
                     }
                 }
-                
+
                 if let Some(current) = current_rpc {
                     div {
                         class: "info-message",
                         "Current RPC: {current}"
                     }
                 }
-                
+
                 div { class: "modal-buttons",
                     button {
                         class: "button-standard secondary",
@@ -67,10 +71,10 @@ pub fn RpcModal(current_rpc: Option<String>, onclose: EventHandler<()>, onsave: 
                             testing.set(true);
                             error_message.set(None);
                             let test_rpc = rpc_url();
-                            
+
                             spawn(async move {
                                 // Test the RPC with a known address
-                                match rpc::get_balance("11111111111111111111111111111111", 
+                                match rpc::get_balance("11111111111111111111111111111111",
                                     if test_rpc.is_empty() { None } else { Some(&test_rpc) }).await {
                                     Ok(_) => {
                                         error_message.set(None);

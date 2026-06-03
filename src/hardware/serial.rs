@@ -7,10 +7,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
-use tokio_serial::{SerialPortBuilderExt, SerialStream};
+use tokio_serial::{
+    ClearBuffer, SerialPort as TokioSerialPort, SerialPortBuilderExt, SerialStream,
+};
 
 const DEFAULT_RESPONSE_TIMEOUT: Duration = Duration::from_secs(10);
 const BUTTON_FLOW_RESPONSE_TIMEOUT: Duration = Duration::from_secs(45);
+const STARTUP_SETTLE_DELAY: Duration = Duration::from_secs(2);
+const STARTUP_NOISE_READ_TIMEOUT: Duration = Duration::from_millis(60);
 const MAX_LINE_BYTES: usize = 8192;
 
 pub struct SerialConnection {
@@ -73,16 +77,35 @@ impl SerialConnection {
 
     /// Connect to a specific port
     pub async fn connect(port_name: &str) -> Result<Self, Box<dyn Error>> {
-        let port = tokio_serial::new(port_name, 115200)
-            .timeout(Duration::from_millis(5000))
+        let mut port = tokio_serial::new(port_name, 115200)
+            .timeout(Duration::from_millis(250))
             .open_native_async()?;
 
-        // Ensure the port is readable and writable
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        // Avoid resetting the device again right after open, then give firmware time to boot.
+        let _ = port.write_data_terminal_ready(false);
+        let _ = port.write_request_to_send(false);
+
+        tokio::time::sleep(STARTUP_SETTLE_DELAY).await;
+        let _ = port.clear(ClearBuffer::All);
+        Self::flush_startup_noise(&mut port).await;
 
         Ok(Self {
             port: Arc::new(Mutex::new(port)),
         })
+    }
+
+    async fn flush_startup_noise(port: &mut SerialStream) {
+        let _ = port.clear(ClearBuffer::Input);
+
+        let mut scratch = [0u8; 256];
+        loop {
+            match tokio::time::timeout(STARTUP_NOISE_READ_TIMEOUT, port.read(&mut scratch)).await {
+                Ok(Ok(read)) if read > 0 => continue,
+                Ok(Ok(_)) | Ok(Err(_)) | Err(_) => break,
+            }
+        }
+
+        let _ = port.clear(ClearBuffer::Input);
     }
 
     /// Send a command and read the first parseable protocol response line.

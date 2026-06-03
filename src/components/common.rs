@@ -1,7 +1,9 @@
+#![allow(dead_code)]
+
 /// Token structure for wallet holdings
 #[derive(Clone, Debug, PartialEq)]
 pub struct Token {
-    pub mint: String,      // Added to store the unique mint address
+    pub mint: String, // Added to store the unique mint address
     pub symbol: String,
     pub name: String,
     pub icon_type: String,
@@ -12,7 +14,7 @@ pub struct Token {
     pub price_change_1d: f64,
     pub price_change_3d: f64,
     pub price_change_7d: f64,
-    pub decimals: u8,      // Token decimals for proper amount conversion
+    pub decimals: u8, // Token decimals for proper amount conversion
 }
 
 // Add after the existing Token struct
@@ -30,21 +32,21 @@ pub struct TokenDisplayData {
 /// Token categories for organization
 #[derive(Clone, Debug, PartialEq)]
 pub enum TokenCategory {
-    Native,      // SOL
-    Stablecoin,  // USDC, USDT
-    DeFi,        // JUP, JTO, JLP
-    Meme,        // BONK
+    Native,     // SOL
+    Stablecoin, // USDC, USDT
+    DeFi,       // JUP, JTO, JLP
+    Meme,       // BONK
     Unknown,
 }
 
 /// Sorting criteria options
 #[derive(Clone, Debug, PartialEq)]
 pub enum SortCriteria {
-    ValueUsd,           // By USD value (default)
-    Balance,            // By token balance
-    PriceChange24h,     // By 24h price change
-    Alphabetical,       // By symbol
-    HasPrice,           // Tokens with price data first
+    ValueUsd,       // By USD value (default)
+    Balance,        // By token balance
+    PriceChange24h, // By 24h price change
+    Alphabetical,   // By symbol
+    HasPrice,       // Tokens with price data first
 }
 
 /// Configuration for token sorting

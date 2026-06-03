@@ -1,12 +1,10 @@
 // src/components/address_input.rs
-use dioxus::prelude::*;
-use solana_sdk::pubkey::Pubkey;
 use crate::sns::SnsResolver;
 use crate::storage::{
-    load_address_book_from_storage,
-    upsert_address_book_entry,
-    remove_address_book_entry,
+    load_address_book_from_storage, remove_address_book_entry, upsert_address_book_entry,
 };
+use dioxus::prelude::*;
+use solana_sdk::pubkey::Pubkey;
 use std::sync::Arc;
 
 #[derive(Props, Clone, PartialEq)]
@@ -32,9 +30,9 @@ pub enum ValidationState {
 
 #[component]
 pub fn AddressInput(props: AddressInputProps) -> Element {
-    let mut validation_state = use_signal(|| ValidationState::Empty);
+    let validation_state = use_signal(|| ValidationState::Empty);
     let sns_resolver = use_context::<Arc<SnsResolver>>();
-    
+
     let show_validation = props.show_validation.unwrap_or(true);
     let auto_resolve = props.auto_resolve.unwrap_or(false);
     let disabled = props.disabled.unwrap_or(false);
@@ -44,7 +42,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
     let mut show_book = use_signal(|| false);
     let mut label_input = use_signal(|| String::new());
 
-    let mut latest_value = use_signal(|| props.value.clone());
+    let latest_value = use_signal(|| props.value.clone());
     let props_on_change = props.on_change.clone();
     let props_on_resolved = props.on_resolved.clone();
 
@@ -52,7 +50,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
         let mut validation_state = validation_state.clone();
         let sns_resolver = sns_resolver.clone();
         let on_resolved = props_on_resolved.clone();
-        
+
         move |input: String| {
             if input.trim().is_empty() {
                 validation_state.set(ValidationState::Empty);
@@ -61,13 +59,13 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
             }
 
             validation_state.set(ValidationState::Resolving);
-            
+
             // Use the detailed resolver for better UX
             match sns_resolver.resolve_address_with_details(&input) {
                 Ok((pubkey, description)) => {
                     validation_state.set(ValidationState::Success(pubkey, description));
                     on_resolved.call(Some(pubkey));
-                },
+                }
                 Err(error) => {
                     validation_state.set(ValidationState::Error(error));
                     on_resolved.call(None);
@@ -78,15 +76,15 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
 
     // Handle input changes
     let handle_input = {
-        let mut resolve_handler = resolve_address_handler.clone();
+        let resolve_handler = resolve_address_handler.clone();
         let props_on_change = props_on_change.clone();
         let mut latest_value = latest_value.clone();
-        
+
         move |evt: FormEvent| {
             let new_value = evt.value();
             props_on_change.call(new_value.clone());
             latest_value.set(new_value.clone());
-            
+
             if auto_resolve && !new_value.trim().is_empty() {
                 // Simple debounce using spawn
                 let mut resolve_fn = resolve_handler.clone();
@@ -103,7 +101,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
     let handle_blur = {
         let mut resolve_handler = resolve_address_handler.clone();
         let latest_value = latest_value.clone();
-        
+
         move |_| {
             if !auto_resolve {
                 resolve_handler(latest_value());
@@ -121,15 +119,15 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
 
     rsx! {
         div { class: "address-input-container",
-            
+
             // Label
             if let Some(label) = &props.label {
-                label { 
+                label {
                     class: "address-input-label",
                     "{label}"
                 }
             }
-            
+
             // Input field
             div { class: "address-input-wrapper",
                 input {
@@ -140,7 +138,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
                     oninput: handle_input,
                     onblur: handle_blur,
                 }
-                
+
                 // Status indicator
                 div { class: "address-input-status",
                     match &*validation_state.read() {
@@ -157,7 +155,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
                     }
                 }
             }
-            
+
             // Validation feedback
             if show_validation {
                 div { class: "address-input-feedback",
@@ -182,7 +180,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
                     }
                 }
             }
-            
+
             // Helper text
             if matches!(&*validation_state.read(), ValidationState::Empty) {
                 div { class: "address-input-helper",
@@ -306,7 +304,7 @@ pub fn AddressInput(props: AddressInputProps) -> Element {
                 }
             }
         }
-        
+
         // CSS styles
         style { {CSS_STYLES} }
     }

@@ -1,10 +1,12 @@
 // src/sns.rs - Cloudflare Worker-based SNS resolver (async-compatible)
+#![allow(dead_code)]
+
+use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::collections::HashMap;
 use std::sync::Mutex;
-use serde::{Deserialize, Serialize};
 
 // Cloudflare worker response format
 #[derive(Debug, Deserialize, Serialize)]
@@ -49,8 +51,8 @@ impl SnsResolver {
     /// Check if input looks like an SNS domain
     pub fn is_sns_domain(&self, input: &str) -> bool {
         let trimmed = input.trim().to_lowercase();
-        trimmed.ends_with(".sol") || 
-        (!trimmed.contains('.') && trimmed.len() > 0 && !self.is_solana_pubkey(&trimmed))
+        trimmed.ends_with(".sol")
+            || (!trimmed.contains('.') && trimmed.len() > 0 && !self.is_solana_pubkey(&trimmed))
     }
 
     /// Check if input is valid Solana pubkey
@@ -68,7 +70,7 @@ impl SnsResolver {
     pub async fn resolve_domain_async(&self, domain: &str) -> Result<Pubkey, SnsError> {
         let clean_domain = self.trim_tld(domain);
         let cache_key = clean_domain.clone();
-        
+
         // Check cache first
         if let Ok(cache) = self.cache.lock() {
             if let Some(cached_pubkey) = cache.get(&cache_key) {
@@ -78,21 +80,21 @@ impl SnsResolver {
         }
 
         let url = format!("{}/resolve/{}", self.base_url, clean_domain);
-        
+
         println!("🌐 Resolving '{}' via Cloudflare: {}", clean_domain, url);
 
-        let response = self.client
-            .get(&url)
-            .send()
-            .await?;
+        let response = self.client.get(&url).send().await?;
 
         if !response.status().is_success() {
             println!("❌ HTTP error: {}", response.status());
-            return Err(SnsError::NetworkError(format!("HTTP {}", response.status())));
+            return Err(SnsError::NetworkError(format!(
+                "HTTP {}",
+                response.status()
+            )));
         }
 
         let cloudflare_response: CloudflareResponse = response.json().await?;
-        
+
         println!("📡 Cloudflare response: {:?}", cloudflare_response);
 
         match cloudflare_response.s.as_str() {
@@ -101,12 +103,12 @@ impl SnsResolver {
                     match Pubkey::from_str(&result) {
                         Ok(pubkey) => {
                             println!("✅ Successfully resolved '{}' to {}", clean_domain, pubkey);
-                            
+
                             // Cache the result
                             if let Ok(mut cache) = self.cache.lock() {
                                 cache.insert(cache_key, pubkey);
                             }
-                            
+
                             Ok(pubkey)
                         }
                         Err(e) => {
@@ -120,7 +122,9 @@ impl SnsResolver {
                 }
             }
             "error" => {
-                let error_msg = cloudflare_response.error.unwrap_or_else(|| "Unknown error".to_string());
+                let error_msg = cloudflare_response
+                    .error
+                    .unwrap_or_else(|| "Unknown error".to_string());
                 println!("❌ Cloudflare error: {}", error_msg);
                 Err(SnsError::NetworkError(error_msg))
             }
@@ -134,7 +138,7 @@ impl SnsResolver {
     /// Main function to resolve any address input (domain or pubkey) - SYNC version for compatibility
     pub fn resolve_address(&self, input: &str) -> Result<Pubkey, String> {
         let trimmed_input = input.trim();
-        
+
         if trimmed_input.is_empty() {
             return Err("Address cannot be empty".to_string());
         }
@@ -144,40 +148,51 @@ impl SnsResolver {
             return Pubkey::from_str(trimmed_input)
                 .map_err(|e| format!("Invalid public key: {}", e));
         }
-        
+
         // If it looks like an SNS domain, we need to use async resolution
         if self.is_sns_domain(trimmed_input) {
             // For sync compatibility, we'll spawn a task and block on it
             let resolver = self.clone();
             let domain = trimmed_input.to_string();
             let domain_for_error = trimmed_input.to_string(); // Clone for error messages
-            
+
             // This is a workaround for sync contexts - in practice, you'd want to make everything async
             let rt = tokio::runtime::Handle::current();
             match std::thread::spawn(move || {
-                rt.block_on(async {
-                    resolver.resolve_domain_async(&domain).await
-                })
-            }).join() {
+                rt.block_on(async { resolver.resolve_domain_async(&domain).await })
+            })
+            .join()
+            {
                 Ok(result) => match result {
                     Ok(pubkey) => Ok(pubkey),
-                    Err(SnsError::NotFound) => Err(format!("Domain '{}' not found", domain_for_error)),
-                    Err(e) => Err(format!("Failed to resolve domain '{}': {:?}", domain_for_error, e)),
+                    Err(SnsError::NotFound) => {
+                        Err(format!("Domain '{}' not found", domain_for_error))
+                    }
+                    Err(e) => Err(format!(
+                        "Failed to resolve domain '{}': {:?}",
+                        domain_for_error, e
+                    )),
                 },
-                Err(_) => Err(format!("Resolution task panicked for domain '{}'", domain_for_error)),
+                Err(_) => Err(format!(
+                    "Resolution task panicked for domain '{}'",
+                    domain_for_error
+                )),
             }
         } else {
-            Err("Input must be a valid Solana address or SNS domain (e.g., 'domain.sol')".to_string())
+            Err(
+                "Input must be a valid Solana address or SNS domain (e.g., 'domain.sol')"
+                    .to_string(),
+            )
         }
     }
 
     /// Resolve with additional details for better UX
     pub fn resolve_address_with_details(&self, input: &str) -> Result<(Pubkey, String), String> {
         let trimmed_input = input.trim();
-        
+
         if self.is_solana_pubkey(trimmed_input) {
-            let pubkey = Pubkey::from_str(trimmed_input)
-                .map_err(|_| "Invalid Solana address format")?;
+            let pubkey =
+                Pubkey::from_str(trimmed_input).map_err(|_| "Invalid Solana address format")?;
             Ok((pubkey, "Direct address".to_string()))
         } else if self.is_sns_domain(trimmed_input) {
             match self.resolve_address(trimmed_input) {
@@ -220,13 +235,16 @@ mod tests {
     #[tokio::test]
     async fn test_cloudflare_resolution() {
         let resolver = SnsResolver::new("dummy".to_string());
-        
+
         // Test known working domain
         match resolver.resolve_domain_async("bonfida").await {
             Ok(pubkey) => {
                 println!("✅ bonfida -> {}", pubkey);
                 // Expected result based on the documentation
-                assert_eq!(pubkey.to_string(), "HKKp49qGWXd639QsuH7JiLijfVW5UtCVY4s1n2HANwEA");
+                assert_eq!(
+                    pubkey.to_string(),
+                    "HKKp49qGWXd639QsuH7JiLijfVW5UtCVY4s1n2HANwEA"
+                );
             }
             Err(e) => {
                 println!("❌ Error: {:?}", e);
@@ -237,7 +255,7 @@ mod tests {
     #[test]
     fn test_sync_resolution() {
         let resolver = SnsResolver::new("dummy".to_string());
-        
+
         match resolver.resolve_address("bonfida.sol") {
             Ok(pubkey) => {
                 println!("✅ Sync resolution: bonfida.sol -> {}", pubkey);

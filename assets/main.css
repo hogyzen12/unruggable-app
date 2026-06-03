@@ -850,14 +850,109 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 48px;
-    height: 48px;
+    width: 56px;
+    height: 56px;
     flex-shrink: 0;
 }
 
 .hardware-wallet-button {
-    --size: 48px;
+    --size: 56px;
     padding: 0;
+    position: relative;
+    overflow: visible;
+}
+
+.hardware-button-aura {
+    position: absolute;
+    inset: -8px;
+    border-radius: 999px;
+    pointer-events: none;
+    opacity: 0.9;
+    transition: all 0.25s ease;
+}
+
+.hardware-wallet-button.hardware-wallet-idle .hardware-button-aura {
+    background: radial-gradient(circle, rgba(148, 163, 184, 0.14) 0%, rgba(148, 163, 184, 0) 72%);
+}
+
+.hardware-wallet-button.hardware-wallet-detected .hardware-button-aura {
+    background: radial-gradient(circle, rgba(245, 158, 11, 0.24) 0%, rgba(245, 158, 11, 0) 72%);
+}
+
+.hardware-wallet-button.hardware-wallet-connected .hardware-button-aura {
+    background: radial-gradient(circle, rgba(34, 197, 94, 0.28) 0%, rgba(34, 197, 94, 0) 72%);
+    animation: hardwareAuraPulse 1.8s ease-in-out infinite;
+}
+
+.hardware-button-icon-frame {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.hardware-wallet-button.hardware-wallet-connected .hardware-button-icon-frame {
+    background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.18), rgba(12, 42, 28, 0.78) 68%);
+}
+
+.hardware-wallet-button.hardware-wallet-detected .hardware-button-icon-frame {
+    background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.16), rgba(66, 42, 10, 0.78) 68%);
+}
+
+.hardware-wallet-button.hardware-wallet-idle .hardware-button-icon-frame {
+    background: radial-gradient(circle at 35% 30%, rgba(255, 255, 255, 0.12), rgba(30, 41, 59, 0.82) 68%);
+}
+
+.hardware-button-led {
+    position: absolute;
+    top: 4px;
+    right: 3px;
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    border: 2px solid rgba(2, 6, 23, 0.96);
+    box-shadow: 0 0 0 4px rgba(2, 6, 23, 0.24);
+    pointer-events: none;
+    transition: all 0.25s ease;
+}
+
+.hardware-button-led.idle {
+    background: #64748b;
+    box-shadow: 0 0 0 4px rgba(2, 6, 23, 0.24), 0 0 10px rgba(100, 116, 139, 0.16);
+}
+
+.hardware-button-led.detected {
+    background: #f59e0b;
+    box-shadow: 0 0 0 4px rgba(2, 6, 23, 0.24), 0 0 14px rgba(245, 158, 11, 0.42);
+}
+
+.hardware-button-led.connected {
+    background: #22c55e;
+    box-shadow: 0 0 0 4px rgba(2, 6, 23, 0.24), 0 0 18px rgba(34, 197, 94, 0.58);
+    animation: hardwareLedPulse 1.6s ease-in-out infinite;
+}
+
+@keyframes hardwareAuraPulse {
+    0%, 100% {
+        transform: scale(0.96);
+        opacity: 0.78;
+    }
+    50% {
+        transform: scale(1.04);
+        opacity: 1;
+    }
+}
+
+@keyframes hardwareLedPulse {
+    0%, 100% {
+        transform: scale(1);
+    }
+    50% {
+        transform: scale(1.18);
+    }
 }
 
 .hardware-wallet-button .cup img,
@@ -868,18 +963,25 @@ body {
 
 @media (max-width: 768px) {
     .hardware-button-wrapper {
-        width: 40px;
-        height: 40px;
+        width: 48px;
+        height: 48px;
     }
 
     .hardware-wallet-button {
-        --size: 40px;
+        --size: 48px;
     }
 
     .hardware-wallet-button .cup img,
     .hardware-wallet-button .cup svg {
         width: 20px;
         height: 20px;
+    }
+
+    .hardware-button-led {
+        width: 11px;
+        height: 11px;
+        top: 3px;
+        right: 3px;
     }
 }
 
@@ -3667,46 +3769,14 @@ input:checked + .toggle-slider:before {
 /* Currency Modal Styles - Add to assets/main.css */
 
 .currency-modal {
-    max-width: 520px;
-    max-height: 80vh;
+    max-height: min(82vh, 760px);
 }
 
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-}
-
-.refresh-button {
-    background-color: #374151;
-    border: none;
-    border-radius: 8px;
-    color: white;
-    width: 36px;
-    height: 36px;
-    cursor: pointer;
-    font-size: 18px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background-color 0.2s;
-}
-
-.refresh-button:hover:not(:disabled) {
-    background-color: #4b5563;
-}
-
-.refresh-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-.loading-indicator {
+.currency-modal .loading-indicator {
     text-align: center;
     color: #6b7280;
     font-style: italic;
-    margin-bottom: 16px;
+    margin: 0 24px 16px;
     padding: 12px;
     background-color: #1f2937;
     border-radius: 8px;
@@ -3718,7 +3788,7 @@ input:checked + .toggle-slider:before {
     gap: 8px;
     max-height: 400px;
     overflow-y: auto;
-    margin-bottom: 20px;
+    margin: 0 24px 20px;
 }
 
 .currency-item {
@@ -3809,18 +3879,11 @@ input:checked + .toggle-slider:before {
     margin-left: 12px;
 }
 
-.modal-footer {
+.currency-modal-actions {
     display: flex;
-    justify-content: space-between;
+    justify-content: center;
     align-items: center;
-    border-top: 1px solid #374151;
-    padding-top: 16px;
-}
-
-.rate-info {
-    font-size: 12px;
-    color: #6b7280;
-    flex: 1;
+    padding: 0 24px 24px;
 }
 
 /* Currency selector in dropdown menu */
@@ -3842,7 +3905,6 @@ input:checked + .toggle-slider:before {
 /* Responsive adjustments */
 @media (max-width: 480px) {
     .currency-modal {
-        width: 95%;
         max-height: 85vh;
     }
     
@@ -3860,14 +3922,8 @@ input:checked + .toggle-slider:before {
         font-size: 16px;
     }
     
-    .modal-footer {
-        flex-direction: column;
-        gap: 12px;
-        align-items: stretch;
-    }
-    
-    .rate-info {
-        text-align: center;
+    .currency-modal-actions {
+        padding: 0 20px 20px;
     }
 }
 
@@ -4851,6 +4907,41 @@ body:has(.token-item-selected) .token-item:hover {
     cursor: not-allowed !important;
     transform: none !important;
     box-shadow: none !important;
+}
+
+.swap-submit-button.is-busy {
+    background-size: 200% 100% !important;
+    animation: swap-button-sheen 1.15s linear infinite;
+}
+
+.swap-submit-content {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+}
+
+.swap-submit-spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: 2px solid rgba(15, 23, 42, 0.18);
+    border-top-color: rgba(15, 23, 42, 0.82);
+    animation: spin 0.9s linear infinite;
+    flex-shrink: 0;
+}
+
+.swap-submit-hint {
+    min-height: 18px;
+    text-align: center;
+    font-size: 12px;
+    color: #94a3b8;
+    letter-spacing: 0.02em;
+}
+
+@keyframes swap-button-sheen {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
 }
 
 /* Mobile responsiveness */
@@ -5858,6 +5949,45 @@ body:has(.token-item-selected) .token-item:hover {
 
 .connect-device-button.connecting {
     background: linear-gradient(135deg, #9ca3af, #6b7280);
+    box-shadow: 0 10px 24px -14px rgba(156, 163, 175, 0.65);
+}
+
+.connect-device-button-copy {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    line-height: 1.05;
+}
+
+.connect-device-button-label {
+    font-size: 14px;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+.connect-device-button-status {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.78);
+    font-weight: 500;
+}
+
+.connect-device-button-spinner {
+    width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    border: 2px solid rgba(255, 255, 255, 0.26);
+    border-top-color: rgba(255, 255, 255, 0.95);
+    animation: hardwareConnectSpin 0.9s linear infinite;
+    flex: 0 0 auto;
+}
+
+@keyframes hardwareConnectSpin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 .pubkey-label {
@@ -5942,13 +6072,14 @@ body:has(.token-item-selected) .token-item:hover {
 }
 
 .hardware-modal .connection-step-chip {
-    padding: 6px 12px;
+    padding: 7px 13px;
     border-radius: 999px;
     border: 1px solid rgba(99, 102, 241, 0.45);
-    background: rgba(99, 102, 241, 0.14);
+    background: rgba(99, 102, 241, 0.18);
     color: #c7d2fe;
     font-size: 12px;
-    font-weight: 600;
+    font-weight: 700;
+    letter-spacing: 0.02em;
 }
 
 .hardware-modal .no-devices-actions {
@@ -5975,12 +6106,14 @@ body:has(.token-item-selected) .token-item:hover {
 }
 
 .hardware-modal .pin-input-container {
-    max-width: none;
+    max-width: 390px;
     width: 100%;
-    padding: 0;
-    background: transparent;
-    border-radius: 0;
-    box-shadow: none;
+    margin: 20px auto 0;
+    padding: 28px 22px;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(2, 6, 23, 0.88));
+    border-radius: 24px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.04);
     overflow: visible;
 }
 
@@ -5989,15 +6122,18 @@ body:has(.token-item-selected) .token-item:hover {
 }
 
 .hardware-modal .pin-input-title {
-    font-size: 24px;
+    font-size: 22px;
+    letter-spacing: -0.03em;
 }
 
 .hardware-modal .pin-input-subtitle {
-    margin-bottom: 24px;
+    margin-bottom: 18px;
+    color: #cbd5e1;
 }
 
 .hardware-modal .pin-dots-container {
-    margin: 24px 0;
+    margin: 18px 0 20px;
+    gap: 16px;
 }
 
 .hardware-modal .pin-number-button,
@@ -6007,12 +6143,694 @@ body:has(.token-item-selected) .token-item:hover {
     height: 68px;
 }
 
+.hardware-modal .connected-section {
+    text-align: left;
+    margin-bottom: 24px;
+    padding: 24px;
+    border-radius: 24px;
+    background: linear-gradient(180deg, rgba(17, 24, 39, 0.94), rgba(8, 15, 29, 0.9));
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.24);
+}
+
+.hardware-modal .connected-section h3 {
+    text-align: center;
+    font-size: 24px;
+    margin: 0 0 10px 0;
+    letter-spacing: -0.03em;
+}
+
+.hardware-modal .connected-section > .info-subtitle {
+    max-width: 460px;
+    margin: 0 auto 18px;
+    text-align: center;
+    line-height: 1.55;
+    color: #cbd5e1;
+}
+
+.hardware-modal .connected-section .wallet-field {
+    background: rgba(15, 23, 42, 0.5);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    border-radius: 18px;
+    padding: 18px;
+    margin-top: 18px;
+}
+
+.hardware-modal .connected-section input[type="password"] {
+    width: 100%;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(2, 6, 23, 0.82);
+    color: #f8fafc;
+    text-align: center;
+    font-size: 26px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    letter-spacing: 0.36em;
+}
+
+.hardware-modal .connected-section input[type="password"]::placeholder {
+    color: rgba(148, 163, 184, 0.42);
+    letter-spacing: 0.18em;
+}
+
+.hardware-modal .connected-section .modal-buttons {
+    margin-top: 18px;
+}
+
 @media (max-width: 480px) {
     .hardware-modal .pin-number-button,
     .hardware-modal .pin-action-button,
     .hardware-modal .pin-spacer {
         width: 60px;
         height: 60px;
+    }
+
+    .hardware-modal .connected-section {
+        padding: 18px;
+        border-radius: 20px;
+    }
+
+    .hardware-modal .connected-section h3 {
+        font-size: 21px;
+    }
+
+    .hardware-modal .connected-section input[type="password"] {
+        font-size: 22px;
+        letter-spacing: 0.28em;
+    }
+}
+
+/* Hardware modal polish for connect + auth flow */
+.hardware-modal {
+    width: min(92vw, 540px);
+    max-width: 540px;
+    max-height: min(88vh, 760px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    background:
+        radial-gradient(circle at top, rgba(99, 102, 241, 0.18), transparent 34%),
+        linear-gradient(160deg, #101826 0%, #0b1120 54%, #050a14 100%);
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    box-shadow:
+        0 28px 70px rgba(0, 0, 0, 0.48),
+        inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.hardware-modal-immersive {
+    width: 100vw;
+    max-width: none;
+    height: 100vh;
+    max-height: none;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+}
+
+.hardware-modal::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 20%),
+        radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.08), transparent 28%);
+    pointer-events: none;
+}
+
+.hardware-modal > * {
+    position: relative;
+    z-index: 1;
+}
+
+.hardware-modal .modal-header {
+    padding: 18px 18px 0;
+    margin-bottom: 14px;
+    border-bottom: none;
+}
+
+.hardware-modal .modal-title {
+    font-size: 24px;
+    letter-spacing: -0.03em;
+}
+
+.hardware-modal .modal-body {
+    padding: 0 18px 18px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.hardware-modal-immersive .modal-header {
+    padding: max(18px, env(safe-area-inset-top)) 24px 0;
+}
+
+.hardware-modal-immersive .modal-body {
+    padding: 0 clamp(20px, 4vw, 40px) max(24px, env(safe-area-inset-bottom));
+    display: flex;
+    flex: 1;
+}
+
+.hardware-modal .connection-section,
+.hardware-modal .connected-section {
+    margin-bottom: 0;
+    padding: 18px;
+    border-radius: 24px;
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.9), rgba(3, 7, 18, 0.88));
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    box-shadow: 0 18px 36px rgba(0, 0, 0, 0.22);
+}
+
+.hardware-modal-immersive .connected-section {
+    width: 100%;
+    margin: auto;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+.hardware-connect-shell,
+.hardware-auth-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.hardware-auth-hero {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    text-align: center;
+    margin-bottom: 2px;
+}
+
+.hardware-auth-kicker {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 28px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.16);
+    border: 1px solid rgba(129, 140, 248, 0.26);
+    color: #c7d2fe;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.hardware-modal .info-header {
+    margin-bottom: 0;
+}
+
+.hardware-modal .info-header h3,
+.hardware-auth-shell h3 {
+    color: #f8fafc;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    margin: 0;
+}
+
+.hardware-modal .info-subtitle {
+    color: #cbd5e1;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.hardware-modal .connection-steps {
+    margin: 0;
+    gap: 6px;
+}
+
+.hardware-modal .connection-step-chip {
+    padding: 6px 11px;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+
+.hardware-modal .scanning-container,
+.hardware-modal .no-devices-container {
+    padding: 22px 12px 8px;
+}
+
+.hardware-modal .devices-section {
+    margin-bottom: 0;
+}
+
+.hardware-modal .devices-title {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #94a3b8;
+}
+
+.hardware-modal .devices-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+}
+
+.hardware-modal .device-card {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 18px;
+    text-align: left;
+}
+
+.hardware-modal .device-card:hover {
+    transform: translateY(-2px);
+}
+
+.hardware-modal .device-icon-container {
+    margin: 0;
+}
+
+.hardware-modal .device-icon-container img {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+}
+
+.hardware-modal .device-info {
+    margin: 0;
+}
+
+.hardware-modal .device-name {
+    margin-bottom: 6px;
+    font-size: 15px;
+}
+
+.hardware-modal .device-card .connect-device-button {
+    width: auto;
+    min-width: 112px;
+}
+
+.hardware-modal .connect-device-button {
+    min-height: 44px;
+    padding: 11px 16px;
+    border-radius: 14px;
+}
+
+.hardware-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.hardware-mode-card {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 16px 14px;
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    background: linear-gradient(180deg, rgba(15, 23, 42, 0.82), rgba(10, 14, 24, 0.74));
+    color: #f8fafc;
+    cursor: pointer;
+    text-align: left;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hardware-mode-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(129, 140, 248, 0.4);
+    box-shadow: 0 12px 24px rgba(15, 23, 42, 0.22);
+}
+
+.hardware-mode-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.16);
+    color: #c7d2fe;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+
+.hardware-mode-title {
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.hardware-mode-caption {
+    color: #94a3b8;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.hardware-auth-card {
+    background: rgba(15, 23, 42, 0.52);
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-radius: 20px;
+    padding: 16px;
+}
+
+.hardware-auth-card-compact {
+    max-width: 430px;
+    margin: 0 auto;
+}
+
+.hardware-pin-shell,
+.hardware-auth-card-otp {
+    padding: 14px;
+}
+
+.hardware-auth-card label {
+    display: block;
+    color: #f8fafc;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+
+.hardware-auth-card .info-subtitle {
+    margin: 0;
+}
+
+.hardware-inline-note {
+    border-radius: 16px;
+    padding: 10px 12px;
+    background: rgba(15, 23, 42, 0.65);
+    border: 1px solid rgba(148, 163, 184, 0.12);
+    color: #cbd5e1;
+    font-size: 13px;
+    line-height: 1.45;
+    text-align: center;
+}
+
+.hardware-inline-note-strong {
+    background: rgba(79, 70, 229, 0.16);
+    border-color: rgba(129, 140, 248, 0.3);
+    color: #e0e7ff;
+}
+
+.hardware-code-input {
+    width: 100%;
+    margin-top: 10px;
+    padding: 16px 18px;
+    border-radius: 16px;
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    background: rgba(2, 6, 23, 0.88);
+    color: #f8fafc;
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Code', monospace;
+    letter-spacing: 0.3em;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.hardware-code-input:focus {
+    outline: none;
+    border-color: rgba(129, 140, 248, 0.55);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.16);
+}
+
+.hardware-code-input::placeholder {
+    color: rgba(148, 163, 184, 0.45);
+    letter-spacing: 0.2em;
+}
+
+.hardware-otp-qr-card {
+    max-width: 220px;
+    margin: 10px auto 14px;
+    padding: 14px;
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.hardware-pin-shell .pin-input-container {
+    max-width: 100%;
+    margin: 0;
+    padding: 16px 14px 14px;
+    border-radius: 18px;
+}
+
+.hardware-pin-shell .pin-step-indicator {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto 8px;
+    padding: 5px 10px;
+    border-radius: 999px;
+    background: rgba(99, 102, 241, 0.12);
+    color: #c7d2fe;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}
+
+.hardware-pin-shell .pin-input-title {
+    font-size: 18px;
+    margin-bottom: 4px;
+}
+
+.hardware-pin-shell .pin-input-subtitle {
+    margin-bottom: 10px;
+    font-size: 13px;
+    color: #94a3b8;
+}
+
+.hardware-pin-shell .pin-dots-container {
+    gap: 10px;
+    margin: 12px 0 14px;
+}
+
+.hardware-pin-shell .pin-dot {
+    width: 14px;
+    height: 14px;
+    border-width: 2px;
+}
+
+.hardware-pin-shell .pin-strength {
+    min-height: 30px;
+    margin-top: 10px;
+    padding: 6px 10px;
+    font-size: 11px;
+    border-radius: 12px;
+}
+
+.hardware-pin-shell .pin-error-message {
+    margin-top: 10px;
+    padding: 10px 12px;
+    font-size: 12px;
+}
+
+.hardware-pin-shell .pin-number-pad {
+    margin-top: 14px;
+    gap: 10px;
+}
+
+.hardware-pin-shell .pin-number-row {
+    gap: 10px;
+}
+
+.hardware-pin-shell .pin-number-button,
+.hardware-pin-shell .pin-action-button,
+.hardware-pin-shell .pin-spacer {
+    width: 56px;
+    height: 56px;
+}
+
+.hardware-pin-shell .pin-number-button {
+    font-size: 21px;
+}
+
+.hardware-pin-shell .pin-action-button {
+    font-size: 18px;
+}
+
+.hardware-pin-shell .pin-success-indicator {
+    font-size: 56px;
+}
+
+.hardware-auth-hero-compact {
+    gap: 4px;
+}
+
+.hardware-pin-setup-stage {
+    gap: 12px;
+}
+
+.hardware-modal-immersive .hardware-pin-setup-stage {
+    width: min(100%, 560px);
+    min-height: 100%;
+    margin: auto;
+    justify-content: center;
+    gap: 18px;
+}
+
+.hardware-modal-immersive .hardware-auth-card {
+    padding: 20px;
+    border-radius: 24px;
+}
+
+.hardware-setup-busy-card {
+    width: min(100%, 420px);
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    text-align: center;
+}
+
+.hardware-setup-busy-title {
+    margin: 0;
+    color: #f8fafc;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+}
+
+.hardware-setup-busy-copy {
+    margin: 0;
+    color: #cbd5e1;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.hardware-pin-minimal-shell {
+    width: 100%;
+    max-width: 360px;
+    margin: 0 auto;
+}
+
+.hardware-pin-shell-minimal {
+    padding: 0;
+    background: transparent;
+    border: none;
+}
+
+.hardware-pin-shell-minimal .pin-input-container {
+    max-width: 100%;
+    margin: 0 auto;
+    padding: 6px 0 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+.hardware-pin-shell-minimal .pin-input-title {
+    margin-bottom: 6px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #94a3b8;
+}
+
+.hardware-pin-shell-minimal .pin-dots-container {
+    margin: 10px 0 16px;
+}
+
+.hardware-pin-shell-minimal .pin-number-pad {
+    margin-top: 12px;
+}
+
+.hardware-pin-shell-minimal .pin-number-button,
+.hardware-pin-shell-minimal .pin-action-button,
+.hardware-pin-shell-minimal .pin-spacer {
+    width: 54px;
+    height: 54px;
+}
+
+@media (max-width: 480px) {
+    .hardware-modal {
+        width: calc(100vw - 16px);
+        max-height: calc(100vh - 16px);
+    }
+
+    .hardware-modal-immersive {
+        width: 100vw;
+        max-height: 100vh;
+    }
+
+    .hardware-modal .modal-header {
+        padding: 16px 16px 0;
+    }
+
+    .hardware-modal-immersive .modal-header {
+        padding: max(14px, env(safe-area-inset-top)) 16px 0;
+    }
+
+    .hardware-modal .modal-body {
+        padding: 0 16px 16px;
+    }
+
+    .hardware-modal-immersive .modal-body {
+        padding: 0 16px max(16px, env(safe-area-inset-bottom));
+    }
+
+    .hardware-modal .connection-section,
+    .hardware-modal .connected-section {
+        padding: 16px;
+        border-radius: 20px;
+    }
+
+    .hardware-modal-immersive .connected-section {
+        padding: 0;
+    }
+
+    .hardware-modal .info-header h3,
+    .hardware-auth-shell h3 {
+        font-size: 22px;
+    }
+
+    .hardware-mode-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .hardware-modal .device-card {
+        grid-template-columns: 1fr;
+        text-align: center;
+    }
+
+    .hardware-modal .device-icon-container {
+        display: flex;
+        justify-content: center;
+    }
+
+    .hardware-modal .device-card .connect-device-button {
+        width: 100%;
+    }
+
+    .hardware-pin-shell .pin-number-button,
+    .hardware-pin-shell .pin-action-button,
+    .hardware-pin-shell .pin-spacer {
+        width: 52px;
+        height: 52px;
+    }
+
+    .hardware-pin-shell-minimal .pin-number-button,
+    .hardware-pin-shell-minimal .pin-action-button,
+    .hardware-pin-shell-minimal .pin-spacer {
+        width: 48px;
+        height: 48px;
+    }
+
+    .hardware-code-input {
+        font-size: 20px;
+        letter-spacing: 0.22em;
     }
 }
 
@@ -6522,6 +7340,37 @@ body:has(.token-item-selected) .token-item:hover {
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
+.tab-button.disabled {
+    color: #6b7280;
+    cursor: default;
+    opacity: 0.78;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.tab-button.disabled:hover {
+    color: #6b7280;
+    background-color: transparent;
+}
+
+.tab-button-label {
+    display: inline-flex;
+    align-items: center;
+}
+
+.tab-button-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #d1d5db;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    padding: 3px 7px;
+}
+
 /* Collectibles specific styles */
 .collectibles-list {
     min-height: 300px;
@@ -6716,6 +7565,11 @@ body:has(.token-item-selected) .token-item:hover {
     animation: pulse 2s ease-in-out infinite alternate;
 }
 
+.collectibles-empty-state .empty-icon {
+    animation: none;
+    opacity: 0.72;
+}
+
 @keyframes pulse {
     from {
         opacity: 0.4;
@@ -6772,8 +7626,8 @@ body:has(.token-item-selected) .token-item:hover {
 /* Add these new styles for the modal structure */
 
 .modal-content.stake-modal {
-    width: 92vw;
-    max-width: 480px;
+    width: min(390px, calc(100vw - 32px));
+    max-width: 390px;
     height: 82vh;
     max-height: 820px; /* Prevent overly tall modals on large screens */
     display: flex;
@@ -7196,6 +8050,23 @@ body:has(.token-item-selected) .token-item:hover {
     max-width: 280px;
 }
 
+.no-stakes-hint {
+    font-size: 11px;
+    line-height: 1.5;
+    max-width: 300px;
+    color: #cbd5e1;
+}
+
+.no-stakes-actions {
+    display: flex;
+    justify-content: center;
+    margin-top: 8px;
+}
+
+.no-stakes-cta {
+    min-width: 180px;
+}
+
 /* Refresh Button */
 .stakes-footer-modern {
     display: flex;
@@ -7424,10 +8295,11 @@ body:has(.token-item-selected) .token-item:hover {
 
 .action-buttons-grid {
     display: grid;
-    grid-template-columns: repeat(5, 1fr);
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
     width: 100%;
-    max-width: 100%;
+    max-width: 420px;
+    margin: 0 auto;
 }
 
 /* Integrations row - collapsible second row */
@@ -7731,6 +8603,15 @@ body:has(.token-item-selected) .token-item:hover {
 
 .show-key-button:hover {
     background-color: #4f46e5;
+}
+
+.export-wallet-auth-shell {
+    margin-top: 14px;
+}
+
+.export-wallet-note-card {
+    width: 100%;
+    margin-bottom: 12px;
 }
 
 /* Ensure proper modal sizing for export/delete modals */
@@ -8076,6 +8957,621 @@ body:has(.token-item-selected) .token-item:hover {
     
     .onboarding-progress {
         margin: 12px 0 12px;
+    }
+}
+
+/* Editorial onboarding + hardware first-setup refresh */
+.onboarding-overlay {
+    background:
+        radial-gradient(circle at top, rgba(117, 166, 255, 0.12), transparent 28%),
+        radial-gradient(circle at bottom, rgba(75, 114, 204, 0.14), transparent 30%),
+        #000000;
+}
+
+.onboarding-container {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto auto auto;
+    align-items: center;
+    justify-items: center;
+    width: 100%;
+    max-width: 410px;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: max(16px, env(safe-area-inset-top)) 20px max(16px, env(safe-area-inset-bottom));
+    gap: 12px;
+    overflow: hidden;
+    text-align: center;
+}
+
+.onboarding-step.onboarding-step-editorial,
+.onboarding-step.onboarding-step-pin-flow {
+    width: 100%;
+    flex: 0 1 auto;
+    padding: 0;
+    gap: 12px;
+    justify-self: stretch;
+    align-self: center;
+}
+
+.onboarding-copy-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.onboarding-title {
+    font-size: 31px;
+    letter-spacing: -0.05em;
+}
+
+.onboarding-title.brand {
+    background: linear-gradient(135deg, #ffffff 0%, #b9c9ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 4px;
+}
+
+.onboarding-description {
+    color: #d6dcea;
+    max-width: 360px;
+    font-size: 15px;
+    line-height: 1.45;
+}
+
+.onboarding-description-wide {
+    max-width: 360px;
+}
+
+.onboarding-description-tight {
+    max-width: 320px;
+    margin-bottom: 0;
+}
+
+.onboarding-support-copy {
+    max-width: 340px;
+    margin: 0;
+    color: #eef2fb;
+    font-size: 15px;
+    line-height: 1.42;
+}
+
+.onboarding-support-copy-tight {
+    max-width: 360px;
+    font-size: 14px;
+    color: #bcc6da;
+}
+
+.flow-hero-media {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: min(62vw, 240px);
+    min-height: 176px;
+    margin: 0 auto;
+}
+
+.flow-hero-media::before {
+    content: "";
+    position: absolute;
+    inset: 12% 8%;
+    background: radial-gradient(circle, rgba(129, 167, 255, 0.28) 0%, rgba(129, 167, 255, 0.08) 46%, transparent 76%);
+    filter: blur(18px);
+    pointer-events: none;
+}
+
+.flow-hero-media-lock {
+    width: min(58vw, 220px);
+    min-height: 164px;
+}
+
+.flow-hero-media-hardware {
+    width: min(50vw, 170px);
+    min-height: 132px;
+    margin-top: 0;
+}
+
+.flow-hero-image {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    height: auto;
+    object-fit: contain;
+    filter: drop-shadow(0 0 24px rgba(166, 198, 255, 0.2));
+}
+
+.flow-hero-image-lock {
+    max-width: 200px;
+}
+
+.flow-hero-image-hardware {
+    max-width: 156px;
+}
+
+.flow-note-card {
+    width: min(100%, 344px);
+    padding: 12px 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(117, 166, 255, 0.28);
+    background: linear-gradient(180deg, rgba(12, 17, 29, 0.94), rgba(7, 10, 19, 0.92));
+    box-shadow: 0 18px 32px rgba(0, 0, 0, 0.24);
+}
+
+.flow-note-card-accent {
+    border-color: rgba(244, 170, 78, 0.42);
+    background: linear-gradient(180deg, rgba(28, 20, 9, 0.9), rgba(13, 10, 6, 0.92));
+}
+
+.flow-note-card-hardware {
+    width: min(100%, 420px);
+    margin: 0 auto;
+}
+
+.flow-note-label {
+    margin-bottom: 4px;
+    color: #d8e5ff;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.flow-note-copy {
+    margin: 0;
+    color: #b9c4d9;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.onboarding-button.primary {
+    background: linear-gradient(135deg, #5d8cff 0%, #4274f2 100%);
+    box-shadow: 0 18px 30px rgba(66, 116, 242, 0.28);
+}
+
+.onboarding-button.primary:hover {
+    box-shadow: 0 22px 36px rgba(66, 116, 242, 0.36);
+}
+
+.progress-dot.active {
+    background: #5d8cff;
+    box-shadow: 0 0 12px rgba(93, 140, 255, 0.6);
+}
+
+.onboarding-pin-intro,
+.onboarding-pin-shell,
+.onboarding-pin-status-shell {
+    width: 100%;
+    max-width: 380px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+.onboarding-alpha-note {
+    width: 100%;
+    margin: 0;
+    padding-top: 10px;
+    color: rgba(185, 196, 217, 0.7);
+    font-size: 11px;
+    line-height: 1.35;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    text-align: center;
+}
+
+.onboarding-pin-preview {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin: 0;
+}
+
+.onboarding-pin-preview-slot {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+    border: 1px solid rgba(111, 137, 182, 0.38);
+    background: linear-gradient(180deg, rgba(11, 16, 27, 0.94), rgba(6, 9, 17, 0.96));
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.onboarding-pin-preview-slot.active {
+    border-color: rgba(255, 255, 255, 0.8);
+    box-shadow:
+        0 0 0 1px rgba(110, 157, 255, 0.3),
+        0 0 18px rgba(110, 157, 255, 0.18);
+}
+
+.onboarding-mini-art-shell {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 92px;
+    min-height: 72px;
+}
+
+.onboarding-mini-art-shell::before {
+    content: "";
+    position: absolute;
+    inset: 12px;
+    background: radial-gradient(circle, rgba(129, 167, 255, 0.22), transparent 72%);
+    filter: blur(14px);
+    pointer-events: none;
+}
+
+.onboarding-mini-art-shell-lock {
+    width: 84px;
+}
+
+.onboarding-mini-art {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    max-width: 88px;
+    height: auto;
+    object-fit: contain;
+}
+
+.onboarding-mini-art-shell-lock .onboarding-mini-art {
+    max-width: 76px;
+}
+
+.onboarding-status-title {
+    margin: 0;
+    color: #ffffff;
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+}
+
+.onboarding-status-loader {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    border: 3px solid rgba(255, 255, 255, 0.12);
+    border-top-color: #5d8cff;
+    animation: spin 0.8s linear infinite;
+}
+
+.onboarding-pin-shell .pin-input-overlay {
+    position: static;
+    inset: auto;
+    background: transparent;
+    z-index: auto;
+    animation: none;
+}
+
+.onboarding-pin-shell .pin-input-container {
+    max-width: 100%;
+    margin-top: 0;
+    padding: 16px 14px 14px;
+    border-radius: 20px;
+    background: linear-gradient(180deg, rgba(15, 21, 35, 0.94), rgba(8, 11, 19, 0.96));
+    border: 1px solid rgba(117, 166, 255, 0.22);
+    box-shadow:
+        0 22px 44px rgba(0, 0, 0, 0.34),
+        0 0 0 1px rgba(96, 122, 176, 0.1);
+}
+
+.onboarding-pin-shell .pin-input-container::before {
+    background: radial-gradient(circle, rgba(93, 140, 255, 0.08) 0%, transparent 72%);
+}
+
+.onboarding-pin-shell .pin-step-indicator {
+    color: #91b0ff;
+    opacity: 1;
+}
+
+.onboarding-pin-shell .pin-input-title {
+    font-size: 22px;
+    margin-bottom: 4px;
+    background: linear-gradient(135deg, #ffffff 0%, #c8d6ff 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.onboarding-pin-shell .pin-input-subtitle {
+    color: #aebbd3;
+    margin-bottom: 12px;
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.onboarding-pin-shell .pin-dots-container {
+    margin: 12px 0 10px;
+    gap: 10px;
+}
+
+.onboarding-pin-shell .pin-dot {
+    width: 14px;
+    height: 14px;
+    background: #0d121c;
+    border: 2px solid rgba(102, 124, 161, 0.45);
+}
+
+.onboarding-pin-shell .pin-dot.filled {
+    background: linear-gradient(135deg, #dce8ff 0%, #86a8ff 100%);
+    border-color: rgba(175, 196, 255, 0.65);
+    box-shadow: 0 0 12px rgba(112, 156, 255, 0.26);
+}
+
+.onboarding-pin-shell .pin-number-pad {
+    margin-top: 12px;
+    gap: 8px;
+}
+
+.onboarding-pin-shell .pin-number-row {
+    gap: 8px;
+}
+
+.onboarding-pin-shell .pin-number-button,
+.onboarding-pin-shell .pin-action-button,
+.onboarding-pin-shell .pin-spacer {
+    width: 50px;
+    height: 50px;
+}
+
+.onboarding-pin-shell .pin-number-button {
+    font-size: 20px;
+    background: linear-gradient(180deg, rgba(20, 29, 48, 0.98), rgba(9, 13, 23, 0.98));
+    border: 1px solid rgba(117, 166, 255, 0.22);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.onboarding-pin-shell .pin-number-button:hover,
+.onboarding-pin-shell .pin-action-button:hover {
+    border-color: rgba(117, 166, 255, 0.4);
+    box-shadow: 0 10px 24px rgba(46, 76, 150, 0.22);
+}
+
+.onboarding-pin-shell .pin-action-button {
+    font-size: 15px;
+    background: rgba(12, 16, 26, 0.92);
+    border: 1px solid rgba(117, 166, 255, 0.16);
+}
+
+.pin-unlock-overlay {
+    min-height: 100vh;
+    min-height: 100dvh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: max(18px, env(safe-area-inset-top)) 20px max(18px, env(safe-area-inset-bottom));
+}
+
+.pin-unlock-stage {
+    width: 100%;
+    max-width: 380px;
+    margin: 0 auto;
+}
+
+.pin-unlock-note-card {
+    width: min(100%, 344px);
+}
+
+.pin-unlock-shell .pin-input-title {
+    font-size: 22px;
+}
+
+.pin-unlock-shell .pin-input-subtitle {
+    color: #aebbd3;
+}
+
+.pin-unlock-locked-stage {
+    text-align: center;
+}
+
+.pin-locked-title {
+    margin-top: 2px;
+}
+
+.pin-locked-message {
+    max-width: 340px;
+}
+
+.hardware-pin-setup-stage {
+    max-width: 430px;
+    gap: 10px;
+}
+
+.hardware-pin-setup-stage .info-subtitle {
+    max-width: 390px;
+    margin: 0 auto;
+}
+
+.hardware-pin-setup-stage .flow-hero-media {
+    margin-bottom: 0;
+}
+
+.hardware-pin-setup-stage .hardware-inline-note {
+    max-width: 390px;
+    margin: 0 auto;
+}
+
+.hardware-pin-setup-stage .flow-note-card-hardware {
+    width: min(100%, 390px);
+}
+
+@media (max-width: 480px) {
+    .onboarding-container {
+        padding: max(14px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom));
+        gap: 10px;
+    }
+
+    .onboarding-title {
+        font-size: 28px;
+    }
+
+    .flow-hero-media {
+        width: min(60vw, 210px);
+        min-height: 150px;
+    }
+
+    .flow-hero-media-hardware {
+        width: min(46vw, 150px);
+        min-height: 118px;
+    }
+
+    .onboarding-support-copy {
+        font-size: 14px;
+    }
+
+    .onboarding-pin-preview-slot {
+        width: 30px;
+        height: 30px;
+        border-radius: 10px;
+    }
+
+    .onboarding-pin-shell .pin-number-button,
+    .onboarding-pin-shell .pin-action-button,
+    .onboarding-pin-shell .pin-spacer {
+        width: 46px;
+        height: 46px;
+    }
+
+    .pin-unlock-overlay {
+        padding: max(14px, env(safe-area-inset-top)) 16px max(14px, env(safe-area-inset-bottom));
+    }
+}
+
+/* Primary app modal consistency */
+.modal-content.app-modal-shell {
+    width: min(390px, calc(100vw - 32px));
+    max-width: 390px;
+    margin: 16px auto;
+    padding: 0;
+    border-radius: 20px;
+    background: #2C2C2C;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+    overflow: hidden;
+}
+
+.modal-content.app-modal-shell.app-modal-shell-scrollable {
+    max-height: min(82vh, 820px);
+    overflow-y: auto;
+}
+
+.app-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    padding: 24px 24px 0;
+    margin-bottom: 16px;
+}
+
+.app-modal-header-toggle {
+    align-items: center;
+}
+
+.app-modal-title {
+    color: #f8fafc;
+    font-size: 22px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.025em;
+}
+
+.app-modal-close-button {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 28px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0;
+    min-width: 32px;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 10px;
+    transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.app-modal-close-button:hover {
+    color: #ffffff;
+    background: rgba(255, 255, 255, 0.08);
+    transform: scale(1.04);
+}
+
+.app-modal-shell .error-message {
+    margin: 0 24px 16px;
+}
+
+.app-modal-shell.send-modal > :not(.app-modal-header):not(.hardware-approval-overlay):not(.modal-backdrop) {
+    margin-left: 24px;
+    margin-right: 24px;
+}
+
+.app-modal-shell.send-modal > .modal-buttons {
+    margin-bottom: 24px;
+}
+
+.app-modal-shell.receive-modal .info-message,
+.app-modal-shell.receive-modal .address-container,
+.app-modal-shell.receive-modal .receive-info,
+.app-modal-shell.receive-modal .wallet-label,
+.app-modal-shell.receive-modal .qr-code-container {
+    margin-left: 24px;
+    margin-right: 24px;
+}
+
+.app-modal-shell.receive-modal .wallet-label,
+.app-modal-shell.receive-modal .qr-code-container {
+    margin-left: 0;
+    margin-right: 0;
+}
+
+.change-pin-modal-body {
+    padding: 0 24px 24px;
+}
+
+.change-pin-modal-stage {
+    max-width: 100%;
+    gap: 12px;
+}
+
+.change-pin-description {
+    max-width: 340px;
+    margin: 0 auto;
+    text-align: center;
+}
+
+.change-pin-note-card {
+    width: min(100%, 344px);
+}
+
+@media (max-width: 640px) {
+    .modal-content.app-modal-shell {
+        width: calc(100vw - 20px);
+        max-width: calc(100vw - 20px);
+        margin: 10px auto;
+    }
+
+    .app-modal-header {
+        padding: 20px 20px 0;
+        margin-bottom: 14px;
+    }
+
+    .app-modal-shell .error-message,
+    .app-modal-shell.send-modal > :not(.app-modal-header):not(.hardware-approval-overlay):not(.modal-backdrop),
+    .app-modal-shell.receive-modal .info-message,
+    .app-modal-shell.receive-modal .address-container,
+    .app-modal-shell.receive-modal .receive-info {
+        margin-left: 20px;
+        margin-right: 20px;
+    }
+
+    .change-pin-modal-body {
+        padding: 0 20px 20px;
     }
 }
 

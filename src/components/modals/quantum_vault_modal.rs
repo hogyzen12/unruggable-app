@@ -38,7 +38,8 @@ fn wallet_to_keypair(wallet_info: &WalletInfo) -> Result<Keypair, String> {
 }
 
 fn decode_vault_privkey(encoded: &str) -> Result<WinternitzPrivkey, String> {
-    let cleaned = encoded.trim().trim_matches('"');
+    let decrypted = crate::pin::decrypt_secret_string(encoded)?;
+    let cleaned = decrypted.trim().trim_matches('"');
     if cleaned.is_empty() {
         return Err("Vault private key is missing. Only original vaults can be split.".to_string());
     }
@@ -276,7 +277,12 @@ pub fn QuantumVaultModal(
                         used: false,
                     };
 
-                    save_quantum_vault_to_storage(&stored_vault);
+                    if let Err(e) = save_quantum_vault_to_storage(&stored_vault) {
+                        error_message.set(Some(format!("Failed to store vault securely: {}", e)));
+                        processing.set(false);
+                        processing_action.set("".to_string());
+                        return;
+                    }
                     my_vaults.set(load_quantum_vaults_from_storage());
                     selected_vault.set(vault_address.to_string());
                     reload_balances_trigger.set(reload_balances_trigger() + 1);
@@ -537,7 +543,12 @@ pub fn QuantumVaultModal(
                             .as_millis() as u64,
                         used: true,
                     };
-                    save_quantum_vault_to_storage(&split_vault);
+                    if let Err(e) = save_quantum_vault_to_storage(&split_vault) {
+                        error_message.set(Some(format!("Failed to store split vault securely: {}", e)));
+                        processing.set(false);
+                        processing_action.set("".to_string());
+                        return;
+                    }
 
                     let refund_vault = StoredVault {
                         name: format!("Refund {}", refund_vault_address.to_string().chars().take(8).collect::<String>()),
@@ -551,7 +562,12 @@ pub fn QuantumVaultModal(
                             .as_millis() as u64,
                         used: true,
                     };
-                    save_quantum_vault_to_storage(&refund_vault);
+                    if let Err(e) = save_quantum_vault_to_storage(&refund_vault) {
+                        error_message.set(Some(format!("Failed to store refund vault securely: {}", e)));
+                        processing.set(false);
+                        processing_action.set("".to_string());
+                        return;
+                    }
 
                     my_vaults.set(load_quantum_vaults_from_storage());
                     reload_balances_trigger.set(reload_balances_trigger() + 1);

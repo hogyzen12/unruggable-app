@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use crate::hardware::HardwareWallet;
 use crate::signing::TransactionSigner;
 use async_trait::async_trait;
@@ -13,6 +15,10 @@ impl HardwareSigner {
     pub async fn new() -> Result<Self, Box<dyn Error>> {
         let wallet = Arc::new(HardwareWallet::new());
         wallet.connect().await?;
+        wallet
+            .get_public_key()
+            .await
+            .map_err(|e| format!("Hardware wallet is connected but not ready for signing: {e}"))?;
         Ok(Self { wallet })
     }
 

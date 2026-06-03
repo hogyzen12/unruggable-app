@@ -1,9 +1,9 @@
-
-use dioxus::prelude::*;
-use crate::wallet::WalletInfo;
+use crate::clipboard::copy_text_to_clipboard;
 use crate::hardware::HardwareWallet;
+use crate::wallet::WalletInfo;
+use dioxus::prelude::*;
+use qrcode::{render::svg, QrCode};
 use std::sync::Arc;
-use qrcode::{QrCode, render::svg};
 
 #[component]
 pub fn ReceiveModal(
@@ -11,13 +11,13 @@ pub fn ReceiveModal(
     hardware_wallet: Option<Arc<HardwareWallet>>,
     onclose: EventHandler<()>,
 ) -> Element {
-    let mut copying = use_signal(|| false);
-    let mut copied = use_signal(|| false);
+    let copying = use_signal(|| false);
+    let copied = use_signal(|| false);
     let mut hardware_pubkey = use_signal(|| None as Option<String>);
-    
+
     // Clone hardware_wallet for use in effect
     let hw_clone = hardware_wallet.clone();
-    
+
     // If we have a hardware wallet, get its public key
     use_effect(move || {
         if let Some(hw) = &hw_clone {
@@ -29,7 +29,7 @@ pub fn ReceiveModal(
             });
         }
     });
-    
+
     // Determine which address to show
     let address = if let Some(hw_key) = hardware_pubkey() {
         hw_key
@@ -38,65 +38,38 @@ pub fn ReceiveModal(
     } else {
         "No Wallet".to_string()
     };
-    
+
     // Generate QR code SVG
     let qr_svg = generate_qr_code_svg(&address);
-    
+
     rsx! {
         div {
             class: "modal-backdrop",
             onclick: move |_| onclose.call(()),
-            
+
             div {
-                class: "modal-content receive-modal",
+                class: "modal-content app-modal-shell app-modal-shell-scrollable receive-modal",
                 onclick: move |e| e.stop_propagation(),
-                
+
                 div {
-                    style: "
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        padding: 24px;
-                        border-bottom: none;
-                        background: transparent;
-                    ",
+                    class: "app-modal-header",
                     h2 {
-                        style: "
-                            color: #f8fafc;
-                            font-size: 22px;
-                            font-weight: 700;
-                            margin: 0;
-                            letter-spacing: -0.025em;
-                        ",
+                        class: "app-modal-title",
                         "Receive"
                     }
                     button {
-                        style: "
-                            background: none;
-                            border: none;
-                            color: white;
-                            font-size: 28px;
-                            cursor: pointer;
-                            padding: 0;
-                            border-radius: 0;
-                            transition: all 0.2s ease;
-                            min-width: 32px;
-                            min-height: 32px;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                        ",
+                        class: "app-modal-close-button",
                         onclick: move |_| onclose.call(()),
                         "×"
                     }
                 }
-                
+
                 // Info message
                 div {
                     class: "info-message",
                     "This address can receive SOL and all SPL tokens on Solana"
                 }
-                
+
                 // QR Code
                 div {
                     class: "qr-code-container",
@@ -105,7 +78,7 @@ pub fn ReceiveModal(
                         dangerous_inner_html: "{qr_svg}"
                     }
                 }
-                
+
                 // Wallet name
                 if let Some(w) = &wallet {
                     div {
@@ -118,7 +91,7 @@ pub fn ReceiveModal(
                         "Hardware Wallet"
                     }
                 }
-                
+
                 // Address display with copy button
                 div {
                     class: "address-container",
@@ -151,7 +124,7 @@ pub fn ReceiveModal(
                         }
                     }
                 }
-                
+
                 // Additional info
                 div {
                     class: "receive-info",
@@ -172,41 +145,29 @@ pub fn ReceiveModal(
 
 // Helper function to handle copy to clipboard
 fn handle_copy(address: String, mut copying: Signal<bool>, mut copied: Signal<bool>) {
+    if copying() {
+        return;
+    }
+
     copying.set(true);
     copied.set(false);
-    
-    spawn(async move {
-        // Copy to clipboard
-        #[cfg(feature = "web")]
-        {
-            if let Some(window) = web_sys::window() {
-                if let Some(navigator) = window.navigator() {
-                    if let Some(clipboard) = navigator.clipboard() {
-                        let _ = clipboard.write_text(&address);
-                    }
-                }
-            }
+
+    match copy_text_to_clipboard(&address) {
+        Ok(()) => {
+            spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                copying.set(false);
+                copied.set(true);
+
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                copied.set(false);
+            });
         }
-        
-        #[cfg(not(feature = "web"))]
-        {
-            // For desktop, you might want to use arboard crate for cross-platform clipboard
-            // arboard = "3.2"
-            // if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            //     let _ = clipboard.set_text(&address);
-            // }
-            println!("Copy to clipboard: {}", address);
+        Err(error) => {
+            log::error!("Failed to copy receive address: {}", error);
+            copying.set(false);
         }
-        
-        // Show copied feedback
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        copying.set(false);
-        copied.set(true);
-        
-        // Reset copied state after 2 seconds
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-        copied.set(false);
-    });
+    }
 }
 
 // Helper function to generate QR code as SVG
@@ -214,7 +175,8 @@ fn generate_qr_code_svg(data: &str) -> String {
     match QrCode::new(data) {
         Ok(qr_code) => {
             // Generate SVG with proper styling
-            let svg_string = qr_code.render()
+            let svg_string = qr_code
+                .render()
                 .min_dimensions(200, 200)
                 .quiet_zone(false) // We handle padding in CSS
                 .dark_color(svg::Color("#000000"))

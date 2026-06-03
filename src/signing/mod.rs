@@ -1,26 +1,28 @@
 // src/signing/mod.rs
+#![allow(dead_code)]
+
 use crate::wallet::Wallet;
-use std::error::Error;
 use async_trait::async_trait;
+use std::error::Error;
 
-pub mod software;
 pub mod hardware;
+pub mod software;
 
-use software::SoftwareSigner;
 use hardware::HardwareSigner;
+use software::SoftwareSigner;
 
 /// Trait for different transaction signing methods
 #[async_trait]
 pub trait TransactionSigner: Send + Sync {
     /// Get the public key of the signer
     async fn get_public_key(&self) -> Result<String, Box<dyn Error>>;
-    
+
     /// Sign a message/transaction
     async fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn Error>>;
-    
+
     /// Get a display name for the signing method
     fn get_name(&self) -> String;
-    
+
     /// Check if the signer is available/connected
     async fn is_available(&self) -> bool;
 
@@ -42,7 +44,7 @@ impl SignerType {
     pub fn from_wallet(wallet: Wallet) -> Self {
         SignerType::Software(SoftwareSigner::new(wallet))
     }
-    
+
     /// Create a hardware signer (attempts to connect)
     pub async fn hardware() -> Result<Self, Box<dyn Error>> {
         let signer = HardwareSigner::new().await?;
@@ -58,21 +60,21 @@ impl TransactionSigner for SignerType {
             SignerType::Hardware(h) => h.get_public_key().await,
         }
     }
-    
+
     async fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
         match self {
             SignerType::Software(s) => s.sign_message(message).await,
             SignerType::Hardware(h) => h.sign_message(message).await,
         }
     }
-    
+
     fn get_name(&self) -> String {
         match self {
             SignerType::Software(s) => s.get_name(),
             SignerType::Hardware(h) => h.get_name(),
         }
     }
-    
+
     async fn is_available(&self) -> bool {
         match self {
             SignerType::Software(s) => s.is_available().await,

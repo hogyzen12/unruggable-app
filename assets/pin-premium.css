@@ -39,6 +39,11 @@
     animation: rotate 30s linear infinite;
 }
 
+.pin-input-container.pin-input-container-processing::before {
+    animation-duration: 14s;
+    opacity: 1;
+}
+
 @keyframes rotate {
     to { transform: rotate(360deg); }
 }
@@ -160,10 +165,30 @@
     animation: dotBounce 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
+.pin-dot.filled.processing {
+    animation: dotProcessing 1.1s ease-in-out infinite;
+    animation-delay: var(--pin-dot-delay, 0ms);
+}
+
 @keyframes dotBounce {
     0% { transform: scale(0); opacity: 0; }
     50% { transform: scale(1.4); }
     100% { transform: scale(1.2); opacity: 1; }
+}
+
+@keyframes dotProcessing {
+    0%, 100% {
+        transform: scale(1.05);
+        box-shadow:
+            0 0 16px rgba(245, 158, 11, 0.35),
+            0 4px 10px rgba(245, 158, 11, 0.18);
+    }
+    50% {
+        transform: scale(1.3);
+        box-shadow:
+            0 0 24px rgba(245, 158, 11, 0.65),
+            0 8px 18px rgba(245, 158, 11, 0.32);
+    }
 }
 
 @keyframes pulse {
@@ -244,6 +269,18 @@
     box-shadow: 
         0 2px 8px rgba(0, 0, 0, 0.2),
         inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.pin-button-disabled,
+.pin-number-button:disabled,
+.pin-action-button:disabled {
+    cursor: default;
+    opacity: 0.55;
+    pointer-events: none;
+    transform: none;
+    box-shadow:
+        0 4px 12px rgba(0, 0, 0, 0.18),
+        inset 0 1px 0 rgba(255, 255, 255, 0.02);
 }
 
 /* Cancel button special styling */
@@ -332,6 +369,38 @@
     animation: successZoom 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55);
     z-index: 10;
     filter: drop-shadow(0 0 20px rgba(34, 197, 94, 0.5));
+}
+
+.pin-processing-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 48px;
+    margin-top: 20px;
+    padding: 12px 20px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.16) 0%, rgba(245, 158, 11, 0.08) 100%);
+    border: 1px solid rgba(245, 158, 11, 0.22);
+    box-shadow: 0 10px 24px rgba(245, 158, 11, 0.08);
+    position: relative;
+    z-index: 1;
+}
+
+.pin-processing-spinner {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-top-color: #fbbf24;
+    animation: spin 0.7s linear infinite;
+}
+
+.pin-processing-label {
+    color: #f8d27a;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
 }
 
 @keyframes successZoom {

@@ -5,8 +5,7 @@ use crate::hardware::{
 };
 use crate::{rpc, storage::load_rpc_from_storage};
 use dioxus::prelude::*;
-use qrcode::{render::svg, QrCode};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 const ICON_UNRUGGABLE: &str =
     "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icon.png";
@@ -15,13 +14,8 @@ const ICON_LEDGER: &str =
 const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
 const LEDGER_SCAN_BATCH_SIZE: u32 = 50;
 const LEDGER_SCAN_MAX_ACCOUNTS: u32 = 100;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SetupChoice {
-    None,
-    Pin,
-    Otp,
-}
+const ESP32_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+const LEDGER_CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum PinSetupStep {
@@ -84,6 +78,26 @@ fn no_funded_ledger_paths_message(primary_change: u32) -> String {
         changes_label,
         LEDGER_SCAN_MAX_ACCOUNTS.saturating_sub(1)
     )
+}
+
+fn connect_timeout_for(device_type: &HardwareDeviceType) -> Duration {
+    match device_type {
+        HardwareDeviceType::ESP32 => ESP32_CONNECT_TIMEOUT,
+        HardwareDeviceType::Ledger => LEDGER_CONNECT_TIMEOUT,
+    }
+}
+
+fn connect_timeout_message(device_type: &HardwareDeviceType) -> String {
+    match device_type {
+        HardwareDeviceType::ESP32 => {
+            "Connection timed out. Replug your Unruggable First Edition and try again."
+                .to_string()
+        }
+        HardwareDeviceType::Ledger => {
+            "Ledger connection timed out. Unlock the device, open the Solana app, close Ledger Live, and try again."
+                .to_string()
+        }
+    }
 }
 
 async fn discover_funded_ledger_paths(
@@ -163,14 +177,15 @@ fn format_connect_unlock_error(err: &str) -> String {
                 "Code must be exactly 6 digits.".to_string()
             }
             "BUTTON_TIMEOUT" => {
-                "No button press detected. Submit code again, then press and hold the device button within 8 seconds."
+                "No button press detected. Submit the code again, then press the device button within 8 seconds."
                     .to_string()
             }
             "AUTH_MODE_MISMATCH" => {
-                "Unlock method does not match device auth mode. Reconnect device.".to_string()
+                "Unlock method does not match the device mode. Open hardware connect and try again."
+                    .to_string()
             }
             "TIME_NOT_SET" => {
-                "Device time not set. Reconnect and try again.".to_string()
+                "Device time is not set yet. Try the unlock again.".to_string()
             }
             other => format!("Unlock failed: {other}"),
         };
@@ -179,24 +194,22 @@ fn format_connect_unlock_error(err: &str) -> String {
     format!("Unlock failed: {err}")
 }
 
-fn generate_qr_code_svg(data: &str) -> String {
-    match QrCode::new(data) {
-        Ok(qr_code) => qr_code
-            .render()
-            .min_dimensions(200, 200)
-            .quiet_zone(false)
-            .dark_color(svg::Color("#000000"))
-            .light_color(svg::Color("#ffffff"))
-            .build(),
-        Err(_) => concat!(
-            r#"<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">"#,
-            r#"<rect width="200" height="200" fill="white"/>"#,
-            r#"<text x="100" y="100" text-anchor="middle" font-family="Arial" font-size="14" fill="gray">"#,
-            r#"QR Code Error"#,
-            r#"</text></svg>"#
-        )
-        .to_string(),
+fn format_setup_error(err: &str) -> String {
+    if let Some(code) = extract_hardware_error_code(err) {
+        return match code.as_str() {
+            "BAD_PIN_FORMAT" => "PIN must be exactly 6 digits.".to_string(),
+            "BUTTON_TIMEOUT" => {
+                "No button hold detected. Submit the PIN again, then hold the device button for about 2 seconds."
+                    .to_string()
+            }
+            "MODE_FINAL" => {
+                "This device is already set up. Reconnect it to continue.".to_string()
+            }
+            other => format!("Setup failed: {other}"),
+        };
     }
+
+    format!("Setup failed: {err}")
 }
 
 #[component]
@@ -206,7 +219,9 @@ pub fn HardwareWalletModal(
     ondisconnect: EventHandler<()>,
     existing_wallet: Option<Arc<HardwareWallet>>,
 ) -> Element {
+    let first_edition_lock_art = crate::asset_hosting::app_asset("lock.png");
     let mut connecting = use_signal(|| false);
+    let mut connecting_device = use_signal(|| None as Option<HardwareDeviceType>);
     let mut error_message = use_signal(|| None as Option<String>);
     let mut hardware_wallet = use_signal(|| existing_wallet.clone());
     let mut connected = use_signal(|| existing_wallet.is_some());
@@ -220,21 +235,15 @@ pub fn HardwareWalletModal(
     let mut fw_auth_mode = use_signal(|| None as Option<AuthMode>);
     let mut fw_finalized = use_signal(|| None as Option<bool>);
     let mut setup_required = use_signal(|| false);
-    let mut setup_choice = use_signal(|| None as Option<SetupChoice>);
     let mut setup_busy = use_signal(|| false);
-    let mut setup_done = use_signal(|| false);
     let mut pin_setup_step = use_signal(|| PinSetupStep::Enter);
     let mut pin_first_entry = use_signal(|| String::new());
     let mut pin_setup_error = use_signal(|| None as Option<String>);
-    let mut otp_code = use_signal(|| String::new());
-    let mut otp_uri = use_signal(|| None as Option<String>);
-    let mut otp_secret = use_signal(|| None as Option<String>);
     let mut connect_unlock_required = use_signal(|| false);
     let mut connect_unlock_mode = use_signal(|| None as Option<ConnectUnlockMode>);
     let mut connect_unlock_busy = use_signal(|| false);
     let mut connect_unlock_error = use_signal(|| None as Option<String>);
     let mut connect_unlock_otp_code = use_signal(|| String::new());
-    let mut connect_unlock_is_setup_verification = use_signal(|| false);
     let mut connect_unlock_waiting_button = use_signal(|| false);
 
     // Ledger derivation-path state
@@ -300,9 +309,13 @@ pub fn HardwareWalletModal(
                                     ledger_accounts_error.set(None);
                                     let preferred_path = active_path
                                         .as_ref()
-                                        .filter(|path| accounts.iter().any(|entry| entry.path == **path))
+                                        .filter(|path| {
+                                            accounts.iter().any(|entry| entry.path == **path)
+                                        })
                                         .cloned()
-                                        .or_else(|| accounts.first().map(|entry| entry.path.clone()));
+                                        .or_else(|| {
+                                            accounts.first().map(|entry| entry.path.clone())
+                                        });
                                     ledger_selected_path.set(preferred_path.clone());
                                     if let Some(path) = preferred_path {
                                         if let Some(entry) =
@@ -355,22 +368,24 @@ pub fn HardwareWalletModal(
 
     let mut connect_device = move |dev_type: HardwareDeviceType| {
         connecting.set(true);
+        connecting_device.set(Some(dev_type.clone()));
         error_message.set(None);
-        setup_done.set(false);
+        hardware_wallet.set(None);
+        connected.set(false);
+        public_key.set(None);
+        device_type.set(None);
+        capability.set(None);
+        fw_auth_mode.set(None);
+        fw_finalized.set(None);
         setup_required.set(false);
-        setup_choice.set(None);
         pin_setup_step.set(PinSetupStep::Enter);
         pin_first_entry.set(String::new());
         pin_setup_error.set(None);
-        otp_code.set(String::new());
-        otp_uri.set(None);
-        otp_secret.set(None);
         connect_unlock_required.set(false);
         connect_unlock_mode.set(None);
         connect_unlock_busy.set(false);
         connect_unlock_error.set(None);
         connect_unlock_otp_code.set(String::new());
-        connect_unlock_is_setup_verification.set(false);
         connect_unlock_waiting_button.set(false);
         ledger_accounts.set(Vec::new());
         ledger_account_balances.set(HashMap::new());
@@ -383,25 +398,44 @@ pub fn HardwareWalletModal(
 
         spawn(async move {
             let wallet = Arc::new(HardwareWallet::new());
-            let result = match dev_type {
-                HardwareDeviceType::ESP32 => wallet.connect_esp32().await,
-                HardwareDeviceType::Ledger => wallet.connect_ledger().await,
+            let result = match tokio::time::timeout(connect_timeout_for(&dev_type), async {
+                match dev_type {
+                    HardwareDeviceType::ESP32 => wallet.connect_esp32().await,
+                    HardwareDeviceType::Ledger => wallet.connect_ledger().await,
+                }
+            })
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => {
+                    let _ = wallet.disconnect().await;
+                    error_message.set(Some(connect_timeout_message(&dev_type)));
+                    connecting.set(false);
+                    connecting_device.set(None);
+                    return;
+                }
             };
 
             match result {
-                Ok(()) => match wallet.get_public_key().await {
-                    Ok(pubkey) => {
-                        public_key.set(Some(pubkey));
-                        device_type.set(Some(dev_type.clone()));
-                        hardware_wallet.set(Some(wallet.clone()));
-                        connected.set(true);
-                        connecting.set(false);
+                Ok(()) => {
+                    let cached_pubkey = wallet.get_cached_public_key().await;
+                    let mut needs_setup = false;
+                    let mut unlock_mode: Option<ConnectUnlockMode> = None;
 
-                        if dev_type == HardwareDeviceType::ESP32 {
-                            capability.set(wallet.get_esp32_capability().await);
-                            let mut needs_setup = false;
-                            let mut unlock_mode: Option<ConnectUnlockMode> = None;
-                            if let Some(info) = wallet.get_cached_esp32_info().await {
+                    if dev_type == HardwareDeviceType::ESP32 {
+                        capability.set(wallet.get_esp32_capability().await);
+                        if let Some(info) = wallet.get_cached_esp32_info().await {
+                            fw_auth_mode.set(Some(info.auth_mode));
+                            fw_finalized.set(Some(info.finalized));
+                            needs_setup = !info.finalized || info.auth_mode == AuthMode::Unset;
+                            unlock_mode = match info.auth_mode {
+                                AuthMode::Pin => Some(ConnectUnlockMode::Pin),
+                                AuthMode::Otp => Some(ConnectUnlockMode::Otp),
+                                _ => None,
+                            };
+                        }
+                        if let Ok(info_opt) = wallet.refresh_esp32_info().await {
+                            if let Some(info) = info_opt {
                                 fw_auth_mode.set(Some(info.auth_mode));
                                 fw_finalized.set(Some(info.finalized));
                                 needs_setup = !info.finalized || info.auth_mode == AuthMode::Unset;
@@ -411,102 +445,121 @@ pub fn HardwareWalletModal(
                                     _ => None,
                                 };
                             }
-                            if let Ok(info_opt) = wallet.refresh_esp32_info().await {
-                                if let Some(info) = info_opt {
-                                    fw_auth_mode.set(Some(info.auth_mode));
-                                    fw_finalized.set(Some(info.finalized));
-                                    needs_setup =
-                                        !info.finalized || info.auth_mode == AuthMode::Unset;
-                                    unlock_mode = match info.auth_mode {
-                                        AuthMode::Pin => Some(ConnectUnlockMode::Pin),
-                                        AuthMode::Otp => Some(ConnectUnlockMode::Otp),
-                                        _ => None,
-                                    };
-                                }
-                            }
-                            setup_required.set(needs_setup);
-                            if needs_setup {
-                                return;
-                            }
-
-                            if let Some(mode) = unlock_mode {
-                                connect_unlock_required.set(true);
-                                connect_unlock_mode.set(Some(mode));
-                                connect_unlock_busy.set(false);
-                                connect_unlock_error.set(None);
-                                connect_unlock_otp_code.set(String::new());
-                                connect_unlock_is_setup_verification.set(false);
-                                connect_unlock_waiting_button.set(false);
-                                return;
-                            }
                         }
+                        setup_required.set(needs_setup);
 
-                        if dev_type == HardwareDeviceType::Ledger {
-                            ledger_accounts_loading.set(true);
-                            ledger_accounts_error.set(None);
-                            ledger_path_busy.set(false);
-                            let (active_account, active_change) = wallet
-                                .ledger_get_derivation_indices()
-                                .await
-                                .unwrap_or((0, 0));
-                            let active_path = wallet.ledger_get_derivation_path().await;
-                            ledger_path_account.set(active_account);
-                            ledger_path_change.set(active_change);
+                        if !needs_setup && cached_pubkey.is_none() {
+                            let _ = wallet.disconnect().await;
+                            error_message.set(Some(
+                                "Device connected but did not return a wallet address. Reconnect and try again."
+                                    .to_string(),
+                            ));
+                            connecting.set(false);
+                            connecting_device.set(None);
+                            return;
+                        }
+                    } else if cached_pubkey.is_none() {
+                        let _ = wallet.disconnect().await;
+                        error_message.set(Some(
+                            "Connected device did not return a wallet address. Try again."
+                                .to_string(),
+                        ));
+                        connecting.set(false);
+                        connecting_device.set(None);
+                        return;
+                    }
 
-                            let rpc_url = active_rpc_url_for_ledger_scan();
-                            match discover_funded_ledger_paths(
-                                wallet.clone(),
-                                active_change,
-                                &rpc_url,
-                            )
-                            .await
-                            {
-                                Ok((accounts, balances)) => {
-                                    if accounts.is_empty() {
-                                        ledger_accounts_error
-                                            .set(Some(no_funded_ledger_paths_message(active_change)));
-                                        ledger_selected_path.set(None);
-                                    } else {
-                                        ledger_accounts_error.set(None);
-                                        let preferred_path = active_path
-                                            .as_ref()
-                                            .filter(|path| accounts.iter().any(|entry| entry.path == **path))
-                                            .cloned()
-                                            .or_else(|| accounts.first().map(|entry| entry.path.clone()));
-                                        ledger_selected_path.set(preferred_path.clone());
-                                        if let Some(path) = preferred_path {
-                                            if let Some(entry) =
-                                                accounts.iter().find(|entry| entry.path == path)
-                                            {
-                                                ledger_path_account.set(entry.account);
-                                                ledger_path_change.set(entry.change);
-                                            }
-                                        }
-                                    }
-                                    ledger_accounts.set(accounts);
-                                    ledger_account_balances.set(balances);
-                                }
-                                Err(err) => {
-                                    ledger_accounts.set(Vec::new());
-                                    ledger_account_balances.set(HashMap::new());
-                                    ledger_accounts_error.set(Some(err));
-                                }
-                            }
-                            ledger_accounts_loading.set(false);
+                    public_key.set(cached_pubkey);
+                    device_type.set(Some(dev_type.clone()));
+                    hardware_wallet.set(Some(wallet.clone()));
+                    connected.set(true);
+                    connecting.set(false);
+                    connecting_device.set(None);
+
+                    if dev_type == HardwareDeviceType::ESP32 {
+                        if needs_setup {
                             return;
                         }
 
-                        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-                        onsuccess.call(wallet);
+                        if let Some(mode) = unlock_mode {
+                            if wallet.has_active_esp32_unlock_session().await {
+                                tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                                onsuccess.call(wallet);
+                                return;
+                            }
+
+                            connect_unlock_required.set(true);
+                            connect_unlock_mode.set(Some(mode));
+                            connect_unlock_busy.set(false);
+                            connect_unlock_error.set(None);
+                            connect_unlock_otp_code.set(String::new());
+                            connect_unlock_waiting_button.set(false);
+                            return;
+                        }
                     }
-                    Err(e) => {
-                        error_message.set(Some(format!("Failed to get public key: {e}")));
-                        connecting.set(false);
+
+                    if dev_type == HardwareDeviceType::Ledger {
+                        ledger_accounts_loading.set(true);
+                        ledger_accounts_error.set(None);
+                        ledger_path_busy.set(false);
+                        let (active_account, active_change) = wallet
+                            .ledger_get_derivation_indices()
+                            .await
+                            .unwrap_or((0, 0));
+                        let active_path = wallet.ledger_get_derivation_path().await;
+                        ledger_path_account.set(active_account);
+                        ledger_path_change.set(active_change);
+
+                        let rpc_url = active_rpc_url_for_ledger_scan();
+                        match discover_funded_ledger_paths(wallet.clone(), active_change, &rpc_url)
+                            .await
+                        {
+                            Ok((accounts, balances)) => {
+                                if accounts.is_empty() {
+                                    ledger_accounts_error
+                                        .set(Some(no_funded_ledger_paths_message(active_change)));
+                                    ledger_selected_path.set(None);
+                                } else {
+                                    ledger_accounts_error.set(None);
+                                    let preferred_path = active_path
+                                        .as_ref()
+                                        .filter(|path| {
+                                            accounts.iter().any(|entry| entry.path == **path)
+                                        })
+                                        .cloned()
+                                        .or_else(|| {
+                                            accounts.first().map(|entry| entry.path.clone())
+                                        });
+                                    ledger_selected_path.set(preferred_path.clone());
+                                    if let Some(path) = preferred_path {
+                                        if let Some(entry) =
+                                            accounts.iter().find(|entry| entry.path == path)
+                                        {
+                                            ledger_path_account.set(entry.account);
+                                            ledger_path_change.set(entry.change);
+                                        }
+                                    }
+                                }
+                                ledger_accounts.set(accounts);
+                                ledger_account_balances.set(balances);
+                            }
+                            Err(err) => {
+                                ledger_accounts.set(Vec::new());
+                                ledger_account_balances.set(HashMap::new());
+                                ledger_accounts_error.set(Some(err));
+                            }
+                        }
+                        ledger_accounts_loading.set(false);
+                        return;
                     }
-                },
+
+                    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                    onsuccess.call(wallet);
+                }
                 Err(e) => {
                     error_message.set(Some(format!("Failed to connect: {e}")));
                     connecting.set(false);
+                    connecting_device.set(None);
                 }
             }
         });
@@ -526,20 +579,14 @@ pub fn HardwareWalletModal(
         fw_auth_mode.set(None);
         fw_finalized.set(None);
         setup_required.set(false);
-        setup_choice.set(None);
-        setup_done.set(false);
         pin_setup_step.set(PinSetupStep::Enter);
         pin_first_entry.set(String::new());
         pin_setup_error.set(None);
-        otp_uri.set(None);
-        otp_secret.set(None);
-        otp_code.set(String::new());
         connect_unlock_required.set(false);
         connect_unlock_mode.set(None);
         connect_unlock_busy.set(false);
         connect_unlock_error.set(None);
         connect_unlock_otp_code.set(String::new());
-        connect_unlock_is_setup_verification.set(false);
         connect_unlock_waiting_button.set(false);
         ledger_accounts.set(Vec::new());
         ledger_account_balances.set(HashMap::new());
@@ -557,10 +604,11 @@ pub fn HardwareWalletModal(
     } else {
         "hardware-pin-setup-confirm"
     };
-    let connect_pin_component_key = if connect_unlock_is_setup_verification() {
-        "hardware-pin-unlock-verify"
+    let connect_pin_component_key = "hardware-pin-unlock";
+    let hardware_modal_class = if setup_required() {
+        "modal-content hardware-modal hardware-modal-immersive"
     } else {
-        "hardware-pin-unlock-connect"
+        "modal-content hardware-modal"
     };
 
     rsx! {
@@ -569,7 +617,7 @@ pub fn HardwareWalletModal(
             onclick: move |_| onclose.call(()),
 
             div {
-                class: "modal-content hardware-modal",
+                class: "{hardware_modal_class}",
                 onclick: move |e| e.stop_propagation(),
 
                 div {
@@ -595,19 +643,31 @@ pub fn HardwareWalletModal(
 
                     if !connected() {
                         div {
-                            class: "connection-section",
+                            class: "connection-section hardware-connect-shell",
 
                             div {
-                                class: "info-header",
-                                h3 { "Bring Your Hardware Wallet Close" }
-                                p { class: "info-subtitle", "Plug in with USB, then tap Connect. The app will guide unlock and setup automatically." }
+                                class: "info-header hardware-auth-hero",
+                                div { class: "hardware-auth-kicker", "Hardware Connect" }
+                                h3 { "Connect Your Hardware Wallet" }
+                                p {
+                                    class: "info-subtitle",
+                                    if connecting() {
+                                        if connecting_device() == Some(HardwareDeviceType::ESP32) {
+                                            "Handshaking with your Unruggable First Edition and establishing a secure connection. First plug-in can take a second."
+                                        } else {
+                                            "Opening a secure connection to Ledger. Keep the device unlocked with the Solana app open."
+                                        }
+                                    } else {
+                                        "Plug in, tap connect, and unlock only if the device asks for it."
+                                    }
+                                }
                             }
 
                             div {
                                 class: "connection-steps",
-                                div { class: "connection-step-chip", "1. Plug in device" }
-                                div { class: "connection-step-chip", "2. Tap Connect" }
-                                div { class: "connection-step-chip", "3. Confirm on device" }
+                                div { class: "connection-step-chip", "1. Plug in" }
+                                div { class: "connection-step-chip", "2. Connect" }
+                                div { class: "connection-step-chip", "3. Unlock" }
                             }
 
                             if scanning() {
@@ -624,7 +684,7 @@ pub fn HardwareWalletModal(
                                         div { class: "no-devices-title", "No Hardware Wallets Detected" }
                                         div {
                                             class: "no-devices-subtitle",
-                                            "Check cable/power, then rescan."
+                                            "Check cable and power, then rescan."
                                         }
                                         div {
                                             class: "no-devices-actions",
@@ -642,33 +702,64 @@ pub fn HardwareWalletModal(
                                         div {
                                             class: "devices-grid",
                                             for device in available_devices() {
-                                                div {
-                                                    class: "device-card",
-                                                    div {
-                                                        class: "device-icon-container",
-                                                        img {
-                                                            src: if device.device_type == HardwareDeviceType::ESP32 { ICON_UNRUGGABLE } else { ICON_LEDGER },
-                                                            alt: if device.device_type == HardwareDeviceType::ESP32 { "Unruggable Hardware Wallet" } else { "Ledger Hardware Wallet" },
-                                                            width: "48",
-                                                            height: "48"
-                                                        }
-                                                    }
-                                                    div {
-                                                        class: "device-info",
-                                                        div { class: "device-name", "{device.name}" }
+                                                {
+                                                    let is_connecting_this_device =
+                                                        connecting()
+                                                            && connecting_device()
+                                                                == Some(device.device_type.clone());
+                                                    rsx! {
                                                         div {
-                                                            class: if device.device_type == HardwareDeviceType::ESP32 { "device-type-badge unruggable-badge" } else { "device-type-badge ledger-badge" },
-                                                            if device.device_type == HardwareDeviceType::ESP32 { "Unruggable Wallet" } else { "Ledger Wallet" }
+                                                            class: "device-card",
+                                                            div {
+                                                                class: "device-icon-container",
+                                                                img {
+                                                                    src: if device.device_type == HardwareDeviceType::ESP32 { ICON_UNRUGGABLE } else { ICON_LEDGER },
+                                                                    alt: if device.device_type == HardwareDeviceType::ESP32 { "Unruggable First Edition" } else { "Ledger Hardware Wallet" },
+                                                                    width: "48",
+                                                                    height: "48"
+                                                                }
+                                                            }
+                                                            div {
+                                                                class: "device-info",
+                                                                div { class: "device-name", "{device.name}" }
+                                                                div {
+                                                                    class: if device.device_type == HardwareDeviceType::ESP32 { "device-type-badge unruggable-badge" } else { "device-type-badge ledger-badge" },
+                                                                    if device.device_type == HardwareDeviceType::ESP32 { "First Edition" } else { "Ledger" }
+                                                                }
+                                                            }
+                                                            button {
+                                                                class: if is_connecting_this_device {
+                                                                    "connect-device-button connecting"
+                                                                } else {
+                                                                    "connect-device-button"
+                                                                },
+                                                                disabled: connecting(),
+                                                                onclick: {
+                                                                    let dev_type = device.device_type.clone();
+                                                                    move |_| connect_device(dev_type.clone())
+                                                                },
+                                                                if is_connecting_this_device {
+                                                                    span { class: "connect-device-button-spinner", "" }
+                                                                    div {
+                                                                        class: "connect-device-button-copy",
+                                                                        span {
+                                                                            class: "connect-device-button-label",
+                                                                            "Connecting"
+                                                                        }
+                                                                        span {
+                                                                            class: "connect-device-button-status",
+                                                                            if device.device_type == HardwareDeviceType::ESP32 {
+                                                                                "Handshaking with device..."
+                                                                            } else {
+                                                                                "Opening secure channel..."
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                } else {
+                                                                    "Connect"
+                                                                }
+                                                            }
                                                         }
-                                                    }
-                                                    button {
-                                                        class: if connecting() { "connect-device-button connecting" } else { "connect-device-button" },
-                                                        disabled: connecting(),
-                                                        onclick: {
-                                                            let dev_type = device.device_type.clone();
-                                                            move |_| connect_device(dev_type.clone())
-                                                        },
-                                                        if connecting() { "Connecting..." } else { "Connect" }
                                                     }
                                                 }
                                             }
@@ -679,431 +770,187 @@ pub fn HardwareWalletModal(
                         }
                     } else if setup_required() {
                         div {
-                            class: "connected-section",
-                            h3 { "Device Setup Required" }
-                            p {
-                                class: "info-subtitle",
-                                "This device is fresh and needs one-time auth setup. Choose one mode: NONE, PIN, or OTP."
+                            class: "connected-section hardware-auth-shell hardware-pin-setup-stage",
+                            div {
+                                class: "flow-hero-media flow-hero-media-hardware",
+                                img {
+                                    class: "flow-hero-image flow-hero-image-hardware",
+                                    src: first_edition_lock_art,
+                                    alt: "Unruggable lock artwork"
+                                }
                             }
 
-                            if setup_done() {
-                                div {
-                                    class: "success-header",
-                                    div { class: "success-icon", "✅" }
-                                    h3 { "Device Setup Complete" }
+                            div {
+                                class: "hardware-auth-hero hardware-auth-hero-compact",
+                                div { class: "hardware-auth-kicker", "First-Time Setup" }
+                                p {
+                                    class: "info-subtitle",
+                                    if setup_busy() {
+                                        "PIN confirmed. Press and hold the hardware button for about 2 seconds to save it on the device."
+                                    } else if pin_setup_step() == PinSetupStep::Enter {
+                                        "Create a 6-digit PIN for your Unruggable First Edition."
+                                    } else {
+                                        "Confirm the same 6-digit PIN, then save it on the device."
+                                    }
                                 }
-                                button {
-                                    class: "connect-device-button",
-                                    onclick: move |_| {
-                                        if let Some(wallet) = hardware_wallet() {
-                                            onsuccess.call(wallet);
-                                        }
-                                    },
-                                    "Continue"
+                            }
+
+                            div {
+                                class: "flow-note-card flow-note-card-hardware",
+                                div {
+                                    class: "flow-note-label",
+                                    "Generated offline on device"
+                                }
+                                p {
+                                    class: "flow-note-copy",
+                                    "Your keypair is created locally on the Unruggable First Edition. The private key never leaves the device."
+                                }
+                            }
+
+                            if setup_busy() {
+                                div {
+                                    class: "hardware-auth-card hardware-setup-busy-card",
+                                    div { class: "pin-processing-spinner" }
+                                    h3 { class: "hardware-setup-busy-title", "Save PIN On Device" }
+                                    p {
+                                        class: "hardware-setup-busy-copy",
+                                        "Press and hold the hardware button for about 2 seconds to finish setup."
+                                    }
+                                }
+                            } else if pin_setup_step() == PinSetupStep::Enter {
+                                div {
+                                    class: "hardware-auth-card hardware-pin-shell hardware-pin-shell-setup",
+                                    key: "{setup_pin_component_key}",
+                                    PinInput {
+                                        title: "Create PIN".to_string(),
+                                        subtitle: Some("Choose a 6-digit code for your Unruggable First Edition.".to_string()),
+                                        error_message: pin_setup_error(),
+                                        on_complete: EventHandler::new(move |pin_value: String| {
+                                            if !valid_six_digits(&pin_value) {
+                                                pin_setup_error.set(Some("PIN must be exactly 6 digits".to_string()));
+                                                return;
+                                            }
+
+                                            pin_first_entry.set(pin_value);
+                                            pin_setup_step.set(PinSetupStep::Confirm);
+                                            pin_setup_error.set(None);
+                                        }),
+                                        on_cancel: None,
+                                        on_input: Some(EventHandler::new(move |_| {
+                                            if pin_setup_error().is_some() {
+                                                pin_setup_error.set(None);
+                                            }
+                                        })),
+                                        show_strength: Some(false),
+                                        step_indicator: Some("Step 1 of 2".to_string()),
+                                        clear_on_complete: Some(true),
+                                        is_processing: Some(false),
+                                        processing_label: None,
+                                        reset_key: Some(setup_pin_component_key.to_string()),
+                                    }
                                 }
                             } else {
-                                if setup_choice().is_none() {
-                                    div {
-                                        class: "devices-grid",
-                                        button {
-                                            class: "connect-device-button",
-                                            onclick: move |_| {
-                                                setup_choice.set(Some(SetupChoice::None));
+                                div {
+                                    class: "hardware-auth-card hardware-pin-shell hardware-pin-shell-setup",
+                                    key: "{setup_pin_component_key}",
+                                    PinInput {
+                                        title: "Confirm PIN".to_string(),
+                                        subtitle: Some("Enter the same 6-digit PIN again.".to_string()),
+                                        error_message: pin_setup_error(),
+                                        on_complete: EventHandler::new(move |pin_value: String| {
+                                            if !valid_six_digits(&pin_value) {
+                                                pin_setup_error.set(Some("PIN must be exactly 6 digits".to_string()));
+                                                return;
+                                            }
+
+                                            if pin_value != pin_first_entry() {
+                                                pin_setup_error.set(Some("PINs don't match. Try again.".to_string()));
                                                 pin_setup_step.set(PinSetupStep::Enter);
                                                 pin_first_entry.set(String::new());
+                                                return;
+                                            }
+
+                                            let Some(wallet) = hardware_wallet() else {
+                                                pin_setup_error.set(Some("Hardware wallet disconnected".to_string()));
+                                                return;
+                                            };
+
+                                            setup_busy.set(true);
+                                            pin_setup_error.set(None);
+                                            error_message.set(None);
+                                            let pin_to_set = pin_value.clone();
+                                            spawn(async move {
+                                                match wallet.setup_mode_pin(&pin_to_set).await {
+                                                    Ok(()) => {
+                                                        if let Some(pubkey) = wallet.get_cached_public_key().await {
+                                                            public_key.set(Some(pubkey));
+                                                        }
+                                                        match wallet.refresh_esp32_info().await {
+                                                            Ok(Some(info)) => {
+                                                                fw_auth_mode.set(Some(info.auth_mode));
+                                                                fw_finalized.set(Some(info.finalized));
+                                                                setup_required
+                                                                    .set(!info.finalized || info.auth_mode == AuthMode::Unset);
+                                                            }
+                                                            _ => {
+                                                                fw_auth_mode.set(Some(AuthMode::Pin));
+                                                                fw_finalized.set(Some(true));
+                                                                setup_required.set(false);
+                                                            }
+                                                        }
+                                                        setup_busy.set(false);
+                                                        pin_setup_step.set(PinSetupStep::Enter);
+                                                        pin_first_entry.set(String::new());
+                                                        pin_setup_error.set(None);
+                                                        connect_unlock_required.set(false);
+                                                        connect_unlock_mode.set(None);
+                                                        connect_unlock_busy.set(false);
+                                                        connect_unlock_error.set(None);
+                                                        connect_unlock_otp_code.set(String::new());
+                                                        connect_unlock_waiting_button.set(false);
+                                                        error_message.set(None);
+                                                        onsuccess.call(wallet);
+                                                    }
+                                                    Err(err) => {
+                                                        setup_busy.set(false);
+                                                        pin_setup_error
+                                                            .set(Some(format_setup_error(&err.to_string())));
+                                                    }
+                                                }
+                                            });
+                                        }),
+                                        on_cancel: None,
+                                        on_input: Some(EventHandler::new(move |_| {
+                                            if pin_setup_error().is_some() {
                                                 pin_setup_error.set(None);
-                                            },
-                                            "No Auth (NONE)"
-                                        }
-                                        button {
-                                            class: "connect-device-button",
-                                            onclick: move |_| {
-                                                setup_choice.set(Some(SetupChoice::Pin));
-                                                pin_setup_step.set(PinSetupStep::Enter);
-                                                pin_first_entry.set(String::new());
-                                                pin_setup_error.set(None);
-                                            },
-                                            "Device PIN (6 digits)"
-                                        }
-                                        button {
-                                            class: "connect-device-button",
-                                            onclick: move |_| {
-                                                setup_choice.set(Some(SetupChoice::Otp));
-                                                pin_setup_step.set(PinSetupStep::Enter);
-                                                pin_first_entry.set(String::new());
-                                                pin_setup_error.set(None);
-                                            },
-                                            "Authenticator OTP"
-                                        }
+                                            }
+                                        })),
+                                        show_strength: Some(false),
+                                        step_indicator: Some("Step 2 of 2".to_string()),
+                                        clear_on_complete: Some(true),
+                                        is_processing: Some(false),
+                                        processing_label: None,
+                                        reset_key: Some(setup_pin_component_key.to_string()),
                                     }
-                                } else {
-                                    match setup_choice() {
-                                        Some(SetupChoice::None) => rsx! {
-                                            div {
-                                                class: "wallet-field",
-                                                label { "Set mode to NONE" }
-                                                p { class: "info-subtitle", "You must hold the hardware button to confirm." }
-                                                div { class: "modal-buttons",
-                                                    button {
-                                                        class: "modal-button cancel",
-                                                        disabled: setup_busy(),
-                                                        onclick: move |_| {
-                                                            setup_choice.set(None);
-                                                            error_message.set(None);
-                                                            pin_setup_step.set(PinSetupStep::Enter);
-                                                            pin_first_entry.set(String::new());
-                                                            pin_setup_error.set(None);
-                                                            otp_code.set(String::new());
-                                                            otp_uri.set(None);
-                                                            otp_secret.set(None);
-                                                        },
-                                                        "Back"
-                                                    }
-                                                    button {
-                                                        class: "modal-button primary",
-                                                        disabled: setup_busy(),
-                                                        onclick: move |_| {
-                                                            let Some(wallet) = hardware_wallet() else {
-                                                                error_message.set(Some("Hardware wallet disconnected".to_string()));
-                                                                return;
-                                                            };
-                                                            setup_busy.set(true);
-                                                            error_message.set(None);
-                                                            spawn(async move {
-                                                                match wallet.setup_mode_none().await {
-                                                                    Ok(()) => {
-                                                                        if let Ok(info_opt) = wallet.refresh_esp32_info().await {
-                                                                            if let Some(info) = info_opt {
-                                                                                fw_auth_mode.set(Some(info.auth_mode));
-                                                                                fw_finalized.set(Some(info.finalized));
-                                                                                setup_required.set(!info.finalized || info.auth_mode == AuthMode::Unset);
-                                                                            }
-                                                                        }
-                                                                        setup_busy.set(false);
-                                                                        setup_done.set(true);
-                                                                        setup_choice.set(None);
-                                                                        pin_setup_step.set(PinSetupStep::Enter);
-                                                                        pin_first_entry.set(String::new());
-                                                                        pin_setup_error.set(None);
-                                                                        otp_code.set(String::new());
-                                                                        otp_uri.set(None);
-                                                                        otp_secret.set(None);
-                                                                        error_message.set(None);
-                                                                    }
-                                                                    Err(err) => {
-                                                                        setup_busy.set(false);
-                                                                        error_message.set(Some(format!("Setup failed: {err}")));
-                                                                    }
-                                                                }
-                                                            });
-                                                        },
-                                                        if setup_busy() { "Setting..." } else { "Confirm NONE" }
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        Some(SetupChoice::Pin) => rsx! {
-                                            div {
-                                                class: "wallet-field",
-                                                label { "Device PIN Setup" }
-                                                p { class: "info-subtitle", "Create and confirm your 6-digit Device PIN." }
-                                                p { class: "info-subtitle", "Final setup still requires holding the hardware button." }
+                                }
 
-                                                div {
-                                                    key: "{setup_pin_component_key}",
-                                                    PinInput {
-                                                        title: if pin_setup_step() == PinSetupStep::Enter {
-                                                            "Create Device PIN".to_string()
-                                                        } else {
-                                                            "Confirm Device PIN".to_string()
-                                                        },
-                                                        subtitle: Some(if pin_setup_step() == PinSetupStep::Enter {
-                                                            "Step 1: Choose a 6-digit PIN".to_string()
-                                                        } else {
-                                                            "Step 2: Enter the same PIN again".to_string()
-                                                        }),
-                                                        error_message: pin_setup_error(),
-                                                        on_complete: EventHandler::new(move |pin_value: String| {
-                                                            if setup_busy() {
-                                                                return;
-                                                            }
-                                                            if !valid_six_digits(&pin_value) {
-                                                                pin_setup_error.set(Some("PIN must be exactly 6 digits".to_string()));
-                                                                return;
-                                                            }
-
-                                                            if pin_setup_step() == PinSetupStep::Enter {
-                                                                pin_first_entry.set(pin_value);
-                                                                pin_setup_step.set(PinSetupStep::Confirm);
-                                                                pin_setup_error.set(None);
-                                                                return;
-                                                            }
-
-                                                            if pin_value != pin_first_entry() {
-                                                                pin_setup_error.set(Some("PINs don't match. Let's try again.".to_string()));
-                                                                pin_setup_step.set(PinSetupStep::Enter);
-                                                                pin_first_entry.set(String::new());
-                                                                return;
-                                                            }
-
-                                                            let Some(wallet) = hardware_wallet() else {
-                                                                pin_setup_error.set(Some("Hardware wallet disconnected".to_string()));
-                                                                return;
-                                                            };
-
-                                                            setup_busy.set(true);
-                                                            pin_setup_error.set(None);
-                                                            error_message.set(None);
-                                                            let pin_to_set = pin_value.clone();
-                                                            spawn(async move {
-                                                                    match wallet.setup_mode_pin(&pin_to_set).await {
-                                                                        Ok(()) => {
-                                                                            if let Ok(info_opt) = wallet.refresh_esp32_info().await {
-                                                                                if let Some(info) = info_opt {
-                                                                                    fw_auth_mode.set(Some(info.auth_mode));
-                                                                                    fw_finalized.set(Some(info.finalized));
-                                                                                    setup_required.set(!info.finalized || info.auth_mode == AuthMode::Unset);
-                                                                                }
-                                                                            }
-                                                                            setup_busy.set(false);
-                                                                            setup_done.set(false);
-                                                                            setup_choice.set(None);
-                                                                            pin_setup_step.set(PinSetupStep::Enter);
-                                                                            pin_first_entry.set(String::new());
-                                                                            pin_setup_error.set(None);
-                                                                            otp_code.set(String::new());
-                                                                            otp_uri.set(None);
-                                                                            otp_secret.set(None);
-                                                                            error_message.set(None);
-                                                                            connect_unlock_required.set(true);
-                                                                            connect_unlock_mode.set(Some(ConnectUnlockMode::Pin));
-                                                                            connect_unlock_busy.set(false);
-                                                                            connect_unlock_error.set(None);
-                                                                            connect_unlock_otp_code.set(String::new());
-                                                                            connect_unlock_is_setup_verification.set(true);
-                                                                            connect_unlock_waiting_button.set(false);
-                                                                        }
-                                                                    Err(err) => {
-                                                                        setup_busy.set(false);
-                                                                        pin_setup_error.set(Some(format!("Setup failed: {err}")));
-                                                                    }
-                                                                }
-                                                            });
-                                                        }),
-                                                        on_cancel: Some(EventHandler::new(move |_| {
-                                                            setup_choice.set(None);
-                                                            pin_setup_step.set(PinSetupStep::Enter);
-                                                            pin_first_entry.set(String::new());
-                                                            pin_setup_error.set(None);
-                                                            error_message.set(None);
-                                                            otp_code.set(String::new());
-                                                            otp_uri.set(None);
-                                                            otp_secret.set(None);
-                                                        })),
-                                                        show_strength: Some(pin_setup_step() == PinSetupStep::Enter),
-                                                        step_indicator: Some(if pin_setup_step() == PinSetupStep::Enter {
-                                                            "Step 1 of 2".to_string()
-                                                        } else {
-                                                            "Step 2 of 2".to_string()
-                                                        }),
-                                                        clear_on_complete: Some(true),
-                                                    }
-                                                }
-
-                                                if setup_busy() {
-                                                    p { class: "info-subtitle", "Setting PIN mode on device... hold the hardware button to confirm." }
-                                                }
-                                            }
-                                        },
-                                        Some(SetupChoice::Otp) => rsx! {
-                                            div {
-                                                class: "wallet-field",
-                                                label { "Authenticator OTP Setup" }
-                                                p { class: "info-subtitle", "Tap Generate OTP Pairing, then press and hold the hardware button so the device can send the QR pairing data." }
-                                                p { class: "info-subtitle", "After confirming OTP mode, setup verification requires a fresh authenticator code (next 30s window)." }
-
-                                                if otp_uri().is_none() {
-                                                    button {
-                                                        class: "modal-button primary",
-                                                        disabled: setup_busy(),
-                                                        onclick: move |_| {
-                                                            let Some(wallet) = hardware_wallet() else {
-                                                                error_message.set(Some("Hardware wallet disconnected".to_string()));
-                                                                return;
-                                                            };
-                                                            setup_busy.set(true);
-                                                            error_message.set(None);
-                                                            spawn(async move {
-                                                                match wallet.setup_mode_otp_begin().await {
-                                                                    Ok(data) => {
-                                                                        setup_busy.set(false);
-                                                                        otp_uri.set(Some(data.uri));
-                                                                        otp_secret.set(Some(data.secret));
-                                                                    }
-                                                                    Err(err) => {
-                                                                        setup_busy.set(false);
-                                                                        error_message.set(Some(format!("OTP begin failed: {err}")));
-                                                                    }
-                                                                }
-                                                            });
-                                                        },
-                                                        if setup_busy() { "Waiting for button press..." } else { "Generate OTP Pairing" }
-                                                    }
-                                                } else {
-                                                    if let Some(uri) = otp_uri() {
-                                                        div {
-                                                            class: "qr-code-container",
-                                                            div {
-                                                                class: "qr-code",
-                                                                dangerous_inner_html: "{generate_qr_code_svg(&uri)}"
-                                                            }
-                                                        }
-                                                        div {
-                                                            class: "wallet-field",
-                                                            label { "OTP URI" }
-                                                            div { class: "address-display", "{uri}" }
-                                                        }
-                                                    }
-                                                    if let Some(secret) = otp_secret() {
-                                                        div {
-                                                            class: "wallet-field",
-                                                            label { "Manual Secret" }
-                                                            div { class: "address-display", "{secret}" }
-                                                        }
-                                                    }
-                                                    input {
-                                                        r#type: "password",
-                                                        value: "{otp_code}",
-                                                        oninput: move |e| otp_code.set(e.value()),
-                                                        placeholder: "Enter 6-digit OTP code",
-                                                        maxlength: "6",
-                                                        autocomplete: "off"
-                                                    }
-                                                    div { class: "modal-buttons",
-                                                        button {
-                                                            class: "modal-button cancel",
-                                                            disabled: setup_busy(),
-                                                            onclick: move |_| {
-                                                                setup_choice.set(None);
-                                                                error_message.set(None);
-                                                                pin_setup_step.set(PinSetupStep::Enter);
-                                                                pin_first_entry.set(String::new());
-                                                                pin_setup_error.set(None);
-                                                                otp_code.set(String::new());
-                                                                otp_uri.set(None);
-                                                                otp_secret.set(None);
-                                                            },
-                                                            "Back"
-                                                        }
-                                                        button {
-                                                            class: "modal-button primary",
-                                                            disabled: setup_busy(),
-                                                            onclick: move |_| {
-                                                                let code = otp_code();
-                                                                if !valid_six_digits(&code) {
-                                                                    error_message.set(Some("OTP code must be exactly 6 digits".to_string()));
-                                                                    return;
-                                                                }
-                                                                let Some(wallet) = hardware_wallet() else {
-                                                                    error_message.set(Some("Hardware wallet disconnected".to_string()));
-                                                                    return;
-                                                                };
-                                                                setup_busy.set(true);
-                                                                error_message.set(None);
-                                                                spawn(async move {
-                                                                    match wallet.setup_mode_otp_confirm(&code).await {
-                                                                        Ok(()) => {
-                                                                            if let Ok(info_opt) = wallet.refresh_esp32_info().await {
-                                                                                if let Some(info) = info_opt {
-                                                                                    fw_auth_mode.set(Some(info.auth_mode));
-                                                                                    fw_finalized.set(Some(info.finalized));
-                                                                                    setup_required.set(!info.finalized || info.auth_mode == AuthMode::Unset);
-                                                                                }
-                                                                            }
-                                                                            setup_busy.set(false);
-                                                                            setup_done.set(false);
-                                                                            setup_choice.set(None);
-                                                                            pin_setup_step.set(PinSetupStep::Enter);
-                                                                            pin_first_entry.set(String::new());
-                                                                            pin_setup_error.set(None);
-                                                                            otp_code.set(String::new());
-                                                                            otp_uri.set(None);
-                                                                            otp_secret.set(None);
-                                                                            error_message.set(None);
-                                                                            connect_unlock_required.set(true);
-                                                                            connect_unlock_mode.set(Some(ConnectUnlockMode::Otp));
-                                                                            connect_unlock_busy.set(false);
-                                                                            connect_unlock_error.set(None);
-                                                                            connect_unlock_otp_code.set(String::new());
-                                                                            connect_unlock_is_setup_verification.set(true);
-                                                                            connect_unlock_waiting_button.set(false);
-                                                                        }
-                                                                        Err(err) => {
-                                                                            setup_busy.set(false);
-                                                                            error_message.set(Some(format!("OTP confirm failed: {err}")));
-                                                                        }
-                                                                    }
-                                                                });
-                                                            },
-                                                            if setup_busy() { "Confirming..." } else { "Confirm OTP Mode" }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        },
-                                        None => rsx! { div {} },
-                                    }
+                                div {
+                                    class: "hardware-inline-note",
+                                    "After you confirm the PIN, you'll press and hold the device button for about 2 seconds."
                                 }
                             }
                         }
                     } else if connect_unlock_required() {
-                        div {
-                            class: "connected-section",
-                            h3 {
-                                if connect_unlock_is_setup_verification() {
-                                    "Verify Auth to Finish Setup"
-                                } else {
-                                    "Unlock Device to Connect"
-                                }
-                            }
-                            p {
-                                class: "info-subtitle",
-                                match connect_unlock_mode() {
-                                    Some(ConnectUnlockMode::Pin) => {
-                                        if connect_unlock_is_setup_verification() {
-                                            "PIN mode is set. Enter your Device PIN to verify it works."
-                                        } else {
-                                            "Enter your Device PIN to start a signing session."
-                                        }
-                                    }
-                                    Some(ConnectUnlockMode::Otp) => {
-                                        if connect_unlock_waiting_button() {
-                                            "Code submitted. Press and hold the device button to authorize login."
-                                        } else if connect_unlock_is_setup_verification() {
-                                            "OTP mode is set. Enter a fresh authenticator code (not the one used during setup) to verify it works."
-                                        } else {
-                                            "Enter your authenticator code to start a signing session."
-                                        }
-                                    }
-                                    None => "Unlock your device to continue.",
-                                }
-                            }
-
-                            if let Some(err) = connect_unlock_error() {
+                        match connect_unlock_mode() {
+                            Some(ConnectUnlockMode::Pin) => rsx! {
                                 div {
-                                    class: "error-message",
-                                    div { class: "error-icon", "⚠️" }
-                                    div { class: "error-text", "{err}" }
-                                }
-                            }
-
-                            match connect_unlock_mode() {
-                                Some(ConnectUnlockMode::Pin) => rsx! {
+                                    class: "hardware-pin-minimal-shell",
                                     div {
+                                        class: "hardware-pin-shell hardware-pin-shell-minimal",
                                         key: "{connect_pin_component_key}",
                                         PinInput {
-                                            title: "Unlock Device PIN".to_string(),
-                                            subtitle: Some("Enter your 6-digit Device PIN".to_string()),
+                                            title: "PIN".to_string(),
+                                            subtitle: None,
                                             error_message: connect_unlock_error(),
                                             on_complete: EventHandler::new(move |pin_value: String| {
                                                 if connect_unlock_busy() {
@@ -1130,7 +977,6 @@ pub fn HardwareWalletModal(
                                                             connect_unlock_mode.set(None);
                                                             connect_unlock_error.set(None);
                                                             connect_unlock_otp_code.set(String::new());
-                                                            connect_unlock_is_setup_verification.set(false);
                                                             connect_unlock_waiting_button.set(false);
                                                             onsuccess.call(wallet);
                                                         }
@@ -1142,65 +988,79 @@ pub fn HardwareWalletModal(
                                                     }
                                                 });
                                             }),
-                                            on_cancel: Some(EventHandler::new(move |_| {
-                                                if let Some(wallet) = hardware_wallet() {
-                                                    spawn(async move {
-                                                        let _ = wallet.disconnect().await;
-                                                    });
+                                            on_cancel: None,
+                                            on_input: Some(EventHandler::new(move |_| {
+                                                if connect_unlock_error().is_some() {
+                                                    connect_unlock_error.set(None);
                                                 }
-                                                hardware_wallet.set(None);
-                                                connected.set(false);
-                                                public_key.set(None);
-                                                device_type.set(None);
-                                                capability.set(None);
-                                                fw_auth_mode.set(None);
-                                                fw_finalized.set(None);
-                                                setup_required.set(false);
-                                                setup_choice.set(None);
-                                                setup_done.set(false);
-                                                pin_setup_step.set(PinSetupStep::Enter);
-                                                pin_first_entry.set(String::new());
-                                                pin_setup_error.set(None);
-                                                otp_uri.set(None);
-                                                otp_secret.set(None);
-                                                otp_code.set(String::new());
-                                                connect_unlock_required.set(false);
-                                                connect_unlock_mode.set(None);
-                                                connect_unlock_busy.set(false);
-                                                connect_unlock_error.set(None);
-                                                connect_unlock_otp_code.set(String::new());
-                                                connect_unlock_is_setup_verification.set(false);
-                                                connect_unlock_waiting_button.set(false);
-                                                ondisconnect.call(());
                                             })),
                                             show_strength: Some(false),
-                                            step_indicator: Some(if connect_unlock_is_setup_verification() {
-                                                "Setup Verification".to_string()
-                                            } else {
-                                                "Connect Unlock".to_string()
-                                            }),
+                                            step_indicator: None,
                                             clear_on_complete: Some(true),
+                                            is_processing: Some(connect_unlock_busy()),
+                                            processing_label: Some(if connect_unlock_waiting_button() {
+                                                "Confirm on device...".to_string()
+                                            } else {
+                                                "Unlocking device...".to_string()
+                                            }),
                                         }
                                     }
-                                },
-                                Some(ConnectUnlockMode::Otp) => rsx! {
+                                }
+                            },
+                            Some(ConnectUnlockMode::Otp) => rsx! {
+                                div {
+                                    class: "connected-section hardware-auth-shell",
                                     div {
-                                        class: "wallet-field",
+                                        class: "hardware-auth-hero hardware-auth-hero-compact",
+                                        div { class: "hardware-auth-kicker", "Authenticator" }
+                                        p {
+                                            class: "info-subtitle",
+                                            if connect_unlock_waiting_button() {
+                                                "Code accepted. Press the hardware button once now."
+                                            } else {
+                                                "Enter the current 6-digit code. After you submit it, press the hardware button once within 8 seconds to finish unlocking."
+                                            }
+                                        }
+                                    }
+
+                                    if connect_unlock_waiting_button() {
+                                        div {
+                                            class: "hardware-inline-note hardware-inline-note-strong",
+                                            "Press the hardware button once within 8 seconds."
+                                        }
+                                    }
+
+                                    if let Some(err) = connect_unlock_error() {
+                                        div {
+                                            class: "error-message",
+                                            div { class: "error-icon", "⚠️" }
+                                            div { class: "error-text", "{err}" }
+                                        }
+                                    }
+
+                                    div {
+                                        class: "hardware-auth-card hardware-auth-card-otp",
                                         label { "Authenticator Code" }
                                         input {
+                                            class: "hardware-code-input",
                                             r#type: "password",
                                             value: "{connect_unlock_otp_code}",
                                             oninput: move |e| {
-                                                connect_unlock_otp_code.set(e.value());
+                                                connect_unlock_otp_code.set(
+                                                    e.value()
+                                                        .chars()
+                                                        .filter(|c| c.is_ascii_digit())
+                                                        .take(6)
+                                                        .collect()
+                                                );
                                                 connect_unlock_waiting_button.set(false);
                                             },
-                                            placeholder: "Enter 6-digit OTP",
+                                            placeholder: "6-digit code",
                                             maxlength: "6",
                                             autocomplete: "off",
+                                            inputmode: "numeric",
+                                            pattern: "[0-9]*",
                                             disabled: connect_unlock_busy()
-                                        }
-                                        if connect_unlock_waiting_button() {
-                                            p { class: "info-subtitle", "After tapping Unlock, press and hold the device button to confirm this login." }
                                         }
                                     }
                                     div { class: "modal-buttons",
@@ -1221,20 +1081,14 @@ pub fn HardwareWalletModal(
                                                 fw_auth_mode.set(None);
                                                 fw_finalized.set(None);
                                                 setup_required.set(false);
-                                                setup_choice.set(None);
-                                                setup_done.set(false);
                                                 pin_setup_step.set(PinSetupStep::Enter);
                                                 pin_first_entry.set(String::new());
                                                 pin_setup_error.set(None);
-                                                otp_uri.set(None);
-                                                otp_secret.set(None);
-                                                otp_code.set(String::new());
                                                 connect_unlock_required.set(false);
                                                 connect_unlock_mode.set(None);
                                                 connect_unlock_busy.set(false);
                                                 connect_unlock_error.set(None);
                                                 connect_unlock_otp_code.set(String::new());
-                                                connect_unlock_is_setup_verification.set(false);
                                                 connect_unlock_waiting_button.set(false);
                                                 ondisconnect.call(());
                                             },
@@ -1269,7 +1123,6 @@ pub fn HardwareWalletModal(
                                                             connect_unlock_mode.set(None);
                                                             connect_unlock_error.set(None);
                                                             connect_unlock_otp_code.set(String::new());
-                                                            connect_unlock_is_setup_verification.set(false);
                                                             connect_unlock_waiting_button.set(false);
                                                             onsuccess.call(wallet);
                                                         }
@@ -1283,7 +1136,7 @@ pub fn HardwareWalletModal(
                                             },
                                             if connect_unlock_busy() {
                                                 if connect_unlock_waiting_button() {
-                                                    "Waiting for Button..."
+                                                    "Press Device Button..."
                                                 } else {
                                                     "Unlocking..."
                                                 }
@@ -1292,14 +1145,14 @@ pub fn HardwareWalletModal(
                                             }
                                         }
                                     }
-                                },
-                                None => rsx! {
-                                    div {
-                                        class: "wallet-field",
-                                        p { class: "info-subtitle", "Unable to determine unlock method. Disconnect and reconnect." }
-                                    }
-                                },
-                            }
+                                }
+                            },
+                            None => rsx! {
+                                div {
+                                    class: "wallet-field",
+                                    p { class: "info-subtitle", "Unable to determine unlock method. Open hardware connect again." }
+                                }
+                            },
                         }
                     } else {
                         div {
@@ -1307,7 +1160,15 @@ pub fn HardwareWalletModal(
                             div {
                                 class: "success-header",
                                 div { class: "success-icon", "✅" }
-                                h3 { "Hardware Wallet Connected" }
+                                h3 {
+                                    if device_type() == Some(HardwareDeviceType::ESP32) {
+                                        "Unruggable First Edition Connected"
+                                    } else if device_type() == Some(HardwareDeviceType::Ledger) {
+                                        "Ledger Connected"
+                                    } else {
+                                        "Hardware Wallet Connected"
+                                    }
+                                }
                             }
 
                             if let Some(dev_type) = device_type() {
@@ -1317,7 +1178,7 @@ pub fn HardwareWalletModal(
                                         class: "connected-device-icon",
                                         img {
                                             src: if dev_type == HardwareDeviceType::ESP32 { ICON_UNRUGGABLE } else { ICON_LEDGER },
-                                            alt: if dev_type == HardwareDeviceType::ESP32 { "Unruggable Hardware Wallet" } else { "Ledger Hardware Wallet" },
+                                            alt: if dev_type == HardwareDeviceType::ESP32 { "Unruggable First Edition" } else { "Ledger Hardware Wallet" },
                                             width: "64",
                                             height: "64"
                                         }

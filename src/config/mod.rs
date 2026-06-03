@@ -31,7 +31,7 @@ impl TpuConfig {
     /// Load TPU configuration - now uses hardcoded defaults, env vars can override
     pub fn from_env() -> Self {
         let default_config = Self::default();
-        
+
         Self {
             enabled: std::env::var("TPU_ENABLED")
                 .map(|v| v.to_lowercase() == "true")
@@ -47,7 +47,7 @@ impl TpuConfig {
                 .unwrap_or(default_config.fanout_count),
         }
     }
-    
+
     /// Check if TPU is properly configured
     pub fn is_valid(&self) -> bool {
         self.enabled && !self.grpc_endpoint.is_empty()

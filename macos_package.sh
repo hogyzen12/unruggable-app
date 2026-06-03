@@ -8,8 +8,7 @@ BINARY_NAME="${BINARY_NAME:-unruggable}"           # Executable name
 BUNDLE_ID="${BUNDLE_ID:-com.unruggable.app}"       # Bundle identifier
 
 TEAM_ID="${TEAM_ID:-AX8C7PY24C}"
-IDENTITY_DEFAULT="Developer ID Application: DEV NAME (${TEAM_ID})"
-IDENTITY="${IDENTITY:-$IDENTITY_DEFAULT}"
+IDENTITY="${IDENTITY:-}"
 
 # Toggle sandbox: 0 = no sandbox (Developer ID distribution), 1 = sandbox with network client/server
 SANDBOX="${SANDBOX:-0}"
@@ -30,29 +29,82 @@ APPLE_APP_SPECIFIC_PW="${APPLE_APP_SPECIFIC_PW:-}" # leave empty to be prompted
 
 log(){ printf "\n\033[1;36m▶ %s\033[0m\n" "$*"; }
 
+resolve_signing_identity() {
+  local identities
+  identities="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+
+  if [ -n "${IDENTITY}" ]; then
+    if printf '%s\n' "$identities" | grep -Fq "\"${IDENTITY}\""; then
+      printf '%s\n' "$IDENTITY"
+      return 0
+    fi
+
+    echo "❌ Signing identity not found in Keychain: $IDENTITY" >&2
+    printf '%s\n' "$identities" >&2
+    return 1
+  fi
+
+  local detected
+  detected="$(
+    printf '%s\n' "$identities" |
+      sed -n "s/.*\"\\(Developer ID Application: .* (${TEAM_ID})\\)\".*/\\1/p" |
+      head -n 1
+  )"
+
+  if [ -z "$detected" ]; then
+    detected="$(
+      printf '%s\n' "$identities" |
+        sed -n 's/.*"\(Developer ID Application: .*\)".*/\1/p' |
+        head -n 1
+    )"
+  fi
+
+  if [ -z "$detected" ]; then
+    echo "❌ No Developer ID Application signing identity found for team ${TEAM_ID}" >&2
+    printf '%s\n' "$identities" >&2
+    return 1
+  fi
+
+  printf '%s\n' "$detected"
+}
+
 ### 0) Pre-flight checks
 log "Pre-flight checks"
 command -v xcrun >/dev/null || { echo "❌ Xcode Command Line Tools required"; exit 1; }
 command -v cargo-bundle >/dev/null || { echo "❌ cargo-bundle not found. Install with: cargo install cargo-bundle"; exit 1; }
-if ! security find-identity -v -p codesigning | grep -q "$IDENTITY"; then
-  echo "❌ Signing identity not found in Keychain: $IDENTITY"
-  security find-identity -v -p codesigning || true
-  exit 1
-fi
+IDENTITY="$(resolve_signing_identity)"
+echo "Using signing identity: $IDENTITY"
 case "$(uname -m)" in arm64) : ;; *) echo "❌ Script is configured for Apple Silicon (arm64)."; exit 1;; esac
 
 ### 1) Build (release, desktop features, arm64)
 log "Building binary with Cargo (release, desktop, arm64)"
-cargo build --release --features desktop --target aarch64-apple-darwin
+cargo build --release --no-default-features --features desktop --target aarch64-apple-darwin
 
 ### 2) Bundle into .app with cargo-bundle
 log "Bundling into .app with cargo-bundle"
 export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
-cargo bundle --release --target aarch64-apple-darwin
+cargo bundle --release --no-default-features --features desktop --target aarch64-apple-darwin
 
 APP_PATH="target/aarch64-apple-darwin/release/bundle/osx/${APP_NAME}.app"
 [ -d "$APP_PATH" ] || { echo "❌ Could not find ${APP_NAME}.app at $APP_PATH"; exit 1; }
 echo "Found app: $APP_PATH"
+
+log "Syncing bundled assets into app resources"
+rm -rf "$APP_PATH/Contents/Resources/assets"
+ditto assets "$APP_PATH/Contents/Resources/assets"
+
+for required_asset in \
+  "Contents/Resources/assets/main.css" \
+  "Contents/Resources/assets/pin-premium.css" \
+  "Contents/Resources/assets/lock.png" \
+  "Contents/Resources/assets/key_screen_1.png"
+do
+  [ -f "$APP_PATH/$required_asset" ] || {
+    echo "❌ Missing bundled asset: $required_asset"
+    echo "   Check [package.metadata.bundle].resources in Cargo.toml"
+    exit 1
+  }
+done
 
 ### 3) Entitlements
 ENTITLEMENTS="$(pwd)/entitlements.generated.plist"
@@ -153,18 +205,28 @@ DMG_FILE="${APP_NAME}.dmg"
 rm -f "$DMG_FILE"
 
 STAGING="$(mktemp -d)"
-trap 'rm -rf "$STAGING"' EXIT
-cp -R "$APP_PATH" "$STAGING/"
+VOLNAME="${APP_NAME} ${SHORT_VER:-}"
+RW_DMG="$(mktemp -u /private/tmp/${APP_NAME}-rw.XXXXXX.dmg)"
+MOUNT_DIR="$(mktemp -d /private/tmp/${APP_NAME}-mount.XXXXXX)"
+cleanup_dmg_staging() {
+  if mount | grep -q "on ${MOUNT_DIR} "; then
+    hdiutil detach "$MOUNT_DIR" -force >/dev/null 2>&1 || true
+  fi
+  rm -rf "$STAGING" "$MOUNT_DIR"
+  rm -f "$RW_DMG"
+}
+trap cleanup_dmg_staging EXIT
+
+ditto "$APP_PATH" "$STAGING/${APP_NAME}.app"
 ln -s /Applications "$STAGING/Applications"
 
-VOL_MP="/Volumes/${APP_NAME}"
-if [ -d "$VOL_MP" ] && ! mount | grep -q "on ${VOL_MP} "; then
-  log "Removing stale volume directory: $VOL_MP"
-  sudo rmdir "$VOL_MP" 2>/dev/null || sudo rm -rf "$VOL_MP" || true
-fi
-
-VOLNAME="${APP_NAME} ${SHORT_VER:-}"
-hdiutil create -volname "$VOLNAME" -srcfolder "$STAGING" -ov -format UDZO "$DMG_FILE"
+DMG_SIZE_MB="$(du -sm "$STAGING" | awk '{print $1 + 64}')"
+hdiutil create -size "${DMG_SIZE_MB}m" -fs HFS+ -volname "$VOLNAME" -ov "$RW_DMG"
+hdiutil attach "$RW_DMG" -mountpoint "$MOUNT_DIR" -nobrowse
+ditto "$STAGING/${APP_NAME}.app" "$MOUNT_DIR/${APP_NAME}.app"
+ln -s /Applications "$MOUNT_DIR/Applications"
+hdiutil detach "$MOUNT_DIR"
+hdiutil convert "$RW_DMG" -ov -format UDZO -o "$DMG_FILE"
 
 log "Code-signing DMG (optional)"
 codesign --force --timestamp --sign "$IDENTITY" "$DMG_FILE" || true

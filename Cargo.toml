@@ -33,7 +33,7 @@ futures-util = "0.3"
 rmp-serde = "1.1"
 sha2 = "0.10"
 async-trait = "0.1"
-log = "0.4"
+log = { version = "0.4", features = ["max_level_warn"] }
 lazy_static = "1.5.0"
 # PIN encryption dependencies
 aes-gcm = "0.10"
@@ -87,7 +87,7 @@ frameworks = [ "WebKit" ]
 [package.metadata.bundle]
 name = "unruggable"             # keeps your .app path as .../unruggable.app
 identifier = "com.unruggable.app"   # ← MUST match your provisioning profile's App ID
-resources = ["assets/**/**"]
+resources = ["assets"]
 icon = ["assets/icon.png"]
 category = "Utility"
 short_description = "unruggable"
@@ -104,6 +104,42 @@ desktop = ["dioxus/desktop"]
 mobile = ["dioxus/mobile"]
 
 [profile]
+
+[profile.dev.package.pbkdf2]
+opt-level = 3
+
+[profile.dev.package.hmac]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.digest]
+opt-level = 3
+
+[profile.server-dev.package.pbkdf2]
+opt-level = 3
+
+[profile.server-dev.package.hmac]
+opt-level = 3
+
+[profile.server-dev.package.sha2]
+opt-level = 3
+
+[profile.server-dev.package.digest]
+opt-level = 3
+
+[profile.test.package.pbkdf2]
+opt-level = 3
+
+[profile.test.package.hmac]
+opt-level = 3
+
+[profile.test.package.sha2]
+opt-level = 3
+
+[profile.test.package.digest]
+opt-level = 3
 
 [profile.wasm-dev]
 inherits = "dev"

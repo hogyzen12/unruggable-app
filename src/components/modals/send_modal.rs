@@ -50,11 +50,16 @@ fn format_unlock_error_message(err: &str) -> String {
             "BAD_PIN_FORMAT" | "BAD_OTP_FORMAT" => {
                 "Code must be exactly 6 digits.".to_string()
             }
+            "BUTTON_TIMEOUT" => {
+                "No button press detected. Submit the code again, then press the device button within 8 seconds."
+                    .to_string()
+            }
             "AUTH_MODE_MISMATCH" => {
-                "Unlock method does not match device auth mode. Reconnect device.".to_string()
+                "Unlock method does not match the device mode. Open hardware connect and try again."
+                    .to_string()
             }
             "TIME_NOT_SET" => {
-                "Device time not set. Reconnect and try again.".to_string()
+                "Device time is not set yet. Try the unlock again.".to_string()
             }
             other => format!("Unlock failed: {other}"),
         };
@@ -123,7 +128,7 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "1" }
-                        span { "Press the button on your Unruggable to confirm" }
+                        span { "Press the hardware button once to confirm" }
                     }
                 }
 
@@ -246,6 +251,7 @@ pub fn SendModalWithHardware(
     current_balance: f64,
     custom_rpc: Option<String>,
     initial_privacy_enabled: bool,
+    #[props(default = true)] enable_privacy: bool,
     onclose: EventHandler<()>,
     onsuccess: EventHandler<String>,
     #[props(!optional)] onhardware: EventHandler<HardwareWalletEvent>,
@@ -266,20 +272,20 @@ pub fn SendModalWithHardware(
     let mut delay_seconds = use_signal(|| 20u32);
     let mut delay_run = use_signal(|| 0u64);
     let mut pending_send = use_signal(|| false);
-    let mut privacy_enabled = use_signal(|| initial_privacy_enabled);
+    let mut privacy_enabled = use_signal(|| enable_privacy && initial_privacy_enabled);
     let mut private_balance = use_signal(|| None as Option<u64>);
-    let mut private_balance_loading = use_signal(|| false);
-    let mut privacy_progress = use_signal(|| None as Option<String>);
+    let private_balance_loading = use_signal(|| false);
+    let privacy_progress = use_signal(|| None as Option<String>);
 
     // Add state for transaction success modal - always declared
     let mut show_success_modal = use_signal(|| false);
-    let mut transaction_signature = use_signal(|| "".to_string());
-    let mut was_hardware_transaction = use_signal(|| false);
+    let transaction_signature = use_signal(|| "".to_string());
+    let was_hardware_transaction = use_signal(|| false);
 
     // Add state for hardware wallet approval overlay - always declared
     let mut show_hardware_approval = use_signal(|| false);
     let mut show_unlock_modal = use_signal(|| false);
-    let mut unlock_mode = use_signal(|| None as Option<UnlockMode>);
+    let unlock_mode = use_signal(|| None as Option<UnlockMode>);
     let mut unlock_code = use_signal(|| "".to_string());
     let mut unlock_error = use_signal(|| None as Option<String>);
     let mut unlock_in_progress = use_signal(|| false);
@@ -289,7 +295,7 @@ pub fn SendModalWithHardware(
         let wallet = wallet.clone();
         let custom_rpc = custom_rpc.clone();
         let delayed_execution = delayed_execution.clone();
-        let mut recipient_send_count = recipient_send_count.clone();
+        let recipient_send_count = recipient_send_count.clone();
         let mut show_hardware_approval = show_hardware_approval.clone();
         let mut was_hardware_transaction = was_hardware_transaction.clone();
         let mut error_message = error_message.clone();
@@ -300,7 +306,6 @@ pub fn SendModalWithHardware(
         let mut show_success_modal = show_success_modal.clone();
         let mut private_balance = private_balance.clone();
         let mut privacy_progress = privacy_progress.clone();
-        let mut private_balance_loading = private_balance_loading.clone();
         let mut show_unlock_modal = show_unlock_modal.clone();
         let mut unlock_mode = unlock_mode.clone();
         let mut unlock_code = unlock_code.clone();
@@ -357,7 +362,7 @@ pub fn SendModalWithHardware(
 
                 let client = TransactionClient::new(rpc_url.as_deref());
 
-                if privacy_enabled() {
+                if enable_privacy && privacy_enabled() {
                     let signer = if let Some(hw) = hardware_wallet_clone.clone() {
                         SignerType::Hardware(HardwareSigner::from_wallet(hw))
                     } else {
@@ -408,7 +413,7 @@ pub fn SendModalWithHardware(
                                         }
                                     } else if code == "MODE_UNSET" {
                                         error_message.set(Some(
-                                            "Device setup is required. Reconnect and complete hardware setup."
+                                            "Device setup is required. Complete hardware setup before signing."
                                                 .to_string(),
                                         ));
                                         sending.set(false);
@@ -438,7 +443,7 @@ pub fn SendModalWithHardware(
 
                     let rpc_url = rpc_url.unwrap_or_else(|| DEFAULT_RPC_URL.to_string());
                     let lamports = (amount_value * 1_000_000_000.0) as u64;
-                    let mut private_balance_value = private_balance().unwrap_or(0);
+                    let private_balance_value = private_balance().unwrap_or(0);
                     privacy_progress.set(Some("Preparing private send…".to_string()));
 
                     if private_balance_value < lamports {
@@ -507,7 +512,6 @@ pub fn SendModalWithHardware(
                         )
                         .await
                         {
-                            private_balance_value = balance;
                             private_balance.set(Some(balance));
                         }
                         privacy_progress.set(Some(format!(
@@ -601,7 +605,7 @@ pub fn SendModalWithHardware(
                                     }
                                 } else if code == "MODE_UNSET" {
                                     error_message.set(Some(
-                                        "Device setup is required. Reconnect and complete hardware setup."
+                                        "Device setup is required. Complete hardware setup before signing."
                                             .to_string(),
                                     ));
                                     sending.set(false);
@@ -744,7 +748,7 @@ pub fn SendModalWithHardware(
         let wallet_info = wallet.clone();
         let rpc_url = custom_rpc.clone();
         let hw_for_refresh = hardware_wallet.clone();
-        let mut private_balance = private_balance.clone();
+        let private_balance = private_balance.clone();
         let mut private_balance_loading = private_balance_loading.clone();
         Rc::new(RefCell::new(move || {
             private_balance_loading.set(true);
@@ -799,7 +803,11 @@ pub fn SendModalWithHardware(
     {
         let refresh_private_balance = Rc::clone(&refresh_private_balance);
         use_effect(move || {
-            if privacy_enabled() && private_balance().is_none() && !private_balance_loading() {
+            if enable_privacy
+                && privacy_enabled()
+                && private_balance().is_none()
+                && !private_balance_loading()
+            {
                 refresh_private_balance.borrow_mut()();
             }
         });
@@ -821,7 +829,7 @@ pub fn SendModalWithHardware(
     }
 
     // Determine which address to show based on wallet type
-    let display_address = if let Some(hw) = &hardware_wallet {
+    let _display_address = if hardware_wallet.is_some() {
         // Use a signal to track hardware wallet address - declared outside any conditionals
         let mut hw_address = use_signal(|| None as Option<String>);
 
@@ -850,7 +858,7 @@ pub fn SendModalWithHardware(
             onclick: move |_| onclose.call(()),
 
             div {
-                class: "modal-content",
+                class: "modal-content app-modal-shell app-modal-shell-scrollable send-modal",
                 onclick: move |e| e.stop_propagation(),
                 style: "position: relative;", // Needed for absolute positioning of overlay
 
@@ -878,10 +886,12 @@ pub fn SendModalWithHardware(
                             ",
                             h2 { class: "modal-title", "Unlock Hardware Device" }
                             p { class: "success-message",
-                                match unlock_mode() {
-                                    Some(UnlockMode::Pin) => "Enter your 6-digit Device PIN to continue signing.",
-                                    Some(UnlockMode::Otp) => "Enter your 6-digit authenticator code to continue signing.",
-                                    None => "Enter device unlock code to continue signing.",
+                                match (unlock_mode(), unlock_in_progress()) {
+                                    (Some(UnlockMode::Pin), true) => "Unlocking device...",
+                                    (Some(UnlockMode::Pin), false) => "Enter your 6-digit Device PIN to continue signing.",
+                                    (Some(UnlockMode::Otp), true) => "Code accepted. Press the hardware button once within 8 seconds to continue signing.",
+                                    (Some(UnlockMode::Otp), false) => "Enter your 6-digit authenticator code. After you submit it, press the hardware button once to continue signing.",
+                                    (None, _) => "Enter device unlock code to continue signing.",
                                 }
                             }
                             div {
@@ -896,10 +906,21 @@ pub fn SendModalWithHardware(
                                 input {
                                     r#type: "password",
                                     value: "{unlock_code}",
-                                    oninput: move |e| unlock_code.set(e.value()),
+                                    oninput: move |e| {
+                                        unlock_code.set(
+                                            e.value()
+                                                .chars()
+                                                .filter(|c| c.is_ascii_digit())
+                                                .take(6)
+                                                .collect(),
+                                        )
+                                    },
                                     placeholder: "6 digits",
                                     maxlength: "6",
-                                    autocomplete: "off"
+                                    autocomplete: "off",
+                                    inputmode: "numeric",
+                                    pattern: "[0-9]*",
+                                    disabled: unlock_in_progress()
                                 }
                             }
                             if let Some(err) = unlock_error() {
@@ -966,7 +987,14 @@ pub fn SendModalWithHardware(
                                             });
                                         }
                                     },
-                                    if unlock_in_progress() { "Unlocking..." } else { "Unlock and Retry" }
+                                    if unlock_in_progress() {
+                                        match unlock_mode() {
+                                            Some(UnlockMode::Otp) => "Press Device Button...",
+                                            _ => "Unlocking...",
+                                        }
+                                    } else {
+                                        "Unlock and Retry"
+                                    }
                                 }
                             }
                         }
@@ -974,22 +1002,9 @@ pub fn SendModalWithHardware(
                 }
 
                 div {
-                    style: "
-                        display: flex;
-                        justify-content: space-between;
-                        align-items: center;
-                        padding: 24px;
-                        border-bottom: none;
-                        background: transparent;
-                    ",
+                    class: "app-modal-header",
                     h2 {
-                        style: "
-                            color: #f8fafc;
-                            font-size: 22px;
-                            font-weight: 700;
-                            margin: 0;
-                            letter-spacing: -0.025em;
-                        ",
+                        class: "app-modal-title",
                         if hardware_wallet.is_some() {
                             "Send SOL"
                         } else {
@@ -997,21 +1012,7 @@ pub fn SendModalWithHardware(
                         }
                     }
                     button {
-                        style: "
-                            background: none;
-                            border: none;
-                            color: white;
-                            font-size: 28px;
-                            cursor: pointer;
-                            padding: 0;
-                            border-radius: 0;
-                            transition: all 0.2s ease;
-                            min-width: 32px;
-                            min-height: 32px;
-                            display: flex;
-                            align-items: center;
-                            justify-content: center;
-                        ",
+                        class: "app-modal-close-button",
                         onclick: move |_| onclose.call(()),
                         "×"
                     }
@@ -1052,7 +1053,7 @@ pub fn SendModalWithHardware(
                     } else if let Some(balance) = recipient_balance() {
                         div {
                             class: "recipient-balance",
-                            "Balance: {balance:.4} SOL"
+                            "Recipient SOL balance: {balance:.4} SOL"
                         }
                     }
                     if let Some(label) = recipient_label() {
@@ -1103,68 +1104,70 @@ pub fn SendModalWithHardware(
                     }
                 }
 
-                div {
-                    class: "wallet-field privacy-field",
+                if enable_privacy {
                     div {
-                        class: "privacy-row",
+                        class: "wallet-field privacy-field",
                         div {
-                            class: "privacy-label",
-                            span { "Privacy" }
-                            span { class: "privacy-subtitle", "Send privately (Privacy Cash)" }
-                        }
-                        label {
-                            class: "privacy-toggle",
-                            input {
-                                r#type: "checkbox",
-                                checked: privacy_enabled(),
-                                oninput: move |_| {
-                                    let enabled = !privacy_enabled();
-                                    privacy_enabled.set(enabled);
-                                    if !enabled {
-                                        private_balance.set(None);
+                            class: "privacy-row",
+                            div {
+                                class: "privacy-label",
+                                span { "Privacy" }
+                                span { class: "privacy-subtitle", "Send privately (Privacy Cash)" }
+                            }
+                            label {
+                                class: "privacy-toggle",
+                                input {
+                                    r#type: "checkbox",
+                                    checked: privacy_enabled(),
+                                    oninput: move |_| {
+                                        let enabled = !privacy_enabled();
+                                        privacy_enabled.set(enabled);
+                                        if !enabled {
+                                            private_balance.set(None);
+                                        }
                                     }
                                 }
+                                span { class: "privacy-slider" }
                             }
-                            span { class: "privacy-slider" }
                         }
-                    }
-                if privacy_enabled() {
-                    if private_balance_loading() {
-                        div { class: "privacy-meta", "Fetching private balance..." }
-                    } else if let Some(balance) = private_balance() {
-                        div {
-                            class: "privacy-meta",
-                            "Private balance: {(balance as f64) / 1_000_000_000.0:.6} SOL"
-                        }
-                    }
-                    if let Some(progress) = privacy_progress() {
-                        div { class: "privacy-hint", "{progress}" }
-                    }
-                    {
-                        let amount_value = amount().parse::<f64>().ok();
-                        let private_balance_value = private_balance().unwrap_or(0);
-                        if let Some(amount_value) = amount_value {
-                            let lamports = (amount_value * 1_000_000_000.0) as u64;
-                            if private_balance().is_some() {
-                                if private_balance_value >= lamports {
-                                    rsx! { div { class: "privacy-hint", "Balance already revealed; no additional hardware approval is needed to send." } }
-                                } else if hardware_wallet.is_some() {
-                                    rsx! { div { class: "privacy-hint", "We will top up privately (2 txs). Your hardware wallet will prompt you to approve the deposit." } }
-                                } else {
-                                    rsx! { div { class: "privacy-hint", "We will top up privately (2 txs). You'll sign a deposit before the private send." } }
-                                }
-                            } else {
-                                if hardware_wallet.is_some() {
-                                    rsx! { div { class: "privacy-hint", "We'll reveal your private balance (one approval). If a top up is needed, you'll approve a deposit." } }
-                                } else {
-                                    rsx! { div { class: "privacy-hint", "We will check your private balance; if a top up is needed, you'll be asked to approve a deposit." } }
+                        if privacy_enabled() {
+                            if private_balance_loading() {
+                                div { class: "privacy-meta", "Fetching private balance..." }
+                            } else if let Some(balance) = private_balance() {
+                                div {
+                                    class: "privacy-meta",
+                                    "Private balance: {(balance as f64) / 1_000_000_000.0:.6} SOL"
                                 }
                             }
-                        } else {
-                            rsx! { div { class: "privacy-hint", "If needed, we will top up privately then send (2 txs)." } }
+                            if let Some(progress) = privacy_progress() {
+                                div { class: "privacy-hint", "{progress}" }
+                            }
+                            {
+                                let amount_value = amount().parse::<f64>().ok();
+                                let private_balance_value = private_balance().unwrap_or(0);
+                                if let Some(amount_value) = amount_value {
+                                    let lamports = (amount_value * 1_000_000_000.0) as u64;
+                                    if private_balance().is_some() {
+                                        if private_balance_value >= lamports {
+                                            rsx! { div { class: "privacy-hint", "Balance already revealed; no additional hardware approval is needed to send." } }
+                                        } else if hardware_wallet.is_some() {
+                                            rsx! { div { class: "privacy-hint", "We will top up privately (2 txs). Your hardware wallet will prompt you to approve the deposit." } }
+                                        } else {
+                                            rsx! { div { class: "privacy-hint", "We will top up privately (2 txs). You'll sign a deposit before the private send." } }
+                                        }
+                                    } else {
+                                        if hardware_wallet.is_some() {
+                                            rsx! { div { class: "privacy-hint", "We'll reveal your private balance (one approval). If a top up is needed, you'll approve a deposit." } }
+                                        } else {
+                                            rsx! { div { class: "privacy-hint", "We will check your private balance; if a top up is needed, you'll be asked to approve a deposit." } }
+                                        }
+                                    }
+                                } else {
+                                    rsx! { div { class: "privacy-hint", "If needed, we will top up privately then send (2 txs)." } }
+                                }
+                            }
                         }
                     }
-                }
                 }
 
                 if hardware_wallet.is_some() {
@@ -1213,12 +1216,12 @@ pub fn SendModalWithHardware(
                                     }
                                     if checking_balance() {
                                         div { class: "wallet-field",
-                                            label { "Recipient balance" }
+                                            label { "Recipient SOL balance" }
                                             div { class: "recipient-balance checking", "Checking balance..." }
                                         }
                                     } else if let Some(balance) = recipient_balance() {
                                         div { class: "wallet-field",
-                                            label { "Recipient balance" }
+                                            label { "Recipient SOL balance" }
                                             div { class: "recipient-balance", "{balance:.4} SOL" }
                                         }
                                     }

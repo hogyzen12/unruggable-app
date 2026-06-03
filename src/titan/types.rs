@@ -15,18 +15,18 @@ pub type Pubkey = [u8; 32];
 /// Uses short field names to save space in MessagePack encoding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AccountMeta {
-    pub p: Pubkey,  // public key
-    pub s: bool,    // is_signer
-    pub w: bool,    // is_writable
+    pub p: Pubkey, // public key
+    pub s: bool,   // is_signer
+    pub w: bool,   // is_writable
 }
 
 /// Solana instruction
 /// Uses short field names to save space in MessagePack encoding
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Instruction {
-    pub p: Pubkey,              // program_id
-    pub a: Vec<AccountMeta>,    // accounts
-    pub d: Vec<u8>,             // data
+    pub p: Pubkey,           // program_id
+    pub a: Vec<AccountMeta>, // accounts
+    pub d: Vec<u8>,          // data
 }
 
 /// Swap mode for interpreting amounts

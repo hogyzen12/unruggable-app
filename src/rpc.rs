@@ -1,10 +1,14 @@
+#![allow(dead_code)]
+
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
 const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
+const COLLECTIBLES_PAGE_LIMIT: usize = 250;
+const MAX_COLLECTIBLES_PAGES: usize = 8;
 
 #[derive(Debug, Serialize)]
 struct RpcRequest {
@@ -59,7 +63,10 @@ pub async fn get_balance(address: &str, rpc_url: Option<&str>) -> Result<f64, St
         return Err(format!("RPC error: {}", response.status()));
     }
 
-    let json: Value = response.json().await.map_err(|e| format!("Failed to parse response: {}", e))?;
+    let json: Value = response
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse response: {}", e))?;
 
     if let Some(error) = json.get("error") {
         return Err(format!("RPC error: {:?}", error));
@@ -158,14 +165,12 @@ pub async fn get_minimum_balance_for_rent_exemption(
         "params": [account_size]
     });
 
-    let response = client
-        .post(url)
-        .json(&request)
-        .send()
-        .await?;
+    let response = client.post(url).json(&request).send().await?;
 
     let json: Value = response.json().await?;
-    Ok(json["result"].as_u64().ok_or("Invalid rent exemption response")?)
+    Ok(json["result"]
+        .as_u64()
+        .ok_or("Invalid rent exemption response")?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -275,7 +280,9 @@ pub async fn get_token_accounts_by_owner(
 
     let filter_param = match filter {
         Some(TokenAccountFilter::Mint(mint)) => serde_json::json!({ "mint": mint }),
-        Some(TokenAccountFilter::ProgramId(program_id)) => serde_json::json!({ "programId": program_id }),
+        Some(TokenAccountFilter::ProgramId(program_id)) => {
+            serde_json::json!({ "programId": program_id })
+        }
         None => serde_json::json!({}),
     };
 
@@ -555,8 +562,8 @@ pub struct TransactionHistoryItem {
 
 /// Convert a timestamp to a human-readable date/time
 pub fn format_timestamp(timestamp: i64) -> String {
-    let datetime = chrono::NaiveDateTime::from_timestamp_opt(timestamp, 0)
-        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap().naive_utc());
+    let datetime = chrono::DateTime::from_timestamp(timestamp, 0)
+        .unwrap_or_else(|| chrono::DateTime::from_timestamp(0, 0).unwrap());
     datetime.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
@@ -580,10 +587,10 @@ pub async fn get_transaction_history(
 ) -> Result<Vec<TransactionInfo>, String> {
     let client = Client::new();
     let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
-    
+
     // Default to 20 transactions or user-requested limit (max 50 to avoid too much data)
     let limit = limit.min(50).max(1);
-    
+
     let request = RpcRequest {
         jsonrpc: "2.0".to_string(),
         id: 1,
@@ -596,7 +603,7 @@ pub async fn get_transaction_history(
             }),
         ],
     };
-    
+
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -604,30 +611,30 @@ pub async fn get_transaction_history(
         .send()
         .await
         .map_err(|e| format!("Failed to send request: {}", e))?;
-    
+
     if !response.status().is_success() {
         return Err(format!("RPC error: {}", response.status()));
     }
-    
+
     let json: serde_json::Value = response
         .json()
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))?;
-    
+
     // Check for errors in the response
     if let Some(error) = json.get("error") {
         return Err(format!("RPC error: {:?}", error));
     }
-    
+
     // Get the result
     if let Some(result) = json.get("result") {
         // Parse the result as a Vec<TransactionHistoryItem>
         let transactions: Vec<TransactionHistoryItem> = serde_json::from_value(result.clone())
             .map_err(|e| format!("Failed to parse transactions: {}", e))?;
-        
+
         // Get current timestamp for "time ago" calculations
         let current_time = chrono::Utc::now().timestamp();
-        
+
         // Convert to TransactionInfo
         let transactions_info = transactions
             .into_iter()
@@ -638,7 +645,7 @@ pub async fn get_transaction_history(
                 } else {
                     "Unknown time".to_string()
                 };
-                
+
                 // Calculate time ago
                 let time_ago = if let Some(block_time) = tx.block_time {
                     let diff = current_time - block_time;
@@ -654,17 +661,18 @@ pub async fn get_transaction_history(
                 } else {
                     "Unknown time".to_string()
                 };
-                
+
                 // Determine status
                 let status = if let Some(_err) = &tx.err {
                     "Failed".to_string()
                 } else {
                     "Success".to_string()
                 };
-                
-                let raw_status = tx.confirmation_status
+
+                let raw_status = tx
+                    .confirmation_status
                     .unwrap_or_else(|| "unknown".to_string());
-                
+
                 // Extract error message if any
                 let error = if let Some(err) = tx.err {
                     let err_str = format!("{:?}", err);
@@ -676,7 +684,7 @@ pub async fn get_transaction_history(
                 } else {
                     None
                 };
-                
+
                 TransactionInfo {
                     signature: tx.signature,
                     timestamp,
@@ -688,7 +696,7 @@ pub async fn get_transaction_history(
                 }
             })
             .collect();
-        
+
         Ok(transactions_info)
     } else {
         Err("Failed to get transactions from response".to_string())
@@ -702,7 +710,7 @@ pub async fn get_transaction_details(
 ) -> Result<HashMap<String, serde_json::Value>, String> {
     let client = Client::new();
     let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
-    
+
     let request = RpcRequest {
         jsonrpc: "2.0".to_string(),
         id: 1,
@@ -716,7 +724,7 @@ pub async fn get_transaction_details(
             }),
         ],
     };
-    
+
     let response = client
         .post(url)
         .header("Content-Type", "application/json")
@@ -724,83 +732,96 @@ pub async fn get_transaction_details(
         .send()
         .await
         .map_err(|e| format!("Failed to send request: {}", e))?;
-    
+
     if !response.status().is_success() {
         return Err(format!("RPC error: {}", response.status()));
     }
-    
+
     let json: serde_json::Value = response
         .json()
         .await
         .map_err(|e| format!("Failed to parse response: {}", e))?;
-    
+
     // Check for errors in the response
     if let Some(error) = json.get("error") {
         return Err(format!("RPC error: {:?}", error));
     }
-    
+
     // Extract the result
     if let Some(result) = json.get("result") {
         if result.is_null() {
             return Err("Transaction not found".to_string());
         }
-        
+
         // Extract useful information to show in UI
         let mut details = HashMap::new();
-        
+
         // Add basic transaction info
         if let Some(slot) = result.get("slot") {
             details.insert("slot".to_string(), slot.clone());
         }
-        
+
         if let Some(block_time) = result.get("blockTime") {
             if let Some(time) = block_time.as_i64() {
                 details.insert("blockTime".to_string(), block_time.clone());
-                details.insert("formattedTime".to_string(), 
-                    serde_json::Value::String(format_timestamp(time)));
+                details.insert(
+                    "formattedTime".to_string(),
+                    serde_json::Value::String(format_timestamp(time)),
+                );
             }
         }
-        
+
         // Add transaction data
         if let Some(meta) = result.get("meta") {
             details.insert("meta".to_string(), meta.clone());
-            
+
             // Extract fee
             if let Some(fee) = meta.get("fee") {
                 if let Some(fee_val) = fee.as_u64() {
-                    details.insert("feeSOL".to_string(), 
-                        serde_json::Value::String(format!("{:.9}", fee_val as f64 / 1_000_000_000.0)));
+                    details.insert(
+                        "feeSOL".to_string(),
+                        serde_json::Value::String(format!(
+                            "{:.9}",
+                            fee_val as f64 / 1_000_000_000.0
+                        )),
+                    );
                 }
             }
-            
+
             // Extract status
             if let Some(err) = meta.get("err") {
                 if err.is_null() {
-                    details.insert("status".to_string(), 
-                        serde_json::Value::String("Success".to_string()));
+                    details.insert(
+                        "status".to_string(),
+                        serde_json::Value::String("Success".to_string()),
+                    );
                 } else {
-                    details.insert("status".to_string(), 
-                        serde_json::Value::String("Failed".to_string()));
+                    details.insert(
+                        "status".to_string(),
+                        serde_json::Value::String("Failed".to_string()),
+                    );
                     details.insert("error".to_string(), err.clone());
                 }
             } else {
-                details.insert("status".to_string(), 
-                    serde_json::Value::String("Unknown".to_string()));
+                details.insert(
+                    "status".to_string(),
+                    serde_json::Value::String("Unknown".to_string()),
+                );
             }
         }
-        
+
         // Add transaction instructions
         if let Some(transaction) = result.get("transaction") {
             if let Some(message) = transaction.get("message") {
                 details.insert("message".to_string(), message.clone());
-                
+
                 // Extract instructions
                 if let Some(instructions) = message.get("instructions") {
                     details.insert("instructions".to_string(), instructions.clone());
                 }
             }
         }
-        
+
         Ok(details)
     } else {
         Err("Failed to get transaction details from response".to_string())
@@ -880,151 +901,581 @@ struct DasOwnership {
 }
 
 /// Fetches collectibles (NFTs) for a wallet using Helius DAS API
-pub async fn fetch_collectibles(wallet_address: &str, rpc_url: Option<&str>) -> Result<Vec<CollectibleInfo>, String> {
+pub async fn fetch_collectibles(
+    wallet_address: &str,
+    rpc_url: Option<&str>,
+) -> Result<Vec<CollectibleInfo>, String> {
     let client = Client::new();
-    let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
-    
+    let url = rpc_url
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_RPC_URL);
+
     println!("🎨 Fetching collectibles for wallet: {}", wallet_address);
-    
-    let request_body = json!({
-        "jsonrpc": "2.0",
-        "id": "1",
-        "method": "getAssetsByOwner",
-        "params": {
-            "ownerAddress": wallet_address,
-            "page": 1,
-            "limit": 50,
-            "sortBy": {
-                "sortBy": "created",
-                "sortDirection": "desc"
-            },
-            "options": {
-                "showUnverifiedCollections": true,
-                "showCollectionMetadata": true,
-                "showGrandTotal": false,
-                "showFungible": false,
-                "showNativeBalance": false,
-                "showInscription": false,
-                "showZeroBalance": false
-            }
-        }
-    });
-    
-    let response = client
-        .post(url)
-        .header("Content-Type", "application/json")
-        .json(&request_body)
-        .send()
-        .await
-        .map_err(|e| format!("Failed to send DAS request: {}", e))?;
-    
-    if !response.status().is_success() {
-        return Err(format!("DAS API error: {}", response.status()));
-    }
-    
-    let json: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|e| format!("Failed to parse DAS response: {}", e))?;
-    
-    // Check for errors in the response
-    if let Some(error) = json.get("error") {
-        return Err(format!("DAS API error: {:?}", error));
-    }
-    
-    // Parse the DAS response
-    let das_response: DasResponse = serde_json::from_value(json)
-        .map_err(|e| format!("Failed to deserialize DAS response: {}", e))?;
-    
-    println!("🎨 Found {} assets from DAS API", das_response.result.items.len());
-    
-    // Convert DAS assets to CollectibleInfo with explicit type annotation
-    let collectibles: Vec<CollectibleInfo> = das_response.result.items
-        .into_iter()
-        .filter_map(|asset| {
-            // Skip burnt assets
-            if asset.burnt.unwrap_or(false) {
-                return None;
-            }
-            
-            // Skip if not owned by the wallet
-            if let Some(ownership) = &asset.ownership {
-                if ownership.owner != wallet_address {
-                    return None;
+
+    let mut page = 1usize;
+    let mut seen_asset_ids = HashSet::new();
+    let mut collectibles = Vec::new();
+    let mut filtered_out = 0usize;
+
+    loop {
+        let request_body = json!({
+            "jsonrpc": "2.0",
+            "id": format!("collectibles-{page}"),
+            "method": "getAssetsByOwner",
+            "params": {
+                "ownerAddress": wallet_address,
+                "page": page,
+                "limit": COLLECTIBLES_PAGE_LIMIT,
+                "displayOptions": {
+                    "showFungible": false,
+                    "showNativeBalance": false,
+                    "showInscription": false
                 }
             }
-            
-            let content = asset.content.as_ref()?;
-            
-            // Try to get name from metadata first, then fallback to parsing from URI
-            let name = if let Some(metadata) = &content.metadata {
-                metadata.name.clone().unwrap_or_else(|| "Unknown NFT".to_string())
+        });
+
+        let response = client
+            .post(url)
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| format!("Failed to fetch collectibles: {}", e))?;
+
+        if !response.status().is_success() {
+            return Err(format!(
+                "Collectibles RPC returned HTTP {}",
+                response.status()
+            ));
+        }
+
+        let payload: Value = response
+            .json()
+            .await
+            .map_err(|e| format!("Failed to decode collectibles response: {}", e))?;
+
+        if let Some(error) = payload.get("error") {
+            return Err(format!("Collectibles RPC error: {:?}", error));
+        }
+
+        let result = payload
+            .get("result")
+            .ok_or_else(|| "Collectibles response was missing result".to_string())?;
+        let items = result
+            .get("items")
+            .and_then(Value::as_array)
+            .ok_or_else(|| "Collectibles response was missing items".to_string())?;
+
+        for item in items {
+            if let Some(parsed) = parse_collectible_info(item, wallet_address) {
+                if seen_asset_ids.insert(parsed.mint.clone()) {
+                    collectibles.push(parsed);
+                }
             } else {
-                "Unknown NFT".to_string()
-            };
-            
-            // Get description
-            let description = content.metadata.as_ref()
-                .and_then(|m| m.description.clone());
-            
-            // Get image - prefer CDN URI, then regular URI, then metadata image
-            let image = if let Some(files) = &content.files {
-                files.first().and_then(|f| 
-                    f.cdn_uri.clone()
-                        .or_else(|| f.uri.clone())
-                ).unwrap_or_else(|| "https://via.placeholder.com/200x200/6b7280/ffffff?text=NFT".to_string())
-            } else if let Some(metadata) = &content.metadata {
-                metadata.image.clone().unwrap_or_else(|| "https://via.placeholder.com/200x200/6b7280/ffffff?text=NFT".to_string())
-            } else {
-                "https://via.placeholder.com/200x200/6b7280/ffffff?text=NFT".to_string()
-            };
-            
-            // Get collection name from grouping
-            let collection = if let Some(grouping) = &asset.grouping {
-                grouping.iter()
-                    .find(|g| g.group_key == "collection")
-                    .map(|g| g.group_value.clone())
-                    .unwrap_or_else(|| "Unknown Collection".to_string())
-            } else {
-                "Unknown Collection".to_string()
-            };
-            
-            // For now, assume all are verified - you could add more logic here
-            let verified = true;
-            
-            Some(CollectibleInfo {
-                mint: asset.id,
-                name,
-                collection,
-                image,
-                description,
-                verified,
+                filtered_out += 1;
+            }
+        }
+
+        let total = result
+            .get("total")
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
+        let fetched = (page * COLLECTIBLES_PAGE_LIMIT) as u64;
+        let reached_end = items.len() < COLLECTIBLES_PAGE_LIMIT
+            || total > 0 && fetched >= total
+            || page >= MAX_COLLECTIBLES_PAGES;
+
+        if reached_end {
+            break;
+        }
+
+        page += 1;
+    }
+
+    collectibles.sort_by(|left, right| {
+        right
+            .verified
+            .cmp(&left.verified)
+            .then_with(|| {
+                left.collection
+                    .to_lowercase()
+                    .cmp(&right.collection.to_lowercase())
             })
-        })
-        .collect();
-    
-    println!("✅ Converted to {} collectible items", collectibles.len());
+            .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
+    });
+
+    println!(
+        "✅ Converted to {} collectible items after filtering {} entries",
+        collectibles.len(),
+        filtered_out
+    );
     Ok(collectibles)
 }
 
+fn parse_collectible_info(asset: &Value, wallet_address: &str) -> Option<CollectibleInfo> {
+    if nested_bool(asset, &["burnt"]).unwrap_or(false) {
+        return None;
+    }
+
+    let owner = nested_string(asset, &["ownership", "owner"])?;
+    if !owner.eq_ignore_ascii_case(wallet_address) {
+        return None;
+    }
+
+    if is_fungible_asset(asset) {
+        return None;
+    }
+
+    let mint = nested_string(asset, &["id"])?;
+    let name = nested_string(asset, &["content", "metadata", "name"])
+        .or_else(|| nested_string(asset, &["content", "metadata", "symbol"]))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())?;
+    let description = nested_string(asset, &["content", "metadata", "description"])
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let image = extract_collectible_image(asset)?;
+
+    let (collection, verified_collection) = parse_collection_metadata(asset, &name);
+    let verified_creator = has_verified_creator(asset);
+    let verified = verified_collection || verified_creator;
+
+    if is_likely_spam(asset, &name, &collection, description.as_deref(), verified) {
+        return None;
+    }
+
+    Some(CollectibleInfo {
+        mint,
+        name,
+        collection,
+        image,
+        description,
+        verified,
+    })
+}
+
+fn parse_collection_metadata(asset: &Value, name: &str) -> (String, bool) {
+    let mut collection_name = None;
+    let mut verified = false;
+
+    if let Some(entries) = asset.get("grouping").and_then(Value::as_array) {
+        for entry in entries {
+            let group_key = nested_string(entry, &["group_key"]).unwrap_or_default();
+            if group_key != "collection" {
+                continue;
+            }
+
+            let group_value = nested_string(entry, &["group_value"])
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            let metadata_name = nested_string(entry, &["collection_metadata", "name"])
+                .or_else(|| nested_string(entry, &["collection_metadata", "symbol"]))
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+            verified = entry
+                .get("verified")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
+            if collection_name.is_none() {
+                collection_name =
+                    metadata_name.or_else(|| group_value.filter(|value| !looks_like_pubkey(value)));
+            }
+            break;
+        }
+    }
+
+    if collection_name.is_none() {
+        collection_name = nested_string(asset, &["content", "metadata", "collection", "name"])
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
+
+    if collection_name.is_none() {
+        collection_name = derive_collection_name(name);
+    }
+
+    (
+        collection_name.unwrap_or_else(|| name.to_string()),
+        verified,
+    )
+}
+
+fn extract_collectible_image(asset: &Value) -> Option<String> {
+    let files = asset
+        .get("content")
+        .and_then(|content| content.get("files"))
+        .and_then(Value::as_array);
+
+    if let Some(files) = files {
+        for file in files {
+            let mime = file
+                .get("mime")
+                .and_then(Value::as_str)
+                .map(|value| value.to_ascii_lowercase());
+            let file_url = file
+                .get("cdn_uri")
+                .and_then(Value::as_str)
+                .or_else(|| file.get("uri").and_then(Value::as_str))
+                .map(normalize_media_url)
+                .filter(|value| !value.is_empty());
+            let is_image_mime = mime
+                .as_deref()
+                .map(|value| value.starts_with("image/"))
+                .unwrap_or(false);
+            if let Some(url) = file_url {
+                if is_image_mime || looks_like_image_url(&url) {
+                    return Some(url);
+                }
+            }
+        }
+    }
+
+    nested_string(asset, &["content", "links", "image"])
+        .map(|value| normalize_media_url(&value))
+        .filter(|value| looks_like_image_url(value))
+        .or_else(|| {
+            nested_string(asset, &["content", "metadata", "image"])
+                .map(|value| normalize_media_url(&value))
+                .filter(|value| looks_like_image_url(value))
+        })
+}
+
+fn has_verified_creator(asset: &Value) -> bool {
+    asset
+        .get("creators")
+        .and_then(Value::as_array)
+        .map(|creators| {
+            creators.iter().any(|creator| {
+                creator
+                    .get("verified")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn is_likely_spam(
+    asset: &Value,
+    name: &str,
+    collection: &str,
+    description: Option<&str>,
+    has_verified_signal: bool,
+) -> bool {
+    if asset
+        .get("spam")
+        .map(|spam| match spam {
+            Value::Bool(flag) => *flag,
+            Value::Object(object) => object
+                .get("isSpam")
+                .and_then(Value::as_bool)
+                .or_else(|| object.get("is_spam").and_then(Value::as_bool))
+                .unwrap_or(false),
+            _ => false,
+        })
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    let lowered = format!(
+        "{} {} {}",
+        name.to_ascii_lowercase(),
+        collection.to_ascii_lowercase(),
+        description.unwrap_or_default().to_ascii_lowercase()
+    );
+    let has_link_bait = lowered.contains("http://")
+        || lowered.contains("https://")
+        || lowered.contains("www.")
+        || lowered.contains(".com")
+        || lowered.contains(".xyz")
+        || lowered.contains(".site")
+        || lowered.contains(".click")
+        || lowered.contains(".top")
+        || lowered.contains(".live")
+        || lowered.contains(".shop")
+        || lowered.contains("discord.gg")
+        || lowered.contains("t.me/")
+        || lowered.contains("linktr.ee")
+        || lowered.contains("bit.ly");
+    let has_airdrop_language = lowered.contains("airdrop")
+        || lowered.contains("claim")
+        || lowered.contains("voucher")
+        || lowered.contains("reward")
+        || lowered.contains("bonus")
+        || lowered.contains("visit")
+        || lowered.contains("free mint")
+        || lowered.contains("mint now")
+        || lowered.contains("presale")
+        || lowered.contains("whitelist")
+        || lowered.contains("redeem")
+        || lowered.contains("prize")
+        || lowered.contains("winner")
+        || lowered.contains("congrat");
+    let has_wallet_lure_language = lowered.contains("connect wallet")
+        || lowered.contains("connect your wallet")
+        || lowered.contains("verify wallet")
+        || lowered.contains("wallet verification")
+        || lowered.contains("approve")
+        || lowered.contains("unlock")
+        || lowered.contains("drainer")
+        || lowered.contains("drain")
+        || lowered.contains("sweep")
+        || lowered.contains("official site")
+        || lowered.contains("link in bio")
+        || lowered.contains("check bio");
+    let suspicious_identity = looks_like_pubkey(name)
+        || looks_like_pubkey(collection)
+        || name.len() > 80
+        || collection.len() > 80
+        || matches!(
+            name.to_ascii_lowercase().as_str(),
+            "unknown nft" | "airdrop reward" | "claim rewards" | "reward"
+        )
+        || matches!(
+            collection.to_ascii_lowercase().as_str(),
+            "unknown collection" | "rewards" | "airdrop"
+        );
+
+    !has_verified_signal
+        && (has_link_bait
+            || has_airdrop_language
+            || has_wallet_lure_language
+            || suspicious_identity)
+}
+
+fn is_fungible_asset(asset: &Value) -> bool {
+    let interface = nested_string(asset, &["interface"])
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    if interface.contains("nonfungible") || interface.contains("nft") || interface.contains("mpl") {
+        return false;
+    }
+
+    interface.starts_with("fungible")
+}
+
+fn nested_string(root: &Value, path: &[&str]) -> Option<String> {
+    nested_value(root, path)
+        .and_then(Value::as_str)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn nested_bool(root: &Value, path: &[&str]) -> Option<bool> {
+    nested_value(root, path).and_then(Value::as_bool)
+}
+
+fn nested_value<'a>(root: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut cursor = root;
+    for segment in path {
+        cursor = cursor.get(*segment)?;
+    }
+    Some(cursor)
+}
+
+fn normalize_media_url(url: &str) -> String {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Some(path) = trimmed.strip_prefix("ipfs://ipfs/") {
+        return format!("https://ipfs.io/ipfs/{path}");
+    }
+    if let Some(path) = trimmed.strip_prefix("ipfs://") {
+        return format!("https://ipfs.io/ipfs/{path}");
+    }
+    if let Some(path) = trimmed.strip_prefix("ar://") {
+        return format!("https://arweave.net/{path}");
+    }
+    if let Some(path) = trimmed.strip_prefix("//") {
+        return format!("https:{path}");
+    }
+
+    trimmed.to_string()
+}
+
+fn looks_like_image_url(url: &str) -> bool {
+    let lowered = url.to_ascii_lowercase();
+    if lowered.is_empty() {
+        return false;
+    }
+    if lowered.starts_with("data:image/") {
+        return true;
+    }
+    if lowered.ends_with(".mp4")
+        || lowered.ends_with(".mov")
+        || lowered.ends_with(".webm")
+        || lowered.ends_with(".m3u8")
+    {
+        return false;
+    }
+    if lowered.starts_with("http://") || lowered.starts_with("https://") {
+        return true;
+    }
+
+    lowered.contains(".png")
+        || lowered.contains(".jpg")
+        || lowered.contains(".jpeg")
+        || lowered.contains(".gif")
+        || lowered.contains(".webp")
+        || lowered.contains(".svg")
+        || lowered.contains(".avif")
+        || lowered.contains("image")
+}
+
+fn derive_collection_name(name: &str) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some((head, tail)) = trimmed.rsplit_once('#') {
+        let suffix = tail.trim();
+        if !head.trim().is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
+            return Some(head.trim().to_string());
+        }
+    }
+
+    if let Some((head, tail)) = trimmed.rsplit_once(' ') {
+        let suffix = tail.trim_matches(|ch: char| ch == '#' || ch == '(' || ch == ')');
+        if !head.trim().is_empty() && suffix.chars().all(|ch| ch.is_ascii_digit()) {
+            return Some(head.trim().to_string());
+        }
+    }
+
+    None
+}
+
+fn looks_like_pubkey(value: &str) -> bool {
+    let trimmed = value.trim();
+    (32..=48).contains(&trimmed.len())
+        && trimmed
+            .chars()
+            .all(|ch| "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz".contains(ch))
+}
+
 // ALSO ADD this helper function to fetch metadata from JSON URI if needed:
-pub async fn fetch_nft_metadata(json_uri: &str) -> Result<HashMap<String, serde_json::Value>, String> {
+pub async fn fetch_nft_metadata(
+    json_uri: &str,
+) -> Result<HashMap<String, serde_json::Value>, String> {
     let client = Client::new();
-    
+
     let response = client
         .get(json_uri)
         .send()
         .await
         .map_err(|e| format!("Failed to fetch metadata: {}", e))?;
-    
+
     if !response.status().is_success() {
         return Err(format!("Metadata fetch error: {}", response.status()));
     }
-    
+
     let metadata: HashMap<String, serde_json::Value> = response
         .json()
         .await
         .map_err(|e| format!("Failed to parse metadata JSON: {}", e))?;
-    
+
     Ok(metadata)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_collectible_info_filters_unverified_airdrop_spam() {
+        let asset = json!({
+            "id": "spam-asset",
+            "interface": "V1_NFT",
+            "ownership": { "owner": "wallet123" },
+            "content": {
+                "metadata": {
+                    "name": "Airdrop Reward",
+                    "description": "Visit https://claim.example.com to claim now",
+                    "image": "https://example.com/spam.png"
+                }
+            }
+        });
+
+        assert!(parse_collectible_info(&asset, "wallet123").is_none());
+    }
+
+    #[test]
+    fn parse_collectible_info_keeps_verified_collectible_with_image() {
+        let asset = json!({
+            "id": "real-asset",
+            "interface": "V1_NFT",
+            "ownership": { "owner": "wallet123" },
+            "grouping": [{
+                "group_key": "collection",
+                "group_value": "CoolCollection11111111111111111111111111111",
+                "verified": true,
+                "collection_metadata": {
+                    "name": "Cool Collection"
+                }
+            }],
+            "content": {
+                "metadata": {
+                    "name": "Cool Collection #12",
+                    "description": "Legit collectible",
+                    "image": "ipfs://QmExample/image.png"
+                }
+            }
+        });
+
+        let collectible = parse_collectible_info(&asset, "wallet123").unwrap();
+        assert_eq!(collectible.mint, "real-asset");
+        assert_eq!(collectible.name, "Cool Collection #12");
+        assert_eq!(collectible.collection, "Cool Collection");
+        assert!(collectible.verified);
+        assert_eq!(
+            collectible.image,
+            "https://ipfs.io/ipfs/QmExample/image.png"
+        );
+    }
+
+    #[test]
+    fn parse_collectible_info_rejects_missing_image() {
+        let asset = json!({
+            "id": "no-image",
+            "interface": "V1_NFT",
+            "ownership": { "owner": "wallet123" },
+            "content": {
+                "metadata": {
+                    "name": "Invisible NFT"
+                }
+            }
+        });
+
+        assert!(parse_collectible_info(&asset, "wallet123").is_none());
+    }
+
+    #[test]
+    fn parse_collectible_info_filters_wallet_lure_with_suspicious_collection() {
+        let asset = json!({
+            "id": "wallet-lure",
+            "interface": "V1_NFT",
+            "ownership": { "owner": "wallet123" },
+            "grouping": [{
+                "group_key": "collection",
+                "group_value": "9YwX5Xk6m2k2uZ2z7Y7x3S8e3uVhQ7yQ4Jp2Qz8bQ7M1",
+                "verified": false
+            }],
+            "content": {
+                "metadata": {
+                    "name": "Verify Wallet Reward",
+                    "description": "Connect wallet to redeem your prize",
+                    "image": "https://example.com/reward.png"
+                }
+            }
+        });
+
+        assert!(parse_collectible_info(&asset, "wallet123").is_none());
+    }
 }

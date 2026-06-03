@@ -1,16 +1,13 @@
 use base64::Engine;
 use dioxus::document::eval;
 use dioxus::prelude::*;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use solana_sdk::{
-    hash::Hash,
-    message::VersionedMessage,
-    signature::Signature,
-    transaction::VersionedTransaction,
-};
 use solana_offchain_message::OffchainMessage;
-use once_cell::sync::Lazy;
+use solana_sdk::{
+    hash::Hash, message::VersionedMessage, signature::Signature, transaction::VersionedTransaction,
+};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify};
 
@@ -54,14 +51,7 @@ struct DepositRequest {
     public_key: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-struct PrivacyCashResponse {
-    #[serde(rename = "signature")]
-    signature: String,
-    #[serde(rename = "success")]
-    success: bool,
-}
-
+#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct WithdrawRequest {
     #[serde(rename = "serializedProof")]
@@ -241,7 +231,10 @@ pub async fn build_deposit_tx(
     ]))
     .map_err(|_| "Failed to send deposit params".to_string())?;
 
-    let res = eval.recv().await.map_err(|_| "Failed to receive deposit tx".to_string())?;
+    let res = eval
+        .recv()
+        .await
+        .map_err(|_| "Failed to receive deposit tx".to_string())?;
 
     match res {
         Value::String(tx_str) => {
@@ -253,7 +246,9 @@ pub async fn build_deposit_tx(
         }
         Value::Object(obj) => Err(format!(
             "Deposit JS error: {}",
-            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+            obj.get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
         )),
         _ => Err("Unexpected response for deposit tx".to_string()),
     }
@@ -266,8 +261,8 @@ pub async fn build_withdraw_request(
     recipient: &str,
     rpc_url: Option<&str>,
 ) -> Result<WithdrawRequest, String> {
-    let wasm_url = PRIVACY_WASM_PATH;
-    let zkey_url = PRIVACY_ZKEY_PATH;
+    let _wasm_url = PRIVACY_WASM_PATH;
+    let _zkey_url = PRIVACY_ZKEY_PATH;
     log::info!(
         "[PrivacyCash] build_withdraw_request authority={} lamports={} recipient={} rpc_url={:?}",
         authority,
@@ -325,7 +320,9 @@ pub async fn build_withdraw_request(
         }
         Value::Object(obj) => Err(format!(
             "Withdraw JS error: {}",
-            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+            obj.get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
         )),
         _ => Err("Unexpected response for withdraw params".to_string()),
     }
@@ -394,7 +391,9 @@ pub async fn build_deposit_spl_tx(
         }
         Value::Object(obj) => Err(format!(
             "Deposit SPL JS error: {}",
-            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+            obj.get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
         )),
         _ => Err("Unexpected response for deposit SPL tx".to_string()),
     }
@@ -467,23 +466,23 @@ pub async fn build_withdraw_spl_request(
                 .map_err(|_| "Failed to decode withdraw SPL params".to_string())?;
             match serde_json::from_slice::<WithdrawRequest>(&params_bytes) {
                 Ok(params) => Ok(params),
-                Err(err) => {
-                    match serde_json::from_str::<WithdrawRequest>(&params_str) {
-                        Ok(params) => Ok(params),
-                        Err(_) => {
-                            let preview = params_str.chars().take(160).collect::<String>();
-                            Err(format!(
-                                "Failed to deserialize withdraw SPL params: {}; preview={}",
-                                err, preview
-                            ))
-                        }
+                Err(err) => match serde_json::from_str::<WithdrawRequest>(&params_str) {
+                    Ok(params) => Ok(params),
+                    Err(_) => {
+                        let preview = params_str.chars().take(160).collect::<String>();
+                        Err(format!(
+                            "Failed to deserialize withdraw SPL params: {}; preview={}",
+                            err, preview
+                        ))
                     }
-                }
+                },
             }
         }
         Value::Object(obj) => Err(format!(
             "Withdraw SPL JS error: {}",
-            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+            obj.get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
         )),
         _ => Err("Unexpected response for withdraw SPL params".to_string()),
     }
@@ -552,7 +551,9 @@ pub async fn get_private_balance_spl(
         }
         Value::Object(obj) => Err(format!(
             "Balance SPL JS error: {}",
-            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+            obj.get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
         )),
         _ => Err("Unexpected response for balance SPL".to_string()),
     }
@@ -563,8 +564,8 @@ pub async fn get_private_balance(
     signature: &str,
     rpc_url: Option<&str>,
 ) -> Result<u64, String> {
-    let wasm_url = PRIVACY_WASM_PATH;
-    let zkey_url = PRIVACY_ZKEY_PATH;
+    let _wasm_url = PRIVACY_WASM_PATH;
+    let _zkey_url = PRIVACY_ZKEY_PATH;
     log::info!(
         "[PrivacyCash] get_private_balance authority={} rpc_url={:?}",
         authority,
@@ -613,7 +614,9 @@ pub async fn get_private_balance(
             .ok_or_else(|| "Invalid balance response".to_string()),
         Value::Object(obj) => Err(format!(
             "Balance JS error: {}",
-            obj.get("error").and_then(|v| v.as_str()).unwrap_or("unknown")
+            obj.get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
         )),
         _ => Err("Unexpected response for balance".to_string()),
     }
@@ -673,10 +676,13 @@ pub async fn submit_deposit(authority: &str, tx: &VersionedTransaction) -> Resul
 
     let status = res.status();
     let body = res.text().await.map_err(|e| e.to_string())?;
-    let json: Value = serde_json::from_str(&body)
-        .map_err(|e| format!("decode error: {e}; body={body}"))?;
+    let json: Value =
+        serde_json::from_str(&body).map_err(|e| format!("decode error: {e}; body={body}"))?;
 
-    let success = json.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    let success = json
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if !success {
         let err_msg = json
             .get("error")
@@ -703,7 +709,11 @@ pub async fn submit_withdraw(req: &WithdrawRequest) -> Result<String, String> {
     } else {
         "/withdraw"
     };
-    log::info!("PrivacyCash withdraw -> {}{}", PRIVACY_CASH_API_URL, endpoint);
+    log::info!(
+        "PrivacyCash withdraw -> {}{}",
+        PRIVACY_CASH_API_URL,
+        endpoint
+    );
     let client = reqwest::Client::new();
     let res = client
         .post(format!("{}{}", PRIVACY_CASH_API_URL, endpoint))
@@ -714,10 +724,13 @@ pub async fn submit_withdraw(req: &WithdrawRequest) -> Result<String, String> {
 
     let status = res.status();
     let body = res.text().await.map_err(|e| e.to_string())?;
-    let json: Value = serde_json::from_str(&body)
-        .map_err(|e| format!("decode error: {e}; body={body}"))?;
+    let json: Value =
+        serde_json::from_str(&body).map_err(|e| format!("decode error: {e}; body={body}"))?;
 
-    let success = json.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+    let success = json
+        .get("success")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if !success {
         let err_msg = json
             .get("error")

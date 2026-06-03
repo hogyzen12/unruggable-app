@@ -1,4 +1,5 @@
 // MessagePack encoding/decoding utilities for Titan API
+#![allow(dead_code)]
 
 use solana_sdk::pubkey::Pubkey as SolanaPubkey;
 use std::str::FromStr;
@@ -15,8 +16,8 @@ pub fn bytes_to_pubkey(bytes: &[u8; 32]) -> SolanaPubkey {
 
 /// Convert base58 string to 32-byte array for MessagePack encoding
 pub fn base58_to_bytes(base58: &str) -> Result<[u8; 32], String> {
-    let pubkey = SolanaPubkey::from_str(base58)
-        .map_err(|e| format!("Invalid base58 pubkey: {}", e))?;
+    let pubkey =
+        SolanaPubkey::from_str(base58).map_err(|e| format!("Invalid base58 pubkey: {}", e))?;
     Ok(pubkey.to_bytes())
 }
 

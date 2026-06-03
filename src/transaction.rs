@@ -1,31 +1,33 @@
 // src/transaction.rs
-use crate::wallet::Wallet;
-use crate::signing::{TransactionSigner, SignerType};
-use crate::storage::get_current_jito_settings;
-use crate::components::modals::bulk_send_modal::SelectedTokenForBulkSend;
+#![allow(dead_code, deprecated)]
+
+use crate::components::common::Token;
 use crate::config::TpuConfig;
+use crate::signing::{SignerType, TransactionSigner};
+use crate::storage::get_current_jito_settings;
 use crate::timeout;
+use crate::wallet::Wallet;
+use bs58;
+use reqwest::Client;
+use serde_json::{json, Value};
 use solana_sdk::{
-    pubkey::Pubkey,
     hash::Hash,
-    signature::{Signature as SolanaSignature, Keypair},
     message::{Message, VersionedMessage},
+    pubkey::Pubkey,
+    signature::{Keypair, Signature as SolanaSignature},
     transaction::VersionedTransaction,
 };
 use solana_system_interface::instruction as system_instruction;
-use bs58;
-use reqwest::Client;
-use std::error::Error;
-use std::str::FromStr;
-use std::sync::Arc;
-use serde_json::{Value, json};
-use spl_token::instruction as token_instruction;
 use spl_associated_token_account::get_associated_token_address_with_program_id;
 use spl_associated_token_account::instruction::create_associated_token_account;
+use spl_token::instruction as token_instruction;
 use std::collections::HashMap;
-use yellowstone_jet_tpu_client::yellowstone_grpc::sender::YellowstoneTpuSender;
-use tokio::sync::{Mutex, OnceCell};
+use std::error::Error;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use tokio::sync::{Mutex, OnceCell};
+use yellowstone_jet_tpu_client::yellowstone_grpc::sender::YellowstoneTpuSender;
 
 // Token program IDs
 const TOKEN_PROGRAM_ID: &str = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
@@ -35,6 +37,12 @@ const TOKEN_2022_PROGRAM_ID: &str = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb
 const MAX_TRANSACTION_SIZE: usize = 1200; // Conservative limit (actual is ~1232)
 const ESTIMATED_INSTRUCTION_SIZE: usize = 150; // Estimated bytes per instruction
 const HEADER_OVERHEAD: usize = 200; // Transaction header and signature overhead
+
+#[derive(Debug, Clone)]
+pub struct SelectedTokenForBulkSend {
+    pub token: Token,
+    pub amount: f64,
+}
 
 /// Transaction client for sending transactions
 pub struct TransactionClient {
@@ -87,11 +95,7 @@ impl BulkTransactionBuilder {
     }
 
     /// Add an SPL token transfer to the bulk transaction
-    pub fn add_spl_transfer(
-        &mut self, 
-        mint: &str, 
-        amount: f64
-    ) -> Result<(), Box<dyn Error>> {
+    pub fn add_spl_transfer(&mut self, mint: &str, amount: f64) -> Result<(), Box<dyn Error>> {
         if amount <= 0.0 {
             return Err("Token amount must be positive".into());
         }
@@ -102,10 +106,9 @@ impl BulkTransactionBuilder {
 
     /// Check if the current instruction set would fit in a single transaction
     fn estimate_transaction_size(&self) -> usize {
-        let instruction_count = self.sol_transfers.len() + 
-                              self.spl_transfers.len() + 
-                              self.required_ata_creations.len();
-        
+        let instruction_count =
+            self.sol_transfers.len() + self.spl_transfers.len() + self.required_ata_creations.len();
+
         HEADER_OVERHEAD + (instruction_count * ESTIMATED_INSTRUCTION_SIZE)
     }
 
@@ -119,21 +122,26 @@ impl BulkTransactionBuilder {
         // First, check which ATA accounts need to be created
         for (mint_str, _, _) in &self.spl_transfers {
             let mint_pubkey = Pubkey::from_str(mint_str)?;
-            
+
             // Detect which token program this mint uses
-            let token_program_id = client.get_mint_program_id(&mint_pubkey).await
+            let token_program_id = client
+                .get_mint_program_id(&mint_pubkey)
+                .await
                 .unwrap_or_else(|_| spl_token::id()); // Fallback to standard Token program
-            
+
             let to_token_account = get_associated_token_address_with_program_id(
                 &self.to_pubkey,
                 &mint_pubkey,
                 &token_program_id,
             );
-            
+
             if !client.account_exists(&to_token_account).await? {
-                println!("Will create ATA for mint {} -> {}", mint_str, to_token_account);
+                println!(
+                    "Will create ATA for mint {} -> {}",
+                    mint_str, to_token_account
+                );
                 self.required_ata_creations.push(mint_pubkey);
-                
+
                 let create_ata_instruction = create_associated_token_account(
                     &self.from_pubkey, // Payer
                     &self.to_pubkey,   // Owner
@@ -147,26 +155,25 @@ impl BulkTransactionBuilder {
         // Add SOL transfer instructions
         for &amount_sol in &self.sol_transfers {
             let amount_lamports = (amount_sol * 1_000_000_000.0) as u64;
-            let transfer_instruction = system_instruction::transfer(
-                &self.from_pubkey,
-                &self.to_pubkey,
-                amount_lamports,
-            );
+            let transfer_instruction =
+                system_instruction::transfer(&self.from_pubkey, &self.to_pubkey, amount_lamports);
             instructions.push(transfer_instruction);
         }
 
         // Add SPL token transfer instructions
         for (mint_str, amount, _) in &self.spl_transfers {
             let mint_pubkey = Pubkey::from_str(mint_str)?;
-            
+
             // Fetch decimals dynamically like single token send does
             let decimals = client.get_token_decimals(&mint_pubkey).await.unwrap_or(6);
             let amount_units = (*amount * 10_f64.powi(decimals as i32)) as u64;
-            
+
             // Detect token program for this mint
-            let token_program_id = client.get_mint_program_id(&mint_pubkey).await
+            let token_program_id = client
+                .get_mint_program_id(&mint_pubkey)
+                .await
                 .unwrap_or_else(|_| spl_token::id());
-            
+
             let from_token_account = get_associated_token_address_with_program_id(
                 &self.from_pubkey,
                 &mint_pubkey,
@@ -177,7 +184,7 @@ impl BulkTransactionBuilder {
                 &mint_pubkey,
                 &token_program_id,
             );
-            
+
             let transfer_instruction = token_instruction::transfer(
                 &spl_token::id(),
                 &from_token_account,
@@ -225,7 +232,7 @@ impl BulkTransactionBuilder {
                     current_size = HEADER_OVERHEAD;
                 }
             }
-            
+
             current_transaction.push(instruction.clone());
             current_size += ESTIMATED_INSTRUCTION_SIZE;
         }
@@ -241,19 +248,25 @@ impl BulkTransactionBuilder {
 impl TransactionClient {
     /// Create a new transaction client
     pub fn new(rpc_url: Option<&str>) -> Self {
-        let url = rpc_url.unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com").to_string();
+        let url = rpc_url
+            .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com")
+            .to_string();
         let tpu_config = TpuConfig::from_env();
-        
+
         // TPU sender will be initialized lazily on first transaction send
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .unwrap_or_else(|_| Client::new()),
             rpc_url: url,
             tpu_sender: Arc::new(OnceCell::new()),
             tpu_config,
             tpu_init_failed: AtomicBool::new(false),
         }
     }
-    
+
     /// Initialize TPU in the background (non-blocking)
     /// Call this at app startup to avoid lag on first transaction
     /// DISABLED ON iOS: iOS does not support TPU background spawning
@@ -291,7 +304,7 @@ impl TransactionClient {
             }
         }
     }
-    
+
     /// Get or initialize TPU sender (lazy async initialization)
     /// DISABLED ON iOS: Always returns None on iOS platform
     async fn get_tpu_sender(&self) -> Option<Arc<Mutex<YellowstoneTpuSender>>> {
@@ -307,56 +320,62 @@ impl TransactionClient {
             if !self.tpu_config.is_valid() {
                 return None;
             }
-        
-        // Check if TPU initialization previously failed - skip retry
-        if self.tpu_init_failed.load(Ordering::Relaxed) {
-            return None;
-        }
-        
-        // Check if already initialized successfully
-        if let Some(sender) = self.tpu_sender.get() {
-            return Some(Arc::clone(sender));
-        }
-        
-        // Try to initialize TPU sender
-        use yellowstone_jet_tpu_client::yellowstone_grpc::sender::{
-            create_yellowstone_tpu_sender, Endpoints,
-        };
-        
-        // Generate ephemeral identity keypair for this TPU sender instance
-        let tpu_identity = Keypair::new();
-        
-        println!("[TPU] Creating TPU sender with:");
-        println!("[TPU]   RPC: {}", self.rpc_url);
-        println!("[TPU]   gRPC: {}", self.tpu_config.grpc_endpoint);
-        println!("[TPU]   Token: {}", if self.tpu_config.grpc_token.is_some() { "***" } else { "none" });
-        
-        let endpoints = Endpoints {
-            rpc: self.rpc_url.clone(),
-            grpc: self.tpu_config.grpc_endpoint.clone(),
-            grpc_x_token: self.tpu_config.grpc_token.clone(),
-        };
-        
-        // Create the TPU sender asynchronously
-        match create_yellowstone_tpu_sender(
-            Default::default(),
-            tpu_identity,
-            endpoints,
-        ).await {
-            Ok(result) => {
-                println!("[TPU] Initialized TPU sender successfully");
-                let sender = Arc::new(Mutex::new(result.sender));
-                let _ = self.tpu_sender.set(Arc::clone(&sender));
-                Some(sender)
+
+            // Check if TPU initialization previously failed - skip retry
+            if self.tpu_init_failed.load(Ordering::Relaxed) {
+                return None;
             }
-            Err(e) => {
-                println!("[TPU] Failed to initialize TPU sender: {}. Continuing with RPC only.", e);
-                // Mark TPU as failed so we don't retry on subsequent transactions
-                self.tpu_init_failed.store(true, Ordering::Relaxed);
-                println!("[TPU] TPU initialization disabled for this session");
-                None
+
+            // Check if already initialized successfully
+            if let Some(sender) = self.tpu_sender.get() {
+                return Some(Arc::clone(sender));
             }
-        }
+
+            // Try to initialize TPU sender
+            use yellowstone_jet_tpu_client::yellowstone_grpc::sender::{
+                create_yellowstone_tpu_sender, Endpoints,
+            };
+
+            // Generate ephemeral identity keypair for this TPU sender instance
+            let tpu_identity = Keypair::new();
+
+            println!("[TPU] Creating TPU sender with:");
+            println!("[TPU]   RPC: {}", self.rpc_url);
+            println!("[TPU]   gRPC: {}", self.tpu_config.grpc_endpoint);
+            println!(
+                "[TPU]   Token: {}",
+                if self.tpu_config.grpc_token.is_some() {
+                    "***"
+                } else {
+                    "none"
+                }
+            );
+
+            let endpoints = Endpoints {
+                rpc: self.rpc_url.clone(),
+                grpc: self.tpu_config.grpc_endpoint.clone(),
+                grpc_x_token: self.tpu_config.grpc_token.clone(),
+            };
+
+            // Create the TPU sender asynchronously
+            match create_yellowstone_tpu_sender(Default::default(), tpu_identity, endpoints).await {
+                Ok(result) => {
+                    println!("[TPU] Initialized TPU sender successfully");
+                    let sender = Arc::new(Mutex::new(result.sender));
+                    let _ = self.tpu_sender.set(Arc::clone(&sender));
+                    Some(sender)
+                }
+                Err(e) => {
+                    println!(
+                        "[TPU] Failed to initialize TPU sender: {}. Continuing with RPC only.",
+                        e
+                    );
+                    // Mark TPU as failed so we don't retry on subsequent transactions
+                    self.tpu_init_failed.store(true, Ordering::Relaxed);
+                    println!("[TPU] TPU initialization disabled for this session");
+                    None
+                }
+            }
         }
     }
 
@@ -376,7 +395,11 @@ impl TransactionClient {
             return Err("No tokens selected for bulk send".into());
         }
 
-        println!("Bulk sending {} tokens to {}", selected_tokens.len(), to_address);
+        println!(
+            "Bulk sending {} tokens to {}",
+            selected_tokens.len(),
+            to_address
+        );
 
         // Create bulk transaction builder
         let mut builder = BulkTransactionBuilder::new(from_pubkey, to_pubkey);
@@ -384,36 +407,49 @@ impl TransactionClient {
         // Add all transfers to the builder
         for selected_token in &selected_tokens {
             let token = &selected_token.token;
-            
+
             // Check if this is SOL (special case)
-            if token.mint == "So11111111111111111111111111111111111111112" || 
-               token.symbol.to_uppercase() == "SOL" {
+            if token.mint == "So11111111111111111111111111111111111111112"
+                || token.symbol.to_uppercase() == "SOL"
+            {
                 builder.add_sol_transfer(selected_token.amount)?;
                 println!("Added SOL transfer: {} SOL", selected_token.amount);
             } else {
                 // Use existing pattern - let transaction client fetch decimals
                 builder.add_spl_transfer(&token.mint, selected_token.amount)?;
-                println!("Added SPL transfer: {} {} (mint: {})", 
-                    selected_token.amount, token.symbol, token.mint);
+                println!(
+                    "Added SPL transfer: {} {} (mint: {})",
+                    selected_token.amount, token.symbol, token.mint
+                );
             }
         }
 
         // Build the instructions (this will check for ATA creation needs)
         let instructions = builder.build_instructions(self).await?;
-        
-        println!("Built {} instructions for bulk transaction", instructions.len());
+
+        println!(
+            "Built {} instructions for bulk transaction",
+            instructions.len()
+        );
 
         // Check if we need to split into multiple transactions
         let transaction_batches = builder.split_for_transaction_limits();
-        
+
         if transaction_batches.len() > 1 {
-            println!("Transaction too large, splitting into {} batches", transaction_batches.len());
+            println!(
+                "Transaction too large, splitting into {} batches",
+                transaction_batches.len()
+            );
             // For now, return an error - you could implement batch sending
-            return Err("Transaction too large for single batch. Multi-batch sending not yet implemented.".into());
+            return Err(
+                "Transaction too large for single batch. Multi-batch sending not yet implemented."
+                    .into(),
+            );
         }
 
         // Send as single transaction
-        self.send_bulk_transaction_single(signer, instructions).await
+        self.send_bulk_transaction_single(signer, instructions)
+            .await
     }
 
     /// Send a single bulk transaction with all instructions
@@ -428,12 +464,15 @@ impl TransactionClient {
             current_slot,
             timeout::DEFAULT_SLOT_WINDOW,
         )?;
-        println!("Added timeout protection: current_slot={}, max_slot={}", 
-            current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
-        
+        println!(
+            "Added timeout protection: current_slot={}, max_slot={}",
+            current_slot,
+            current_slot + timeout::DEFAULT_SLOT_WINDOW
+        );
+
         // Prepend timeout instruction
         instructions.insert(0, timeout_ix);
-        
+
         // Check Jito settings and apply modifications if needed
         let jito_settings = get_current_jito_settings();
         let from_pubkey_str = signer.get_public_key().await?;
@@ -455,11 +494,17 @@ impl TransactionClient {
 
         // Create a VersionedTransaction with empty signatures
         let mut transaction = VersionedTransaction {
-            signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+            signatures: vec![
+                SolanaSignature::default();
+                message.header.num_required_signatures as usize
+            ],
             message: VersionedMessage::Legacy(message),
         };
 
-        println!("Number of signatures expected: {}", transaction.message.header().num_required_signatures);
+        println!(
+            "Number of signatures expected: {}",
+            transaction.message.header().num_required_signatures
+        );
 
         // Serialize the transaction message for signing
         let message_bytes = transaction.message.serialize();
@@ -469,7 +514,11 @@ impl TransactionClient {
 
         // Convert to solana signature (expect exactly 64 bytes)
         if signature_bytes.len() != 64 {
-            return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()).into());
+            return Err(format!(
+                "Invalid signature length: expected 64, got {}",
+                signature_bytes.len()
+            )
+            .into());
         }
 
         let mut sig_array = [0u8; 64];
@@ -478,7 +527,11 @@ impl TransactionClient {
 
         // Assign the signature to the transaction
         if transaction.signatures.len() != 1 {
-            return Err(format!("Expected 1 signature slot, found {}", transaction.signatures.len()).into());
+            return Err(format!(
+                "Expected 1 signature slot, found {}",
+                transaction.signatures.len()
+            )
+            .into());
         }
         transaction.signatures[0] = solana_signature;
 
@@ -486,7 +539,10 @@ impl TransactionClient {
         let serialized_transaction = bincode::serialize(&transaction)?;
         let encoded_transaction = bs58::encode(serialized_transaction).into_string();
 
-        println!("Serialized bulk transaction: {} bytes", encoded_transaction.len());
+        println!(
+            "Serialized bulk transaction: {} bytes",
+            encoded_transaction.len()
+        );
 
         // Send the transaction
         self.send_transaction(&encoded_transaction).await
@@ -495,7 +551,7 @@ impl TransactionClient {
     /// Get token decimals for multiple mints (batch operation)
     pub async fn get_token_decimals_batch(&self, mints: &[String]) -> HashMap<String, u8> {
         let mut decimals_map = HashMap::new();
-        
+
         // For now, fetch individually - could be optimized with batch requests
         for mint_str in mints {
             if let Ok(mint_pubkey) = Pubkey::from_str(mint_str) {
@@ -507,10 +563,10 @@ impl TransactionClient {
                 }
             }
         }
-        
+
         decimals_map
     }
-    
+
     /// Get recent blockhash from the network
     pub async fn get_recent_blockhash(&self) -> Result<Hash, Box<dyn Error>> {
         let request = json!({
@@ -524,20 +580,21 @@ impl TransactionClient {
             ]
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.rpc_url)
             .json(&request)
             .send()
             .await?;
 
         let json: Value = response.json().await?;
-        
+
         println!("Blockhash response: {:?}", json);
-        
+
         if let Some(error) = json.get("error") {
             return Err(format!("RPC error: {:?}", error).into());
         }
-        
+
         if let Some(blockhash_str) = json["result"]["value"]["blockhash"].as_str() {
             let hash = Hash::from_str(blockhash_str)?;
             Ok(hash)
@@ -559,18 +616,19 @@ impl TransactionClient {
             ]
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.rpc_url)
             .json(&request)
             .send()
             .await?;
 
         let json: Value = response.json().await?;
-        
+
         if let Some(error) = json.get("error") {
             return Err(format!("RPC error getting slot: {:?}", error).into());
         }
-        
+
         if let Some(slot) = json["result"].as_u64() {
             Ok(slot)
         } else {
@@ -584,7 +642,7 @@ impl TransactionClient {
         let tx_bytes = bs58::decode(signed_tx).into_vec()?;
         let transaction: VersionedTransaction = bincode::deserialize(&tx_bytes)?;
         let signature = transaction.signatures[0];
-        
+
         // Parallel TPU send (fire-and-forget if TPU is enabled)
         // DISABLED ON iOS: iOS restricts tokio::spawn in background, causing crashes
         #[cfg(not(target_os = "ios"))]
@@ -593,7 +651,6 @@ impl TransactionClient {
                 let tpu_sender_clone = Arc::clone(&tpu_sender);
                 let tx_bytes_clone = tx_bytes.clone();
                 let sig_clone = signature;
-                let fanout = self.tpu_config.fanout_count;
 
                 tokio::spawn(async move {
                     let mut sender = tpu_sender_clone.lock().await;
@@ -614,10 +671,10 @@ impl TransactionClient {
         {
             println!("[TPU] TPU disabled on iOS - using RPC-only submission");
         }
-        
+
         // RPC send (unchanged - this is the source of truth)
         let jito_settings = get_current_jito_settings();
-        
+
         // Prepare the request, potentially with Jito-specific parameters
         let request = if jito_settings.jito_tx {
             // If JitoTx is enabled, use base64 encoding as recommended by Jito
@@ -652,16 +709,17 @@ impl TransactionClient {
             })
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.rpc_url)
             .json(&request)
             .send()
             .await?;
 
         let json: Value = response.json().await?;
-        
+
         println!("Send transaction response: {:?}", json);
-        
+
         if let Some(error) = json.get("error") {
             Err(format!("Transaction error: {:?}", error).into())
         } else if let Some(result) = json["result"].as_str() {
@@ -679,7 +737,8 @@ impl TransactionClient {
         amount_sol: f64,
     ) -> Result<String, Box<dyn Error>> {
         let signer = SignerType::from_wallet(from_wallet.clone());
-        self.send_sol_with_signer(&signer, to_address, amount_sol).await
+        self.send_sol_with_signer(&signer, to_address, amount_sol)
+            .await
     }
 
     /// Send SOL without timeout instruction (used for delayed execution flow)
@@ -690,9 +749,10 @@ impl TransactionClient {
         amount_sol: f64,
     ) -> Result<String, Box<dyn Error>> {
         let signer = SignerType::from_wallet(from_wallet.clone());
-        self.send_sol_with_signer_no_timeout(&signer, to_address, amount_sol).await
+        self.send_sol_with_signer_no_timeout(&signer, to_address, amount_sol)
+            .await
     }
-    
+
     /// Send SOL using any signer type
     pub async fn send_sol_with_signer(
         &self,
@@ -702,86 +762,105 @@ impl TransactionClient {
     ) -> Result<String, Box<dyn Error>> {
         // Check Jito settings
         let jito_settings = get_current_jito_settings();
-        
+
         // Get the public key from the signer
         let from_pubkey_str = signer.get_public_key().await?;
         let from_pubkey = Pubkey::from_str(&from_pubkey_str)?;
         let to_pubkey = Pubkey::from_str(to_address)?;
-        
+
         // Convert SOL to lamports
         let amount_lamports = (amount_sol * 1_000_000_000.0) as u64;
-        
-        println!("Sending {} lamports ({} SOL) from {} to {}", 
-            amount_lamports, amount_sol, from_pubkey, to_pubkey);
-        
+
+        println!(
+            "Sending {} lamports ({} SOL) from {} to {}",
+            amount_lamports, amount_sol, from_pubkey, to_pubkey
+        );
+
         // Get current slot and build timeout instruction (FIRST)
         let current_slot = self.get_current_slot().await?;
         let timeout_ix = timeout::build_timeout_instruction_from_current(
             current_slot,
             timeout::DEFAULT_SLOT_WINDOW,
         )?;
-        println!("Added timeout protection: current_slot={}, max_slot={}", 
-            current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
-        
+        println!(
+            "Added timeout protection: current_slot={}, max_slot={}",
+            current_slot,
+            current_slot + timeout::DEFAULT_SLOT_WINDOW
+        );
+
         // Get recent blockhash
         let recent_blockhash = self.get_recent_blockhash().await?;
         println!("Using blockhash: {}", recent_blockhash);
-        
+
         // Create the transfer instruction using Solana SDK
-        let transfer_instruction = system_instruction::transfer(
-            &from_pubkey,
-            &to_pubkey,
-            amount_lamports,
-        );
-        
+        let transfer_instruction =
+            system_instruction::transfer(&from_pubkey, &to_pubkey, amount_lamports);
+
         // Build instructions with timeout FIRST
         let mut instructions = vec![timeout_ix, transfer_instruction];
-        
+
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
             self.apply_jito_modifications(&from_pubkey, &mut instructions, signer.is_hardware())?;
         }
-        
+
         // Create a message with all instructions
         let mut message = Message::new(&instructions, Some(&from_pubkey));
         message.recent_blockhash = recent_blockhash;
-        
+
         // Create a VersionedTransaction with empty signatures
         let mut transaction = VersionedTransaction {
-            signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+            signatures: vec![
+                SolanaSignature::default();
+                message.header.num_required_signatures as usize
+            ],
             message: VersionedMessage::Legacy(message),
         };
-        
-        println!("Number of signatures expected: {}", transaction.message.header().num_required_signatures);
-        
+
+        println!(
+            "Number of signatures expected: {}",
+            transaction.message.header().num_required_signatures
+        );
+
         // Serialize the transaction message for signing
         let message_bytes = transaction.message.serialize();
-        
+
         // Sign the message with our signer
         let signature_bytes = signer.sign_message(&message_bytes).await?;
-        
+
         // Convert to solana signature (expect exactly 64 bytes)
         if signature_bytes.len() != 64 {
-            return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()).into());
+            return Err(format!(
+                "Invalid signature length: expected 64, got {}",
+                signature_bytes.len()
+            )
+            .into());
         }
-        
+
         let mut sig_array = [0u8; 64];
         sig_array.copy_from_slice(&signature_bytes);
         let solana_signature = SolanaSignature::from(sig_array);
-        
+
         // Assign the signature to the transaction
         if transaction.signatures.len() != 1 {
-            return Err(format!("Expected 1 signature slot, found {}", transaction.signatures.len()).into());
+            return Err(format!(
+                "Expected 1 signature slot, found {}",
+                transaction.signatures.len()
+            )
+            .into());
         }
         transaction.signatures[0] = solana_signature;
-        
+
         // Serialize the entire transaction with signature
         let serialized_transaction = bincode::serialize(&transaction)?;
         let encoded_transaction = bs58::encode(serialized_transaction).into_string();
-        
-        println!("Serialized transaction: {} bytes", encoded_transaction.len());
-        
+
+        println!(
+            "Serialized transaction: {} bytes",
+            encoded_transaction.len()
+        );
+
         // Send the transaction
         self.send_transaction(&encoded_transaction).await
     }
@@ -800,11 +879,8 @@ impl TransactionClient {
         let amount_lamports = (amount_sol * 1_000_000_000.0) as u64;
 
         let recent_blockhash = self.get_recent_blockhash().await?;
-        let transfer_instruction = system_instruction::transfer(
-            &from_pubkey,
-            &to_pubkey,
-            amount_lamports,
-        );
+        let transfer_instruction =
+            system_instruction::transfer(&from_pubkey, &to_pubkey, amount_lamports);
         let mut instructions = vec![transfer_instruction];
 
         if jito_settings.jito_tx {
@@ -815,14 +891,21 @@ impl TransactionClient {
         message.recent_blockhash = recent_blockhash;
 
         let mut transaction = VersionedTransaction {
-            signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+            signatures: vec![
+                SolanaSignature::default();
+                message.header.num_required_signatures as usize
+            ],
             message: VersionedMessage::Legacy(message),
         };
 
         let message_bytes = transaction.message.serialize();
         let signature_bytes = signer.sign_message(&message_bytes).await?;
         if signature_bytes.len() != 64 {
-            return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()).into());
+            return Err(format!(
+                "Invalid signature length: expected 64, got {}",
+                signature_bytes.len()
+            )
+            .into());
         }
         let mut sig_array = [0u8; 64];
         sig_array.copy_from_slice(&signature_bytes);
@@ -842,7 +925,8 @@ impl TransactionClient {
         token_mint: &str,
     ) -> Result<String, Box<dyn Error>> {
         let signer = SignerType::from_wallet(from_wallet.clone());
-        self.send_spl_token_with_signer(&signer, to_address, amount, token_mint).await
+        self.send_spl_token_with_signer(&signer, to_address, amount, token_mint)
+            .await
     }
 
     /// Send SPL token transaction using any signer type
@@ -855,37 +939,46 @@ impl TransactionClient {
     ) -> Result<String, Box<dyn Error>> {
         // Check Jito settings
         let jito_settings = get_current_jito_settings();
-        
+
         let from_pubkey_str = signer.get_public_key().await?;
         let from_pubkey = Pubkey::from_str(&from_pubkey_str)?;
         let to_pubkey = Pubkey::from_str(to_address)?;
         let mint_pubkey = Pubkey::from_str(token_mint)?;
-        
-        println!("Sending {} tokens from {} to {} (mint: {})", 
-            amount, from_pubkey, to_pubkey, mint_pubkey);
-        
+
+        println!(
+            "Sending {} tokens from {} to {} (mint: {})",
+            amount, from_pubkey, to_pubkey, mint_pubkey
+        );
+
         // Get current slot and build timeout instruction (FIRST)
         let current_slot = self.get_current_slot().await?;
         let timeout_ix = timeout::build_timeout_instruction_from_current(
             current_slot,
             timeout::DEFAULT_SLOT_WINDOW,
         )?;
-        println!("Added timeout protection: current_slot={}, max_slot={}", 
-            current_slot, current_slot + timeout::DEFAULT_SLOT_WINDOW);
-        
+        println!(
+            "Added timeout protection: current_slot={}, max_slot={}",
+            current_slot,
+            current_slot + timeout::DEFAULT_SLOT_WINDOW
+        );
+
         // Get token info to determine decimals
-        let token_decimals = self.get_token_decimals(&mint_pubkey).await
-            .unwrap_or(6); // Default to 6 decimals if we can't fetch
-            
+        let token_decimals = self.get_token_decimals(&mint_pubkey).await.unwrap_or(6); // Default to 6 decimals if we can't fetch
+
         // Convert amount to token units (accounting for decimals)
         let amount_units = (amount * 10_f64.powi(token_decimals as i32)) as u64;
-        
-        println!("Token amount in units: {} (decimals: {})", amount_units, token_decimals);
-        
+
+        println!(
+            "Token amount in units: {} (decimals: {})",
+            amount_units, token_decimals
+        );
+
         // Detect which token program this mint uses
-        let token_program_id = self.get_mint_program_id(&mint_pubkey).await
+        let token_program_id = self
+            .get_mint_program_id(&mint_pubkey)
+            .await
             .unwrap_or_else(|_| spl_token::id()); // Fallback to standard Token program
-        
+
         // Get associated token accounts
         let from_token_account = get_associated_token_address_with_program_id(
             &from_pubkey,
@@ -897,92 +990,111 @@ impl TransactionClient {
             &mint_pubkey,
             &token_program_id,
         );
-        
+
         println!("From token account: {}", from_token_account);
         println!("To token account: {}", to_token_account);
-        
+
         // Get recent blockhash
         let recent_blockhash = self.get_recent_blockhash().await?;
         println!("Using blockhash: {}", recent_blockhash);
-        
+
         // Build instructions starting with timeout
         let mut instructions = vec![timeout_ix];
-        
+
         if !self.account_exists(&to_token_account).await? {
             println!("Creating destination token account: {}", to_token_account);
-            
+
             // Detect which token program this mint uses
-            let token_program_id = self.get_mint_program_id(&mint_pubkey).await
+            let token_program_id = self
+                .get_mint_program_id(&mint_pubkey)
+                .await
                 .unwrap_or_else(|_| spl_token::id()); // Fallback to standard Token program
-            
+
             // Create associated token account for recipient
             let create_ata_instruction = create_associated_token_account(
-                &from_pubkey, // Payer (sender pays for account creation)
-                &to_pubkey,   // Owner of the new account
-                &mint_pubkey, // Token mint
+                &from_pubkey,      // Payer (sender pays for account creation)
+                &to_pubkey,        // Owner of the new account
+                &mint_pubkey,      // Token mint
                 &token_program_id, // Token program ID (Token or Token-2022)
             );
-            
+
             instructions.push(create_ata_instruction);
         }
-        
+
         // Create the token transfer instruction
         let transfer_instruction = token_instruction::transfer(
-            &spl_token::id(),                    // Token program ID
-            &from_token_account,                 // Source token account
-            &to_token_account,                   // Destination token account  
-            &from_pubkey,                        // Authority (owner of source account)
-            &[&from_pubkey],                     // Signers
-            amount_units,                        // Amount in token units
+            &spl_token::id(),    // Token program ID
+            &from_token_account, // Source token account
+            &to_token_account,   // Destination token account
+            &from_pubkey,        // Authority (owner of source account)
+            &[&from_pubkey],     // Signers
+            amount_units,        // Amount in token units
         )?;
-        
+
         instructions.push(transfer_instruction);
-        
+
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
             self.apply_jito_modifications(&from_pubkey, &mut instructions, signer.is_hardware())?;
         }
-        
+
         // Create a message with all instructions
         let mut message = Message::new(&instructions, Some(&from_pubkey));
         message.recent_blockhash = recent_blockhash;
-        
+
         // Create a VersionedTransaction with empty signatures
         let mut transaction = VersionedTransaction {
-            signatures: vec![SolanaSignature::default(); message.header.num_required_signatures as usize],
+            signatures: vec![
+                SolanaSignature::default();
+                message.header.num_required_signatures as usize
+            ],
             message: VersionedMessage::Legacy(message),
         };
-        
-        println!("Number of signatures expected: {}", transaction.message.header().num_required_signatures);
-        
+
+        println!(
+            "Number of signatures expected: {}",
+            transaction.message.header().num_required_signatures
+        );
+
         // Serialize the transaction message for signing
         let message_bytes = transaction.message.serialize();
-        
+
         // Sign the message with our signer
         let signature_bytes = signer.sign_message(&message_bytes).await?;
-        
+
         // Convert to solana signature (expect exactly 64 bytes)
         if signature_bytes.len() != 64 {
-            return Err(format!("Invalid signature length: expected 64, got {}", signature_bytes.len()).into());
+            return Err(format!(
+                "Invalid signature length: expected 64, got {}",
+                signature_bytes.len()
+            )
+            .into());
         }
-        
+
         let mut sig_array = [0u8; 64];
         sig_array.copy_from_slice(&signature_bytes);
         let solana_signature = SolanaSignature::from(sig_array);
-        
+
         // Assign the signature to the transaction
         if transaction.signatures.len() != 1 {
-            return Err(format!("Expected 1 signature slot, found {}", transaction.signatures.len()).into());
+            return Err(format!(
+                "Expected 1 signature slot, found {}",
+                transaction.signatures.len()
+            )
+            .into());
         }
         transaction.signatures[0] = solana_signature;
-        
+
         // Serialize the entire transaction with signature
         let serialized_transaction = bincode::serialize(&transaction)?;
         let encoded_transaction = bs58::encode(serialized_transaction).into_string();
-        
-        println!("Serialized SPL token transaction: {} bytes", encoded_transaction.len());
-        
+
+        println!(
+            "Serialized SPL token transaction: {} bytes",
+            encoded_transaction.len()
+        );
+
         // Send the transaction
         self.send_transaction(&encoded_transaction).await
     }
@@ -1001,17 +1113,18 @@ impl TransactionClient {
             ]
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.rpc_url)
             .json(&request)
             .send()
             .await?;
 
         let json: Value = response.json().await?;
-        
+
         if let Some(owner_str) = json["result"]["value"]["owner"].as_str() {
             let owner = Pubkey::from_str(owner_str)?;
-            
+
             // Check if it's Token-2022 program
             let token_2022_id = Pubkey::from_str(TOKEN_2022_PROGRAM_ID)?;
             if owner == token_2022_id {
@@ -1042,15 +1155,18 @@ impl TransactionClient {
             ]
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.rpc_url)
             .json(&request)
             .send()
             .await?;
 
         let json: Value = response.json().await?;
-        
-        if let Some(account_data) = json["result"]["value"]["data"]["parsed"]["info"]["decimals"].as_u64() {
+
+        if let Some(account_data) =
+            json["result"]["value"]["data"]["parsed"]["info"]["decimals"].as_u64()
+        {
             Ok(account_data as u8)
         } else {
             Err("Failed to get token decimals".into())
@@ -1071,14 +1187,15 @@ impl TransactionClient {
             ]
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.rpc_url)
             .json(&request)
             .send()
             .await?;
 
         let json: Value = response.json().await?;
-        
+
         // Account exists if the result value is not null
         Ok(!json["result"]["value"].is_null())
     }
@@ -1092,14 +1209,15 @@ impl TransactionClient {
             "params": [[signature]]
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.rpc_url)
             .json(&request)
             .send()
             .await?;
 
         let json: Value = response.json().await?;
-        
+
         if let Some(result) = json["result"]["value"][0]["confirmationStatus"].as_str() {
             Ok(result == "finalized" || result == "confirmed")
         } else {
@@ -1119,10 +1237,10 @@ impl TransactionClient {
             println!("Hardware wallet detected - skipping Jito tips");
             return Ok(());
         }
-        
+
         // First Jito address (as per JS example)
         let jito_address1 = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
-        
+
         // Second Jito address (as per JS example)
         let jito_address2 = Pubkey::from_str("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL")?;
 
