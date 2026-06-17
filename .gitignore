@@ -22,3 +22,7 @@ unruggable.dmg
 partner_secrets.local
 .env.local
 .env.*.local
+scripts/package-windows-release.sh
+scripts/package-linux-release.sh
+unruggable.dmg.sha256
+unruggable.dmg.sha256

@@ -78,13 +78,13 @@ pub struct Earning {
 
 fn get_fallback_icon(symbol: &str) -> String {
     match symbol {
-        "USDC" => "assets/lendLogos/usdc.png".to_string(),
-        "SOL" => "assets/lendLogos/sol.png".to_string(),
-        "USDT" => "assets/lendLogos/usdt.png".to_string(),
-        "EURC" => "assets/lendLogos/eurc.png".to_string(),
-        "USDG" => "assets/lendLogos/usdg.png".to_string(),
-        "USDS" => "assets/lendLogos/usds.png".to_string(),
-        _ => "assets/default-token.png".to_string(), // Add a default fallback icon if needed
+        "USDC" => crate::asset_hosting::app_asset("lendLogos/usdc.png"),
+        "SOL" => crate::asset_hosting::app_asset("lendLogos/sol.png"),
+        "USDT" => crate::asset_hosting::app_asset("lendLogos/usdt.png"),
+        "EURC" => crate::asset_hosting::app_asset("lendLogos/eurc.png"),
+        "USDG" => crate::asset_hosting::app_asset("lendLogos/usdg.png"),
+        "USDS" => crate::asset_hosting::app_asset("lendLogos/usds.png"),
+        _ => crate::asset_hosting::app_asset("icons/icon.png"),
     }
 }
 
