@@ -9672,6 +9672,13 @@ button {
   z-index: 20;
 }
 
+.sheet-overlay.hardware-approval-overlay {
+  z-index: 92;
+  background: rgba(18, 20, 28, 0.58);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 .detected-sheet {
   position: absolute;
   left: 8px;
@@ -9688,6 +9695,50 @@ button {
   flex-direction: column;
   align-items: center;
   padding: 8px 16px 14px;
+}
+
+.detected-sheet.hardware-approval-sheet {
+  z-index: 93;
+  left: 14px;
+  right: 14px;
+  bottom: 28px;
+  padding: 8px 16px 12px;
+  border-radius: 30px;
+  background:
+    linear-gradient(180deg, rgba(247, 247, 248, 0.98) 0%, rgba(232, 233, 236, 0.98) 100%);
+  box-shadow:
+    0 18px 42px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.hardware-approval-sheet .sheet-kicker {
+  margin: 10px 0 4px;
+}
+
+.hardware-approval-sheet .sheet-title {
+  font-size: 28px;
+  line-height: 0.98;
+  text-align: center;
+}
+
+.hardware-approval-sheet .sheet-address {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #666a73;
+}
+
+.hardware-approval-sheet .sheet-status {
+  max-width: 270px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #555962;
+}
+
+.hardware-approval-sheet .sheet-device {
+  width: 110px;
+  height: 84px;
+  margin: 12px 0 0;
 }
 
 .sheet-handle {
@@ -10072,6 +10123,15 @@ button {
   height: 8px;
   border-radius: 50%;
   background: rgba(0, 0, 0, 0.8);
+}
+
+.wallet-card-hardware-glyph {
+  font-family: "Open Runde", "Manrope", "Avenir Next", "SF Pro Display", sans-serif;
+  font-size: 11px;
+  line-height: 1;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  color: rgba(0, 0, 0, 0.82);
 }
 
 .wallet-card-menu {
@@ -14235,6 +14295,19 @@ button {
   line-height: 1.5;
   letter-spacing: -0.02em;
   color: rgba(255, 255, 255, 0.5);
+  flex-shrink: 0;
+}
+
+.send-confirm-hold-note {
+  margin: 10px 0 0;
+  width: 100%;
+  padding: 0 20px;
+  text-align: center;
+  font-family: "Open Runde", "Manrope", "Avenir Next", "SF Pro Display", sans-serif;
+  font-size: 12px;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+  color: rgba(255, 255, 255, 0.68);
   flex-shrink: 0;
 }
 
