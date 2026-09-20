@@ -8,8 +8,11 @@ pub mod protocol;
 #[cfg(not(target_os = "android"))]
 pub mod serial;
 
-pub use protocol::{AuthMode, DeviceInfo, Esp32Capability, OtpSetupData};
-use protocol::{Command, Response};
+use protocol::{
+    clear_sensitive_string, parse_hardware_pubkey, validate_signing_payload, Command, Response,
+    CURRENT_V2_MAX_SIGN_BYTES,
+};
+pub use protocol::{AuthMode, DeviceInfo, Esp32Capability, KeyState, OtpSetupData, ProtocolError};
 use std::collections::HashMap;
 use std::error::Error;
 use std::sync::{Arc, OnceLock};
@@ -32,7 +35,7 @@ pub enum HardwareDeviceType {
 impl std::fmt::Display for HardwareDeviceType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            HardwareDeviceType::ESP32 => write!(f, "Unruggable First Edition"),
+            HardwareDeviceType::ESP32 => write!(f, "Unruggable Hardware Wallet"),
             HardwareDeviceType::Ledger => write!(f, "Ledger"),
         }
     }
@@ -43,6 +46,14 @@ pub struct HardwareDeviceInfo {
     pub device_type: HardwareDeviceType,
     pub name: String,
     pub connected: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HardwareScanResult {
+    pub devices: Vec<HardwareDeviceInfo>,
+    pub user_hint: Option<String>,
+    pub diagnostic_text: Option<String>,
+    pub fallback_serial_ports: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,13 +166,9 @@ impl HardwareWallet {
         capability: Esp32Capability,
         info_state: Option<DeviceInfo>,
     ) -> Result<(), Box<dyn Error>> {
-        let cached_unlock_until = match pubkey.as_ref() {
-            Some(pubkey) => {
-                if let Err(e) = bs58::decode(pubkey).into_vec() {
-                    return Err(format!("Invalid public key format: {e}").into());
-                }
-                Self::load_cached_esp32_unlock_until(pubkey).await
-            }
+        let pubkey = pubkey.as_deref().map(parse_hardware_pubkey).transpose()?;
+        let cached_unlock_until = match pubkey.as_deref() {
+            Some(pubkey) => Self::load_cached_esp32_unlock_until(pubkey).await,
             None => None,
         };
 
@@ -230,19 +237,30 @@ impl HardwareWallet {
         }
     }
 
-    pub async fn scan_available_devices() -> Vec<HardwareDeviceInfo> {
+    pub async fn scan_available_devices() -> HardwareScanResult {
         let mut devices = Vec::new();
 
         #[cfg(not(target_os = "android"))]
-        {
-            if serial::SerialConnection::check_device_presence() {
+        let (user_hint, diagnostic_text, fallback_serial_ports) = {
+            let serial_scan = serial::SerialConnection::scan_report();
+
+            if serial_scan.hardware_wallet_present {
                 devices.push(HardwareDeviceInfo {
                     device_type: HardwareDeviceType::ESP32,
-                    name: "Unruggable First Edition".to_string(),
+                    name: "Unruggable Hardware Wallet".to_string(),
                     connected: false,
                 });
             }
-        }
+
+            (
+                serial_scan.user_hint,
+                Some(serial_scan.diagnostic_text),
+                serial_scan.fallback_port_names,
+            )
+        };
+
+        #[cfg(target_os = "android")]
+        let (user_hint, diagnostic_text, fallback_serial_ports) = (None, None, Vec::new());
 
         #[cfg(target_os = "android")]
         {
@@ -250,7 +268,7 @@ impl HardwareWallet {
                 for device in esp32_devices {
                     devices.push(HardwareDeviceInfo {
                         device_type: HardwareDeviceType::ESP32,
-                        name: "Unruggable First Edition".to_string(),
+                        name: "Unruggable Hardware Wallet".to_string(),
                         connected: false,
                     });
                 }
@@ -270,7 +288,12 @@ impl HardwareWallet {
             }
         }
 
-        devices
+        HardwareScanResult {
+            devices,
+            user_hint,
+            diagnostic_text,
+            fallback_serial_ports,
+        }
     }
 
     pub async fn connect(&self) -> Result<(), Box<dyn Error>> {
@@ -290,30 +313,47 @@ impl HardwareWallet {
         .await
         .map_err(|_| "Timed out while opening the hardware wallet connection")??;
 
+        self.initialize_esp32_connection(connection).await
+    }
+
+    #[cfg(not(target_os = "android"))]
+    async fn connect_esp32_port_once(
+        &self,
+        port_name: &str,
+    ) -> Result<serial::SerialConnection, Box<dyn Error>> {
+        let connection = tokio::time::timeout(
+            ESP32_CONNECT_TIMEOUT,
+            serial::SerialConnection::connect(port_name),
+        )
+        .await
+        .map_err(|_| format!("Timed out while opening {port_name}"))??;
+
+        self.initialize_esp32_connection(connection).await
+    }
+
+    #[cfg(not(target_os = "android"))]
+    async fn initialize_esp32_connection(
+        &self,
+        connection: serial::SerialConnection,
+    ) -> Result<serial::SerialConnection, Box<dyn Error>> {
         let mut capability = Esp32Capability::LegacyV0;
         let mut info_state: Option<DeviceInfo> = None;
 
         match connection.send_command(Command::GetInfo).await {
             Ok(Response::Info(info)) => {
-                capability = Esp32Capability::NewV1;
+                capability = info.capability();
                 info_state = Some(info);
             }
-            Ok(Response::Error(err)) if err == "Unknown command" => {}
+            Ok(Response::Error(ProtocolError::UnknownCommand)) => {}
             Ok(_) => {}
             Err(_) => {}
         }
 
         let pubkey = match connection.send_command(Command::GetPubkey).await? {
             Response::Pubkey(pubkey) => Some(pubkey),
-            Response::Error(err) if err == "WALLET_NOT_INITIALIZED" => {
+            Response::Error(err) if err.is_not_initialized() => {
                 if info_state.is_none() {
-                    info_state = Some(DeviceInfo {
-                        version: "unknown".to_string(),
-                        auth_mode: AuthMode::Unset,
-                        finalized: false,
-                        locked: false,
-                        retries_left: 0,
-                    });
+                    info_state = Some(DeviceInfo::uninitialized_legacy_compatible());
                     capability = Esp32Capability::NewV1;
                 }
                 None
@@ -330,6 +370,45 @@ impl HardwareWallet {
             .await?;
 
         Ok(connection)
+    }
+
+    pub async fn connect_esp32_port(&self, port_name: &str) -> Result<(), Box<dyn Error>> {
+        #[cfg(not(target_os = "android"))]
+        {
+            let mut esp32_guard = self.esp32_connection.lock().await;
+            let mut last_err: Option<Box<dyn Error>> = None;
+
+            for attempt in 0..2 {
+                match self.connect_esp32_port_once(port_name).await {
+                    Ok(connection) => {
+                        *esp32_guard = Some(connection);
+                        return Ok(());
+                    }
+                    Err(err) => {
+                        log::warn!(
+                            "ESP32 connect attempt {} on {} failed: {}",
+                            attempt + 1,
+                            port_name,
+                            err
+                        );
+                        last_err = Some(err);
+                        if attempt == 0 {
+                            tokio::time::sleep(Duration::from_millis(900)).await;
+                        }
+                    }
+                }
+            }
+
+            Err(last_err.unwrap_or_else(|| {
+                format!("Failed to connect to hardware wallet on {port_name}").into()
+            }))
+        }
+
+        #[cfg(target_os = "android")]
+        {
+            let _ = port_name;
+            Err("Manual serial-port selection is only available on desktop".into())
+        }
     }
 
     pub async fn connect_esp32(&self) -> Result<(), Box<dyn Error>> {
@@ -371,10 +450,10 @@ impl HardwareWallet {
 
             match connection.send_command(Command::GetInfo).await {
                 Ok(Response::Info(info)) => {
-                    capability = Esp32Capability::NewV1;
+                    capability = info.capability();
                     info_state = Some(info);
                 }
-                Ok(Response::Error(err)) if err == "Unknown command" => {}
+                Ok(Response::Error(ProtocolError::UnknownCommand)) => {}
                 Ok(_) => {}
                 Err(_) => {}
             }
@@ -385,15 +464,9 @@ impl HardwareWallet {
                 .map_err(|e| format!("Failed to get public key: {e}"))?
             {
                 Response::Pubkey(pubkey) => Some(pubkey),
-                Response::Error(err) if err == "WALLET_NOT_INITIALIZED" => {
+                Response::Error(err) if err.is_not_initialized() => {
                     if info_state.is_none() {
-                        info_state = Some(DeviceInfo {
-                            version: "unknown".to_string(),
-                            auth_mode: AuthMode::Unset,
-                            finalized: false,
-                            locked: false,
-                            retries_left: 0,
-                        });
+                        info_state = Some(DeviceInfo::uninitialized_legacy_compatible());
                         capability = Esp32Capability::NewV1;
                     }
                     None
@@ -621,7 +694,7 @@ impl HardwareWallet {
 
         match self.send_esp32_command(Command::SetTime(unix_secs)).await {
             Ok(Response::TimeSet(_)) => {}
-            Ok(Response::Error(err)) if err == "Unknown command" => {}
+            Ok(Response::Error(ProtocolError::UnknownCommand)) => {}
             Ok(_) => {}
             Err(_) => {}
         }
@@ -650,10 +723,11 @@ impl HardwareWallet {
 
         match self.send_esp32_command(Command::GetInfo).await? {
             Response::Info(info) => {
+                *self.esp32_capability.lock().await = Some(info.capability());
                 *self.esp32_info.lock().await = Some(info.clone());
                 Ok(Some(info))
             }
-            Response::Error(err) if err == "Unknown command" => {
+            Response::Error(ProtocolError::UnknownCommand) => {
                 *self.esp32_capability.lock().await = Some(Esp32Capability::LegacyV0);
                 *self.esp32_info.lock().await = None;
                 Ok(None)
@@ -670,15 +744,13 @@ impl HardwareWallet {
 
         match self.send_esp32_command(Command::GetPubkey).await? {
             Response::Pubkey(pubkey) => {
-                if let Err(e) = bs58::decode(&pubkey).into_vec() {
-                    return Err(format!("Invalid public key format: {e}").into());
-                }
+                let pubkey = parse_hardware_pubkey(&pubkey)?;
                 let cached_unlock_until = Self::load_cached_esp32_unlock_until(&pubkey).await;
                 *self.public_key.lock().await = Some(pubkey.clone());
                 *self.esp32_unlocked_until.lock().await = cached_unlock_until;
                 Ok(Some(pubkey))
             }
-            Response::Error(err) if err == "WALLET_NOT_INITIALIZED" => {
+            Response::Error(err) if err.is_not_initialized() => {
                 *self.public_key.lock().await = None;
                 *self.esp32_unlocked_until.lock().await = None;
                 Ok(None)
@@ -690,12 +762,16 @@ impl HardwareWallet {
 
     pub async fn is_esp32_setup_required(&self) -> Result<bool, Box<dyn Error>> {
         match self.refresh_esp32_info().await? {
-            Some(info) => Ok(!info.finalized || info.auth_mode == AuthMode::Unset),
+            Some(info) => Ok(info.needs_setup()),
             None => Ok(false),
         }
     }
 
     pub async fn setup_mode_none(&self) -> Result<(), Box<dyn Error>> {
+        if self.get_esp32_capability().await == Some(Esp32Capability::CurrentV2) {
+            return Err("This hardware wallet supports PIN setup only".into());
+        }
+
         match self.send_esp32_command(Command::SetModeNone).await? {
             Response::ModeSet(AuthMode::None) => {
                 let _ = self.refresh_esp32_info().await;
@@ -712,25 +788,106 @@ impl HardwareWallet {
             return Err("Device PIN must be exactly 6 digits".into());
         }
 
-        match self
-            .send_esp32_command(Command::SetModePin(pin.to_string()))
-            .await?
-        {
-            Response::ModeSet(AuthMode::Pin) => {
-                let _ = self.refresh_esp32_info().await;
-                match self.refresh_esp32_pubkey().await? {
+        let capability = self
+            .get_esp32_capability()
+            .await
+            .unwrap_or(Esp32Capability::LegacyV0);
+        let mut pin_value = pin.to_string();
+        let result = async {
+            match self
+                .send_esp32_command(Command::SetModePin(pin_value.clone()))
+                .await?
+            {
+                Response::ModeSet(AuthMode::Pin) => {}
+                Response::Error(ProtocolError::ModeFinal)
+                    if capability == Esp32Capability::CurrentV2 => {}
+                Response::Error(err) => return Err(format!("Hardware wallet error: {err}").into()),
+                _ => return Err("Unexpected response while setting PIN mode".into()),
+            }
+
+            let info = self.refresh_esp32_info().await?;
+            if capability != Esp32Capability::CurrentV2 {
+                return match self.refresh_esp32_pubkey().await? {
                     Some(_) => Ok(()),
                     None => {
                         Err("Hardware wallet did not return a public key after PIN setup".into())
                     }
+                };
+            }
+
+            let info = info.ok_or("Missing device state after PIN setup")?;
+            if info.auth_mode != AuthMode::Pin || !info.finalized {
+                return Err("Hardware wallet did not save the PIN after setup".into());
+            }
+            match info.key_state {
+                KeyState::Ready => {
+                    if self.refresh_esp32_pubkey().await?.is_some() {
+                        Ok(())
+                    } else {
+                        Err("Hardware wallet did not return its public key after PIN setup".into())
+                    }
+                }
+                KeyState::Uninitialized => {
+                    // CurrentV2 deliberately separates auth setup from key generation.
+                    // Reuse the just-confirmed PIN for this one setup transaction, then
+                    // clear it below regardless of success or failure.
+                    self.unlock_pin(&pin_value).await?;
+                    self.generate_esp32_wallet().await.map(|_| ())
+                }
+                KeyState::Fault => Err("Hardware wallet error: KEYSTORE_CORRUPT".into()),
+                KeyState::Unknown => {
+                    Err("Hardware wallet returned an unknown key state after PIN setup".into())
                 }
             }
-            Response::Error(err) => Err(format!("Hardware wallet error: {err}").into()),
-            _ => Err("Unexpected response while setting PIN mode".into()),
         }
+        .await;
+
+        clear_sensitive_string(&mut pin_value);
+        result
+    }
+
+    pub async fn generate_esp32_wallet(&self) -> Result<String, Box<dyn Error>> {
+        if self.get_esp32_capability().await != Some(Esp32Capability::CurrentV2) {
+            return Err("Wallet generation is not supported by this hardware firmware".into());
+        }
+
+        let generated_pubkey = match self.send_esp32_command(Command::Generate).await? {
+            Response::Pubkey(pubkey) => parse_hardware_pubkey(&pubkey)?,
+            Response::Error(ProtocolError::WalletAlreadyInitialized) => self
+                .refresh_esp32_pubkey()
+                .await?
+                .ok_or("Hardware wallet reports an initialized key but returned no public key")?,
+            Response::Error(err) => return Err(format!("Hardware wallet error: {err}").into()),
+            _ => return Err("Unexpected response while generating wallet key".into()),
+        };
+
+        // The firmware closes the unlock window after key generation.
+        self.set_esp32_unlock_until(None).await;
+
+        let info = self
+            .refresh_esp32_info()
+            .await?
+            .ok_or("Missing device state after wallet generation")?;
+        if info.key_state != KeyState::Ready {
+            return Err("Hardware wallet did not report a ready key after generation".into());
+        }
+
+        let verified_pubkey = self
+            .refresh_esp32_pubkey()
+            .await?
+            .ok_or("Hardware wallet did not return a public key after generation")?;
+        if verified_pubkey != generated_pubkey {
+            return Err("Hardware wallet returned a different public key after generation".into());
+        }
+
+        Ok(verified_pubkey)
     }
 
     pub async fn setup_mode_otp_begin(&self) -> Result<OtpSetupData, Box<dyn Error>> {
+        if self.get_esp32_capability().await == Some(Esp32Capability::CurrentV2) {
+            return Err("This hardware wallet supports PIN setup only".into());
+        }
+
         match self.send_esp32_command(Command::SetModeOtpBegin).await? {
             Response::OtpSetup(data) => Ok(data),
             Response::Error(err) => Err(format!("Hardware wallet error: {err}").into()),
@@ -741,6 +898,9 @@ impl HardwareWallet {
     pub async fn setup_mode_otp_confirm(&self, code: &str) -> Result<(), Box<dyn Error>> {
         if !is_six_digit_code(code) {
             return Err("Authenticator code must be exactly 6 digits".into());
+        }
+        if self.get_esp32_capability().await == Some(Esp32Capability::CurrentV2) {
+            return Err("This hardware wallet supports PIN setup only".into());
         }
 
         self.sync_esp32_time_best_effort().await;
@@ -797,18 +957,80 @@ impl HardwareWallet {
         }
     }
 
+    pub async fn show_receive_qr(&self) -> Result<(), Box<dyn Error>> {
+        if self.get_esp32_capability().await != Some(Esp32Capability::CurrentV2) {
+            return Err("On-device receive QR is not supported by this hardware firmware".into());
+        }
+
+        match self.send_esp32_command(Command::ShowReceiveQr).await? {
+            Response::ReceiveQrShown => Ok(()),
+            Response::Error(err) => Err(format!("Hardware wallet error: {err}").into()),
+            _ => Err("Unexpected response while showing receive QR".into()),
+        }
+    }
+
+    pub async fn hide_receive_qr(&self) -> Result<(), Box<dyn Error>> {
+        if self.get_esp32_capability().await != Some(Esp32Capability::CurrentV2) {
+            return Ok(());
+        }
+
+        match self.send_esp32_command(Command::HideReceiveQr).await? {
+            Response::HomeShown => Ok(()),
+            Response::Error(err) => Err(format!("Hardware wallet error: {err}").into()),
+            _ => Err("Unexpected response while hiding receive QR".into()),
+        }
+    }
+
+    pub async fn wipe_esp32_keys(&self) -> Result<(), Box<dyn Error>> {
+        if self.get_esp32_capability().await != Some(Esp32Capability::CurrentV2) {
+            return Err("Key wipe is not supported by this hardware firmware".into());
+        }
+
+        match self.send_esp32_command(Command::WipeKeys).await? {
+            Response::Wiped => {
+                self.set_esp32_unlock_until(None).await;
+                let info = self
+                    .refresh_esp32_info()
+                    .await?
+                    .ok_or("Missing device state after key wipe")?;
+                if info.auth_mode != AuthMode::Unset || info.key_state != KeyState::Uninitialized {
+                    return Err("Hardware wallet did not reset into an uninitialized state".into());
+                }
+                if self.refresh_esp32_pubkey().await?.is_some() {
+                    return Err("Hardware wallet still reports a public key after wipe".into());
+                }
+                Ok(())
+            }
+            Response::Error(err) => Err(format!("Hardware wallet error: {err}").into()),
+            _ => Err("Unexpected response while wiping hardware wallet".into()),
+        }
+    }
+
     pub async fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
         let device_type = self.device_type.lock().await.clone();
 
         match device_type {
             Some(HardwareDeviceType::ESP32) => {
+                let capability = self
+                    .get_esp32_capability()
+                    .await
+                    .unwrap_or(Esp32Capability::LegacyV0);
+                if let Err(err) = validate_signing_payload(capability, message.len()) {
+                    log::warn!(
+                        "Rejected CurrentV2 signing request: {} bytes exceeds {} byte limit",
+                        message.len(),
+                        CURRENT_V2_MAX_SIGN_BYTES
+                    );
+                    return Err(format!("Hardware wallet error: {err}").into());
+                }
+
                 let response = self
                     .send_command(Command::SignMessage(message.to_vec()))
                     .await?;
                 match response {
                     Response::Signature(sig) => Ok(sig),
                     Response::Error(e) => {
-                        if e == "LOCKED" {
+                        if e == ProtocolError::Locked {
                             self.set_esp32_unlock_until(None).await;
                         }
                         Err(format!("Hardware wallet error: {e}").into())

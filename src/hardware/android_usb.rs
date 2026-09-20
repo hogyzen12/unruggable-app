@@ -48,8 +48,15 @@ impl AndroidUsbSerial {
             Command::SetModeNone
             | Command::SetModePin(_)
             | Command::SetModeOtpBegin
-            | Command::SignMessage(_) => (180, 250), // ~45s total wait for button-confirm flows
-            _ => (40, 250), // ~10s default
+            | Command::SetModeOtpConfirm(_)
+            | Command::UnlockPin(_)
+            | Command::UnlockOtp(_)
+            | Command::Generate
+            | Command::ShowReceiveQr
+            | Command::HideReceiveQr
+            | Command::WipeKeys => (180, 250), // ~45s total wait for button-confirm flows
+            Command::SignMessage(_) => (300, 250), // ~75s signing confirmation window
+            _ => (40, 250),                        // ~10s default
         }
     }
 
@@ -150,7 +157,7 @@ impl AndroidUsbSerial {
             .ok_or(StorageError("Not connected to hardware wallet".to_string()))?
             .clone();
         let (max_reads, read_timeout_ms) = Self::response_profile_for(&command);
-        let cmd_data = format_esp32_command(&command);
+        let mut cmd_data = format_esp32_command(command);
         let (tx, rx) = std::sync::mpsc::channel();
 
         dispatch(move |env, activity, _webview| {
@@ -162,6 +169,7 @@ impl AndroidUsbSerial {
                 max_reads,
                 read_timeout_ms,
             );
+            cmd_data.fill(0);
             tx.send(result).unwrap();
         });
 

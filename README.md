@@ -31,11 +31,13 @@ cross compile from mac/use cargo stuff
 export X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR=/Users/hogyzen12/Downloads/openssl-3.5.3/x64 && \
 export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1 && \
 cargo xwin build --target x86_64-pc-windows-msvc --release --no-default-features --features desktop && \
-sh scripts/package-windows-release.sh
+sh scripts/package-windows-diagnostic-release.sh
 upload:
 target/x86_64-pc-windows-msvc/release/unruggable-app-windows.zip
 target/x86_64-pc-windows-msvc/release/unruggable-app-windows.zip.sha256
-zip contains the exe, required DLLs, and assets/
+zip contains the exe, required DLLs, assets/, build metadata, and Windows USB support instructions.
+
+Before publishing, run the physical-device matrix in docs/HARDWARE_RELEASE_CHECKLIST.md.
 
 Cross compile for UBUNTU distribution
 HAVE TO HAVE cross (cargo install cross) 
@@ -53,4 +55,3 @@ Manual installation on android device
 hogyzen12@anons-MBP unruggable-app % find ./target -name "*.apk"
 
 hogyzen12@anons-MacBook-Pro unruggable-app % adb install -r ./target/dx/unruggable/release/android/app/app/build/outputs/apk/debug/app-debug.apk
-

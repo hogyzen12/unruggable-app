@@ -29,6 +29,8 @@ enum ConnectUnlockMode {
     Otp,
 }
 
+type DeviceConnectTarget = (HardwareDeviceType, Option<String>);
+
 fn format_auth_mode(mode: AuthMode) -> &'static str {
     match mode {
         AuthMode::Unset => "UNSET",
@@ -90,7 +92,7 @@ fn connect_timeout_for(device_type: &HardwareDeviceType) -> Duration {
 fn connect_timeout_message(device_type: &HardwareDeviceType) -> String {
     match device_type {
         HardwareDeviceType::ESP32 => {
-            "Connection timed out. Replug your Unruggable First Edition and try again."
+            "Connection timed out. Replug your Unruggable hardware wallet and try again."
                 .to_string()
         }
         HardwareDeviceType::Ledger => {
@@ -176,12 +178,19 @@ fn format_connect_unlock_error(err: &str) -> String {
             "BAD_PIN_FORMAT" | "BAD_OTP_FORMAT" => {
                 "Code must be exactly 6 digits.".to_string()
             }
-            "BUTTON_TIMEOUT" => {
-                "No button press detected. Submit the code again, then press the device button within 8 seconds."
-                    .to_string()
-            }
             "AUTH_MODE_MISMATCH" => {
                 "Unlock method does not match the device mode. Open hardware connect and try again."
+                    .to_string()
+            }
+            "PIN_REQUIRED" | "MODE_UNSET" => {
+                "Finish PIN setup on the hardware wallet before continuing.".to_string()
+            }
+            "CONFIRM_TIMEOUT" | "BUTTON_TIMEOUT" => {
+                "Confirmation timed out. Submit again, then use the device button when prompted."
+                    .to_string()
+            }
+            "KEYSTORE_CORRUPT" => {
+                "The hardware wallet secure elements reported a fault. Reconnect it and contact support with diagnostics."
                     .to_string()
             }
             "TIME_NOT_SET" => {
@@ -198,12 +207,20 @@ fn format_setup_error(err: &str) -> String {
     if let Some(code) = extract_hardware_error_code(err) {
         return match code.as_str() {
             "BAD_PIN_FORMAT" => "PIN must be exactly 6 digits.".to_string(),
-            "BUTTON_TIMEOUT" => {
+            "BUTTON_TIMEOUT" | "CONFIRM_TIMEOUT" => {
                 "No button hold detected. Submit the PIN again, then hold the device button for about 2 seconds."
                     .to_string()
             }
             "MODE_FINAL" => {
                 "This device is already set up. Reconnect it to continue.".to_string()
+            }
+            "AUTH_FAILED" => "Incorrect PIN. Please try again.".to_string(),
+            "AUTH_LOCKED" => {
+                "Too many incorrect PIN attempts. The hardware wallet is locked.".to_string()
+            }
+            "KEYSTORE_CORRUPT" => {
+                "The hardware wallet secure elements reported a fault. Reconnect it and contact support with diagnostics."
+                    .to_string()
             }
             other => format!("Setup failed: {other}"),
         };
@@ -229,6 +246,10 @@ pub fn HardwareWalletModal(
     let mut device_type = use_signal(|| None as Option<HardwareDeviceType>);
     let mut available_devices = use_signal(|| Vec::<HardwareDeviceInfo>::new());
     let mut scanning = use_signal(|| false);
+    let mut scan_user_hint = use_signal(|| None as Option<String>);
+    let mut scan_diagnostic_text = use_signal(|| None as Option<String>);
+    let mut fallback_serial_ports = use_signal(Vec::<String>::new);
+    let mut scan_diagnostics_copied = use_signal(|| false);
 
     // New firmware/setup state
     let mut capability = use_signal(|| None as Option<Esp32Capability>);
@@ -273,15 +294,13 @@ pub fn HardwareWalletModal(
                         if let Some(info) = wallet.get_cached_esp32_info().await {
                             fw_auth_mode.set(Some(info.auth_mode));
                             fw_finalized.set(Some(info.finalized));
-                            setup_required
-                                .set(!info.finalized || info.auth_mode == AuthMode::Unset);
+                            setup_required.set(info.needs_setup());
                         }
                         if let Ok(info_opt) = wallet.refresh_esp32_info().await {
                             if let Some(info) = info_opt {
                                 fw_auth_mode.set(Some(info.auth_mode));
                                 fw_finalized.set(Some(info.finalized));
-                                setup_required
-                                    .set(!info.finalized || info.auth_mode == AuthMode::Unset);
+                                setup_required.set(info.needs_setup());
                             }
                         }
                     } else if dev_type == HardwareDeviceType::Ledger {
@@ -346,8 +365,12 @@ pub fn HardwareWalletModal(
         if !has_existing_wallet {
             scanning.set(true);
             spawn(async move {
-                let devices = HardwareWallet::scan_available_devices().await;
-                available_devices.set(devices);
+                let result = HardwareWallet::scan_available_devices().await;
+                available_devices.set(result.devices);
+                scan_user_hint.set(result.user_hint);
+                scan_diagnostic_text.set(result.diagnostic_text);
+                fallback_serial_ports.set(result.fallback_serial_ports);
+                scan_diagnostics_copied.set(false);
                 scanning.set(false);
             });
         }
@@ -360,13 +383,17 @@ pub fn HardwareWalletModal(
         scanning.set(true);
         error_message.set(None);
         spawn(async move {
-            let devices = HardwareWallet::scan_available_devices().await;
-            available_devices.set(devices);
+            let result = HardwareWallet::scan_available_devices().await;
+            available_devices.set(result.devices);
+            scan_user_hint.set(result.user_hint);
+            scan_diagnostic_text.set(result.diagnostic_text);
+            fallback_serial_ports.set(result.fallback_serial_ports);
+            scan_diagnostics_copied.set(false);
             scanning.set(false);
         });
     };
 
-    let mut connect_device = move |dev_type: HardwareDeviceType| {
+    let mut connect_device = move |(dev_type, selected_serial_port): DeviceConnectTarget| {
         connecting.set(true);
         connecting_device.set(Some(dev_type.clone()));
         error_message.set(None);
@@ -400,7 +427,10 @@ pub fn HardwareWalletModal(
             let wallet = Arc::new(HardwareWallet::new());
             let result = match tokio::time::timeout(connect_timeout_for(&dev_type), async {
                 match dev_type {
-                    HardwareDeviceType::ESP32 => wallet.connect_esp32().await,
+                    HardwareDeviceType::ESP32 => match selected_serial_port.as_deref() {
+                        Some(port_name) => wallet.connect_esp32_port(port_name).await,
+                        None => wallet.connect_esp32().await,
+                    },
                     HardwareDeviceType::Ledger => wallet.connect_ledger().await,
                 }
             })
@@ -427,7 +457,7 @@ pub fn HardwareWalletModal(
                         if let Some(info) = wallet.get_cached_esp32_info().await {
                             fw_auth_mode.set(Some(info.auth_mode));
                             fw_finalized.set(Some(info.finalized));
-                            needs_setup = !info.finalized || info.auth_mode == AuthMode::Unset;
+                            needs_setup = info.needs_setup();
                             unlock_mode = match info.auth_mode {
                                 AuthMode::Pin => Some(ConnectUnlockMode::Pin),
                                 AuthMode::Otp => Some(ConnectUnlockMode::Otp),
@@ -438,7 +468,7 @@ pub fn HardwareWalletModal(
                             if let Some(info) = info_opt {
                                 fw_auth_mode.set(Some(info.auth_mode));
                                 fw_finalized.set(Some(info.finalized));
-                                needs_setup = !info.finalized || info.auth_mode == AuthMode::Unset;
+                                needs_setup = info.needs_setup();
                                 unlock_mode = match info.auth_mode {
                                     AuthMode::Pin => Some(ConnectUnlockMode::Pin),
                                     AuthMode::Otp => Some(ConnectUnlockMode::Otp),
@@ -604,7 +634,9 @@ pub fn HardwareWalletModal(
     } else {
         "hardware-pin-setup-confirm"
     };
-    let connect_pin_component_key = "hardware-pin-unlock";
+    let resuming_current_v2_setup = capability() == Some(Esp32Capability::CurrentV2)
+        && fw_auth_mode() == Some(AuthMode::Pin)
+        && fw_finalized() == Some(true);
     let hardware_modal_class = if setup_required() {
         "modal-content hardware-modal hardware-modal-immersive"
     } else {
@@ -653,7 +685,7 @@ pub fn HardwareWalletModal(
                                     class: "info-subtitle",
                                     if connecting() {
                                         if connecting_device() == Some(HardwareDeviceType::ESP32) {
-                                            "Handshaking with your Unruggable First Edition and establishing a secure connection. First plug-in can take a second."
+                                            "Handshaking with your Unruggable hardware wallet and establishing a secure connection. First plug-in can take a second."
                                         } else {
                                             "Opening a secure connection to Ledger. Keep the device unlocked with the Solana app open."
                                         }
@@ -684,7 +716,75 @@ pub fn HardwareWalletModal(
                                         div { class: "no-devices-title", "No Hardware Wallets Detected" }
                                         div {
                                             class: "no-devices-subtitle",
-                                            "Check cable and power, then rescan."
+                                            if let Some(hint) = scan_user_hint() {
+                                                "{hint}"
+                                            } else {
+                                                "Check cable and power, then rescan."
+                                            }
+                                        }
+                                        if cfg!(target_os = "windows") {
+                                            a {
+                                                class: "hardware-inline-note",
+                                                href: "https://docs.espressif.com/projects/esp-iot-solution/en/release-v2.0/usb/usb_overview/usb_serial_jtag.html#usb-serial-jtag-peripheral-driver",
+                                                target: "_blank",
+                                                rel: "noopener noreferrer",
+                                                "Espressif USB Serial/JTAG driver help"
+                                            }
+                                            a {
+                                                class: "hardware-inline-note",
+                                                href: "https://www.silabs.com/software-and-tools/usb-to-uart-bridge-vcp-drivers",
+                                                target: "_blank",
+                                                rel: "noopener noreferrer",
+                                                "CP210x Windows driver help"
+                                            }
+                                        }
+                                        if let Some(diagnostics) = scan_diagnostic_text() {
+                                            details {
+                                                class: "hardware-inline-note",
+                                                summary { "Connection details" }
+                                                pre {
+                                                    style: "white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; margin: 10px 0; text-align: left; font-size: 12px;",
+                                                    "{diagnostics}"
+                                                }
+                                                button {
+                                                    class: "connect-device-button rescan-button",
+                                                    onclick: move |_| {
+                                                        if let Some(text) = scan_diagnostic_text() {
+                                                            scan_diagnostics_copied.set(
+                                                                crate::clipboard::copy_text_to_clipboard(&text).is_ok()
+                                                            );
+                                                        }
+                                                    },
+                                                    if scan_diagnostics_copied() {
+                                                        "Copied"
+                                                    } else {
+                                                        "Copy Diagnostics"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !fallback_serial_ports().is_empty() {
+                                            div {
+                                                class: "hardware-inline-note hardware-inline-note-strong",
+                                                "Advanced: Windows reported these unmatched COM ports. Choose one only if Device Manager identifies it as the hardware wallet."
+                                            }
+                                            div {
+                                                class: "no-devices-actions",
+                                                for port_name in fallback_serial_ports() {
+                                                    button {
+                                                        class: "connect-device-button",
+                                                        disabled: connecting(),
+                                                        onclick: {
+                                                            let selected_port = port_name.clone();
+                                                            move |_| connect_device((
+                                                                HardwareDeviceType::ESP32,
+                                                                Some(selected_port.clone())
+                                                            ))
+                                                        },
+                                                        "Try {port_name}"
+                                                    }
+                                                }
+                                            }
                                         }
                                         div {
                                             class: "no-devices-actions",
@@ -714,7 +814,7 @@ pub fn HardwareWalletModal(
                                                                 class: "device-icon-container",
                                                                 img {
                                                                     src: if device.device_type == HardwareDeviceType::ESP32 { ICON_UNRUGGABLE } else { ICON_LEDGER },
-                                                                    alt: if device.device_type == HardwareDeviceType::ESP32 { "Unruggable First Edition" } else { "Ledger Hardware Wallet" },
+                                                                    alt: if device.device_type == HardwareDeviceType::ESP32 { "Unruggable hardware wallet" } else { "Ledger Hardware Wallet" },
                                                                     width: "48",
                                                                     height: "48"
                                                                 }
@@ -724,7 +824,7 @@ pub fn HardwareWalletModal(
                                                                 div { class: "device-name", "{device.name}" }
                                                                 div {
                                                                     class: if device.device_type == HardwareDeviceType::ESP32 { "device-type-badge unruggable-badge" } else { "device-type-badge ledger-badge" },
-                                                                    if device.device_type == HardwareDeviceType::ESP32 { "First Edition" } else { "Ledger" }
+                                                                    if device.device_type == HardwareDeviceType::ESP32 { "Unruggable" } else { "Ledger" }
                                                                 }
                                                             }
                                                             button {
@@ -736,7 +836,7 @@ pub fn HardwareWalletModal(
                                                                 disabled: connecting(),
                                                                 onclick: {
                                                                     let dev_type = device.device_type.clone();
-                                                                    move |_| connect_device(dev_type.clone())
+                                                                    move |_| connect_device((dev_type.clone(), None))
                                                                 },
                                                                 if is_connecting_this_device {
                                                                     span { class: "connect-device-button-spinner", "" }
@@ -786,9 +886,11 @@ pub fn HardwareWalletModal(
                                 p {
                                     class: "info-subtitle",
                                     if setup_busy() {
-                                        "PIN confirmed. Press and hold the hardware button for about 2 seconds to save it on the device."
+                                        "Follow the device prompts: hold to save the PIN, then hold again to create the wallet key."
+                                    } else if resuming_current_v2_setup {
+                                        "Enter your existing 6-digit PIN to finish creating the wallet key."
                                     } else if pin_setup_step() == PinSetupStep::Enter {
-                                        "Create a 6-digit PIN for your Unruggable First Edition."
+                                        "Create a 6-digit PIN for your Unruggable hardware wallet."
                                     } else {
                                         "Confirm the same 6-digit PIN, then save it on the device."
                                     }
@@ -803,7 +905,7 @@ pub fn HardwareWalletModal(
                                 }
                                 p {
                                     class: "flow-note-copy",
-                                    "Your keypair is created locally on the Unruggable First Edition. The private key never leaves the device."
+                                    "Your keypair is created locally on the hardware wallet. The private key never leaves the device."
                                 }
                             }
 
@@ -814,7 +916,7 @@ pub fn HardwareWalletModal(
                                     h3 { class: "hardware-setup-busy-title", "Save PIN On Device" }
                                     p {
                                         class: "hardware-setup-busy-copy",
-                                        "Press and hold the hardware button for about 2 seconds to finish setup."
+                                        "Follow both confirmation prompts on the device to finish setup."
                                     }
                                 }
                             } else if pin_setup_step() == PinSetupStep::Enter {
@@ -823,7 +925,11 @@ pub fn HardwareWalletModal(
                                     key: "{setup_pin_component_key}",
                                     PinInput {
                                         title: "Create PIN".to_string(),
-                                        subtitle: Some("Choose a 6-digit code for your Unruggable First Edition.".to_string()),
+                                        subtitle: Some(if resuming_current_v2_setup {
+                                            "Enter the PIN already saved on this device.".to_string()
+                                        } else {
+                                            "Choose a 6-digit code for your Unruggable hardware wallet.".to_string()
+                                        }),
                                         error_message: pin_setup_error(),
                                         on_complete: EventHandler::new(move |pin_value: String| {
                                             if !valid_six_digits(&pin_value) {
@@ -889,8 +995,7 @@ pub fn HardwareWalletModal(
                                                             Ok(Some(info)) => {
                                                                 fw_auth_mode.set(Some(info.auth_mode));
                                                                 fw_finalized.set(Some(info.finalized));
-                                                                setup_required
-                                                                    .set(!info.finalized || info.auth_mode == AuthMode::Unset);
+                                                                setup_required.set(info.needs_setup());
                                                             }
                                                             _ => {
                                                                 fw_auth_mode.set(Some(AuthMode::Pin));
@@ -936,7 +1041,7 @@ pub fn HardwareWalletModal(
 
                                 div {
                                     class: "hardware-inline-note",
-                                    "After you confirm the PIN, you'll press and hold the device button for about 2 seconds."
+                                    "After you confirm the PIN, follow the on-device prompts to save it and create the wallet key."
                                 }
                             }
                         }
@@ -947,7 +1052,7 @@ pub fn HardwareWalletModal(
                                     class: "hardware-pin-minimal-shell",
                                     div {
                                         class: "hardware-pin-shell hardware-pin-shell-minimal",
-                                        key: "{connect_pin_component_key}",
+                                        key: "hardware-pin-unlock",
                                         PinInput {
                                             title: "PIN".to_string(),
                                             subtitle: None,
@@ -1162,7 +1267,7 @@ pub fn HardwareWalletModal(
                                 div { class: "success-icon", "✅" }
                                 h3 {
                                     if device_type() == Some(HardwareDeviceType::ESP32) {
-                                        "Unruggable First Edition Connected"
+                                        "Unruggable Hardware Wallet Connected"
                                     } else if device_type() == Some(HardwareDeviceType::Ledger) {
                                         "Ledger Connected"
                                     } else {
@@ -1178,7 +1283,7 @@ pub fn HardwareWalletModal(
                                         class: "connected-device-icon",
                                         img {
                                             src: if dev_type == HardwareDeviceType::ESP32 { ICON_UNRUGGABLE } else { ICON_LEDGER },
-                                            alt: if dev_type == HardwareDeviceType::ESP32 { "Unruggable First Edition" } else { "Ledger Hardware Wallet" },
+                                            alt: if dev_type == HardwareDeviceType::ESP32 { "Unruggable hardware wallet" } else { "Ledger Hardware Wallet" },
                                             width: "64",
                                             height: "64"
                                         }
@@ -1438,7 +1543,11 @@ pub fn HardwareWalletModal(
                                                 class: "connection-status",
                                                 if let Some(cap) = capability() {
                                                     span {
-                                                        if cap == Esp32Capability::NewV1 { "Firmware: NewV1" } else { "Firmware: LegacyV0" }
+                                                        match cap {
+                                                            Esp32Capability::CurrentV2 => "Model: CurrentV2 dual-element",
+                                                            Esp32Capability::NewV1 => "Firmware: NewV1",
+                                                            Esp32Capability::LegacyV0 => "Firmware: LegacyV0",
+                                                        }
                                                     }
                                                 }
                                             }

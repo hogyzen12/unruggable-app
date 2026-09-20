@@ -14,6 +14,7 @@ pub fn ReceiveModal(
     let copying = use_signal(|| false);
     let copied = use_signal(|| false);
     let mut hardware_pubkey = use_signal(|| None as Option<String>);
+    let mut device_qr_visible = use_signal(|| false);
 
     // Clone hardware_wallet for use in effect
     let hw_clone = hardware_wallet.clone();
@@ -25,6 +26,13 @@ pub fn ReceiveModal(
             spawn(async move {
                 if let Ok(pubkey) = hw.get_public_key().await {
                     hardware_pubkey.set(Some(pubkey));
+                }
+                match hw.show_receive_qr().await {
+                    Ok(()) => device_qr_visible.set(true),
+                    Err(err) => {
+                        // Legacy devices do not expose this command; the app QR remains usable.
+                        log::debug!("On-device receive QR unavailable: {err}");
+                    }
                 }
             });
         }
@@ -45,7 +53,10 @@ pub fn ReceiveModal(
     rsx! {
         div {
             class: "modal-backdrop",
-            onclick: move |_| onclose.call(()),
+            onclick: {
+                let hardware_wallet = hardware_wallet.clone();
+                move |_| close_receive_modal(hardware_wallet.clone(), onclose)
+            },
 
             div {
                 class: "modal-content app-modal-shell app-modal-shell-scrollable receive-modal",
@@ -59,7 +70,10 @@ pub fn ReceiveModal(
                     }
                     button {
                         class: "app-modal-close-button",
-                        onclick: move |_| onclose.call(()),
+                        onclick: {
+                            let hardware_wallet = hardware_wallet.clone();
+                            move |_| close_receive_modal(hardware_wallet.clone(), onclose)
+                        },
                         "×"
                     }
                 }
@@ -136,11 +150,26 @@ pub fn ReceiveModal(
                             class: "hardware-info",
                             "🔐 This is your hardware wallet address - keep your device safe!"
                         }
+                        if device_qr_visible() {
+                            p {
+                                class: "hardware-info",
+                                "The same receive address is displayed on your device for verification."
+                            }
+                        }
                     }
                 }
             }
         }
     }
+}
+
+fn close_receive_modal(hardware_wallet: Option<Arc<HardwareWallet>>, onclose: EventHandler<()>) {
+    if let Some(wallet) = hardware_wallet {
+        spawn(async move {
+            let _ = wallet.hide_receive_qr().await;
+        });
+    }
+    onclose.call(());
 }
 
 // Helper function to handle copy to clipboard
