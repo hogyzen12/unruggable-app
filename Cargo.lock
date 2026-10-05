@@ -9690,7 +9690,7 @@ dependencies = [
 
 [[package]]
 name = "unruggable"
-version = "0.1.0"
+version = "1.1.1"
 dependencies = [
  "aes-gcm",
  "android_logger",

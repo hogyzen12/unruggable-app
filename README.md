@@ -1,56 +1,70 @@
-ANDROID 
-buid, install on device, prepare for play store upload
+# Unruggable App
 
-Android will crash - use the scripts to force enviroments.
- - build for android apk cleanly
-sh scripts/android.build.sh && sh scripts/android.bundle.sh && sh scripts/android.update.sh && jarsigner -verbose \
-  -sigalg SHA256withRSA -digestalg SHA-256 \
-  -keystore ~/keys/unruggable-upload.jks \
-  "/Users/hogyzen12/coding-project-folders/unruggable-app/dist/android/unruggable-release.aab" \
-  unruggable-upload
+The Unruggable Solana wallet application for desktop and mobile, with support
+for software wallets, Ledger devices, and Unruggable hardware wallets.
 
-For self hosted release via github and not through store.
-sh scripts/android.build.sh && sh scripts/android.bundle.sh && sh scripts/android.github.sh
+## Repository status
 
-bundle and push to device. APK available for sideloading release as well.
+- `main` is the stable desktop-app lineage. Its current release is `v1.1.1`.
+- `dev/v2.0.0` is reserved for the next desktop update: MLH hardware V2
+  compatibility, Windows USB diagnostics, and related reliability fixes.
+- Historical experiments are retained as descriptive `archive/*` tags rather
+  than permanent development branches.
+- Firmware is versioned independently. The shipped MLH firmware is
+  `firmware-v0.3.3-mlh-2026` in the firmware repositories.
 
-For other ditris use hosted assets to make sure it builds
-IPHONES
-tools and cargo make are in charge of building for real iphone deployment. 
+See [Repository workflow](docs/REPOSITORY_WORKFLOW.md) for the branch and
+release policy.
 
-cargo make build_ios_device && cargo make code-sign-ios-device && cargo make run-ios-device
+## Desktop development
 
-build for device, sign and install. Will not load from local assets. 
+Install Rust and the platform dependencies required by Dioxus, then use the
+locked dependency graph:
 
-MacOS
-simply execute macos_package.sh and let the script deal with it.
-Ensure parameters are correctly set.
+```sh
+cargo check --locked --no-default-features --features desktop
+cargo test --locked --no-default-features --features desktop
+```
 
-Windows
-cross compile from mac/use cargo stuff
-export X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR=/Users/hogyzen12/Downloads/openssl-3.5.3/x64 && \
-export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1 && \
-cargo xwin build --target x86_64-pc-windows-msvc --release --no-default-features --features desktop && \
+Hardware-focused tests can be run with:
+
+```sh
+cargo test --locked --offline --no-default-features --features desktop hardware::
+```
+
+## Platform builds
+
+macOS packaging:
+
+```sh
+sh macos_package.sh
+```
+
+Windows cross-builds require `cargo-xwin` and a Windows OpenSSL SDK. Set
+`X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR` to that SDK before building:
+
+```sh
+export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1
+cargo xwin build --locked --target x86_64-pc-windows-msvc --release \
+  --no-default-features --features desktop
 sh scripts/package-windows-release.sh
-upload:
-target/x86_64-pc-windows-msvc/release/unruggable-app-windows.zip
-target/x86_64-pc-windows-msvc/release/unruggable-app-windows.zip.sha256
-zip contains the exe, required DLLs, and assets/
+```
 
-Cross compile for UBUNTU distribution
-HAVE TO HAVE cross (cargo install cross) 
-AND the Cross.toml with prebuild stuff.
-Will only run on UBUNTU 24, LTS till 29
+Linux packaging:
 
-cross build --target x86_64-unknown-linux-gnu --release --no-default-features --features desktop && \
+```sh
+cross build --locked --target x86_64-unknown-linux-gnu --release \
+  --no-default-features --features desktop
 sh scripts/package-linux-release.sh
-upload:
-target/x86_64-unknown-linux-gnu/release/unruggable-linux.zip
-target/x86_64-unknown-linux-gnu/release/unruggable-linux.zip.sha256
-zip contains the binary and assets/
+```
 
-Manual installation on android device
-hogyzen12@anons-MBP unruggable-app % find ./target -name "*.apk"
+Android and iOS builds require their platform toolchains. The existing scripts
+under `scripts/` and `tools/` remain the source of the platform-specific build
+steps.
 
-hogyzen12@anons-MacBook-Pro unruggable-app % adb install -r ./target/dx/unruggable/release/android/app/app/build/outputs/apk/debug/app-debug.apk
+## Releases
+
+Generated packages, installers, checksums, and mobile bundles are attached to
+GitHub Releases; they are not committed to the source branch. Release builds
+must come from a clean, tested commit and use an annotated version tag.
 
