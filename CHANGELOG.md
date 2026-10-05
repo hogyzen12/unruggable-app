@@ -51,6 +51,8 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Fixed staking accepting amounts below the network's current minimum delegation.
 - Fixed a failed swap provider (including a 502 Bad Gateway response) overriding a valid route returned by another provider. Provider failures are now isolated and only surfaced when every provider fails.
 - Fixed hardware transactions becoming invalid during user review because the previous 24-slot guard could expire before approval.
+- Fixed successful hardware sends refreshing the selected software-wallet address and overwriting the hardware balance with zero. Send, token-send, stake, and swap now refresh the active wallet through one shared path.
+- Debounced USB presence monitoring so one transient serial-enumeration miss cannot silently clear a connected hardware session.
 - Fixed the desktop UI losing its CSS/images after the old `dev-app-release` branch was archived.
 - Fixed the existing synchronous SNS test so the full desktop suite runs inside a Tokio runtime.
 

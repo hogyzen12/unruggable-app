@@ -613,6 +613,7 @@ pub fn WalletView() -> Element {
     // Monitor hardware wallet presence - check every 2 seconds
     use_effect(move || {
         spawn(async move {
+            let mut consecutive_absent_scans = 0u8;
             loop {
                 let is_present = HardwareWallet::is_device_present();
                 let was_present = hardware_device_present();
@@ -625,13 +626,27 @@ pub fn WalletView() -> Element {
                     );
                 }
 
-                hardware_device_present.set(is_present);
-
-                if !is_present && hardware_connected() {
-                    log::info!("🔌 Hardware device removed, disconnecting...");
-                    hardware_connected.set(false);
-                    hardware_wallet.set(None);
-                    hardware_pubkey.set(None);
+                if is_present {
+                    consecutive_absent_scans = 0;
+                    hardware_device_present.set(true);
+                } else if hardware_connected() {
+                    consecutive_absent_scans = consecutive_absent_scans.saturating_add(1);
+                    log::warn!(
+                        "Hardware presence scan missed connected device ({}/3)",
+                        consecutive_absent_scans
+                    );
+                    if consecutive_absent_scans >= 3 {
+                        log::info!("🔌 Hardware device absent for three scans, disconnecting...");
+                        hardware_device_present.set(false);
+                        hardware_connected.set(false);
+                        hardware_wallet.set(None);
+                        hardware_pubkey.set(None);
+                        hardware_device_type.set(None);
+                        consecutive_absent_scans = 0;
+                    }
+                } else {
+                    consecutive_absent_scans = 0;
+                    hardware_device_present.set(false);
                 }
 
                 tokio::time::sleep(std::time::Duration::from_secs(2)).await;
@@ -805,11 +820,17 @@ pub fn WalletView() -> Element {
                 }
                 Ok(Err(e)) => {
                     println!("Failed to fetch balance for address {}: {}", address, e);
-                    0.0
+                    wallet_snapshots()
+                        .get(&cache_key)
+                        .map(|snapshot| snapshot.balance)
+                        .unwrap_or(0.0)
                 }
                 Err(_) => {
                     println!("Timed out fetching SOL balance for address {}", address);
-                    0.0
+                    wallet_snapshots()
+                        .get(&cache_key)
+                        .map(|snapshot| snapshot.balance)
+                        .unwrap_or(0.0)
                 }
             };
 
@@ -1793,23 +1814,9 @@ pub fn WalletView() -> Element {
                     },
                     onsuccess: move |_| {
                         show_send_modal.set(false);
-                        // Don't reset hardware_wallet here either
-                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
-                            let address = wallet.address.clone();
-                            let rpc_url = custom_rpc();
-
-                            spawn(async move {
-                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                    Ok(sol_balance) => {
-                                        balance.set(sol_balance);
-                                    }
-                                    Err(e) => {
-                                        println!("Failed to fetch balance: {}", e);
-                                        balance.set(0.0);
-                                    }
-                                }
-                            });
-                        }
+                        // Refresh through the central active-wallet loader so a hardware
+                        // send cannot overwrite its balance with the software wallet's.
+                        refresh_trigger.set(refresh_trigger().wrapping_add(1));
                     },
                     // Add new event handler for hardware wallet status changes
                     onhardware: move |event: HardwareWalletEvent| {
@@ -1853,22 +1860,7 @@ pub fn WalletView() -> Element {
                         selected_token_decimals.set(None);
                         println!("Token transaction successful: {}", signature);
 
-                        // Refresh balances after successful transaction
-                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
-                            let address = wallet.address.clone();
-                            let rpc_url = custom_rpc();
-
-                            spawn(async move {
-                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                    Ok(sol_balance) => {
-                                        balance.set(sol_balance);
-                                    }
-                                    Err(e) => {
-                                        println!("Failed to refresh balance after token send: {}", e);
-                                    }
-                                }
-                            });
-                        }
+                        refresh_trigger.set(refresh_trigger().wrapping_add(1));
                     },
                     onhardware: move |event: HardwareWalletEvent| {
                         hardware_connected.set(event.connected);
@@ -1903,22 +1895,7 @@ pub fn WalletView() -> Element {
                     },
                     onsuccess: move |_| {
                         show_stake_modal.set(false);
-                        // Refresh balance after staking
-                        if let Some(wallet) = wallets.read().get(current_wallet_index()) {
-                            let address = wallet.address.clone();
-                            let rpc_url = custom_rpc();
-
-                            spawn(async move {
-                                match rpc::get_balance(&address, rpc_url.as_deref()).await {
-                                    Ok(sol_balance) => {
-                                        balance.set(sol_balance);
-                                    }
-                                    Err(e) => {
-                                        println!("Error refreshing balance after stake: {}", e);
-                                    }
-                                }
-                            });
-                        }
+                        refresh_trigger.set(refresh_trigger().wrapping_add(1));
                     }
                 }
             }
@@ -1933,8 +1910,8 @@ pub fn WalletView() -> Element {
                     onclose: move |_| show_swap_modal.set(false),
                     onsuccess: move |signature| {
                         show_swap_modal.set(false);
-                        // You can add success handling here if needed
                         println!("Swap successful: {}", signature);
+                        refresh_trigger.set(refresh_trigger().wrapping_add(1));
                     }
                 }
             }

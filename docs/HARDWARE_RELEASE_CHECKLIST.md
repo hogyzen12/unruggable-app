@@ -16,6 +16,8 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Prefer computer PIN entry throughout connect and transaction flows, with on-wallet entry minimized as a CurrentV2 option.
 - [x] Lock only after five minutes of actual inactivity; changing window focus no longer immediately locks or disconnects the wallet.
 - [x] Remove the custom on-chain slot guard and its transaction-construction `getSlot` dependency from every send, swap, stake, and unstake path.
+- [x] Refresh the active hardware address after send, token-send, stake, and swap rather than falling back to the selected software wallet.
+- [x] Require three consecutive failed USB-presence scans before clearing a connected hardware session.
 - [x] Add on-device receive QR show/hide behavior.
 - [x] Add Windows COM, USB-ID, open-error, PnP/no-COM, and manual-port diagnostics.
 - [x] Update to `serialport` 4.9 and remove the desktop Windows OpenSSL build/runtime requirement.
@@ -61,6 +63,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [ ] Configured wallet: expand the optional on-wallet PIN action and open an authenticated session.
 - [ ] Configured wallet: show receive QR, verify it matches the app address, close it, and return to the wallet home screen.
 - [ ] Configured wallet: sign and submit a small controlled transaction after reviewing it on-device.
+- [ ] Configured wallet: complete two consecutive sends without reconnecting and confirm the hardware balance refreshes after each send.
 - [ ] Configured wallet: verify the removed slot guard is absent and the Jito/Jules transfers are shown explicitly with the expected amounts.
 - [ ] Configured wallet: allow the session to expire, unlock again, disconnect, reconnect, and repeat signing.
 - [ ] Blank wallet: set PIN, unlock, generate, validate/read back the public key, and reconnect.
