@@ -59,6 +59,7 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Fixed the desktop UI losing its CSS/images after the old `dev-app-release` branch was archived.
 - Fixed the existing synchronous SNS test so the full desktop suite runs inside a Tokio runtime.
 - Fixed some larger swaps failing at RPC submission with `Invalid Request: decoded too large`.
+- Fixed the connected hardware-wallet row overflowing and inheriting the transaction-approval icon layout in the wallet selector.
 
 ### Compatibility and operations
 

@@ -1221,6 +1221,8 @@ body {
     text-align: left;
     font-size: 16px;
     position: relative;
+    box-sizing: border-box;
+    min-width: 0;
 }
 
 .dropdown-item:hover {
@@ -1863,24 +1865,48 @@ div.profile-icon.hardware-connected > div.hardware-indicator.connected {
 
 /* Hardware wallet items in dropdown */
 .hardware-wallet-item {
-    background-color: rgba(16, 185, 129, 0.1);
-    border-left: 3px solid #10b981;
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.18), rgba(16, 185, 129, 0.06));
+    border: 1px solid rgba(16, 185, 129, 0.24);
+    overflow: hidden;
 }
 
-.hardware-icon {
-    background-color: #10b981;
-    color: white;
+.hardware-wallet-dropdown-icon {
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    margin: 0;
+    color: #6ee7b7;
+    background-color: rgba(16, 185, 129, 0.14);
+    border: 1px solid rgba(52, 211, 153, 0.28);
+    border-radius: 9px;
+    box-shadow: inset 0 0 12px rgba(16, 185, 129, 0.08);
+}
+
+.hardware-wallet-item .wallet-info {
+    min-width: 0;
 }
 
 /* Special styling for hardware wallet dropdown option */
 .dropdown-item.hardware-wallet-item:hover {
-    background-color: rgba(16, 185, 129, 0.2);
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.24), rgba(16, 185, 129, 0.1));
+    border-color: rgba(52, 211, 153, 0.38);
 }
 
 /* Hardware wallet active state */
 .dropdown-item.hardware-wallet-item.active {
-    background-color: rgba(16, 185, 129, 0.15);
-    border-left: 3px solid #10b981;
+    background: linear-gradient(90deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.07));
+    border: 1px solid rgba(52, 211, 153, 0.3);
+}
+
+.dropdown-item.hardware-wallet-item.active::before {
+    left: 0;
+    top: 8px;
+    bottom: 8px;
+    width: 3px;
+    height: auto;
+    transform: none;
+    background-color: #10b981;
+    border-radius: 0 3px 3px 0;
 }
 
 /* Improve modal buttons */

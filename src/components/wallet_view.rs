@@ -1450,16 +1450,17 @@ pub fn WalletView() -> Element {
                         //    }
                         //}
 
-                        // Hardware wallet display (unchanged)
+                        // Connected hardware wallet
                         if hardware_connected() && hardware_pubkey().is_some() {
-                            div {
+                            button {
                                 class: "dropdown-item hardware-wallet-item active",
+                                r#type: "button",
                                 onclick: move |_| {
                                     show_hardware_modal.set(true);
                                     show_dropdown.set(false);
                                 },
                                 div {
-                                    class: "dropdown-icon hardware-icon",
+                                    class: "dropdown-icon hardware-wallet-dropdown-icon",
                                     "🔐"
                                 }
                                 div {
