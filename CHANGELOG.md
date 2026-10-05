@@ -18,6 +18,7 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Manual **Try COMx** fallback for unmatched Windows serial-port metadata.
 - A release compatibility guide and physical-device test matrix under `docs/`.
 - A configurable managed API client for desktop swap provider and RPC traffic.
+- Capability-gated Solana v1 swap transactions for routes that exceed the v0 packet limit supported by the finalized MLH firmware.
 
 ### Changed
 
@@ -40,6 +41,8 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Jito-enabled transactions retain the finalized 4,200-lamport Jito tip and 100,000-lamport Jules tip, using the official eight-account Jito allow-list.
 - Jupiter swaps are built from managed gateway instructions and submitted through the configured RPC, avoiding the unreliable Ultra execute path while preserving local hardware signing and review.
 - CurrentV2 hardware transactions with the tip bundle include the exact firmware marker guard as instruction one, using a 512-slot review window. Software and legacy transactions do not add this marker-only instruction or slot lookup.
+- Swap routes that fit within 1,232 bytes remain v0. Oversized Jupiter, DFlow, and Titan routes are rebuilt as v1 up to the 4,096-byte limit, with compute-budget instructions converted into the v1 transaction configuration.
+- V1 swaps use base64 RPC submission with preflight. V0 transactions retain the existing RPC/TPU behavior.
 
 ### Fixed
 
@@ -55,6 +58,7 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Debounced USB presence monitoring so one transient serial-enumeration miss cannot silently clear a connected hardware session.
 - Fixed the desktop UI losing its CSS/images after the old `dev-app-release` branch was archived.
 - Fixed the existing synchronous SNS test so the full desktop suite runs inside a Tokio runtime.
+- Fixed some larger swaps failing at RPC submission with `Invalid Request: decoded too large`.
 
 ### Compatibility and operations
 
@@ -67,8 +71,10 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 
 - Desktop `cargo check` passes.
 - Windows MSVC `cargo xwin check` passes.
+- The locked Windows MSVC release cross-build passes with Solana v1 support enabled.
+- Six focused Solana v1 tests pass: v0 preservation, oversized fallback/round-trip, capability rejection, compute-budget conversion, and malformed/duplicate budget rejection.
 - All focused protocol and bounded-serial tests pass.
-- Full desktop suite passes serially: 34 passed, 0 failed, 1 deliberately ignored physical-device test. The serial run avoids the existing process-global PIN-state race between parallel tests.
+- Full desktop suite passes serially: 40 passed, 0 failed, 1 deliberately ignored physical-device test. The serial run avoids the existing process-global PIN-state race between parallel tests.
 - The ignored physical-device test was run explicitly against the connected finalized MLH wallet and passed CurrentV2 classification, firmware-state checks, real Solana public-key validation, and clean disconnect.
 - The macOS desktop app builds, launches, and loads CSS/images from the local asset handler.
 - Live managed API checks pass for Jupiter quote/order/build, DFlow quote, latest blockhash, and epoch RPC requests.
@@ -80,6 +86,7 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Test the Windows diagnostics and driver/no-COM cases on real Windows PCs.
 - Confirm the production gateway's desktop access/authentication policy and rate limits before final release.
 - Complete a controlled end-to-end swap and stake on macOS; live checks in this changelog did not sign or submit transactions.
+- Complete controlled small-v0 and oversized-v1 swaps on the finalized CurrentV2 firmware; v1 transactions use the firmware's blind-review path rather than structured v0 marker review.
 - Regress physical legacy hardware and Ledger.
 - Build a signed Windows installer and Authenticode-sign the installer/executable.
 - Produce and verify the macOS release package, signing, and notarization.

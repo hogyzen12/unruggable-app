@@ -6,6 +6,8 @@ use crate::config::TpuConfig;
 use crate::signing::{SignerType, TransactionSigner};
 use crate::storage::get_current_jito_settings;
 use crate::wallet::Wallet;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine as _;
 use bs58;
 use reqwest::Client;
 use serde_json::{json, Value};
@@ -597,45 +599,62 @@ impl TransactionClient {
 
     /// Send a signed transaction with parallel RPC + TPU delivery
     pub async fn send_transaction(&self, signed_tx: &str) -> Result<String, Box<dyn Error>> {
-        // Decode the transaction to get signature and serialized bytes
+        // Swap callers use base58 internally for compatibility with the existing
+        // API. Solana v1 is detected after decoding and submitted as base64.
         let tx_bytes = bs58::decode(signed_tx).into_vec()?;
-        let transaction: VersionedTransaction = bincode::deserialize(&tx_bytes)?;
-        let signature = transaction.signatures[0];
+        let is_v1 = crate::transaction_v1::is_v1(&tx_bytes);
 
-        // Parallel TPU send (fire-and-forget if TPU is enabled)
-        // DISABLED ON iOS: iOS restricts tokio::spawn in background, causing crashes
-        #[cfg(not(target_os = "ios"))]
-        {
-            if let Some(tpu_sender) = self.get_tpu_sender().await {
-                let tpu_sender_clone = Arc::clone(&tpu_sender);
-                let tx_bytes_clone = tx_bytes.clone();
-                let sig_clone = signature;
+        if !is_v1 {
+            let transaction: VersionedTransaction = bincode::deserialize(&tx_bytes)?;
+            let signature = transaction
+                .signatures
+                .first()
+                .copied()
+                .ok_or("Transaction has no signature")?;
 
-                tokio::spawn(async move {
-                    let mut sender = tpu_sender_clone.lock().await;
-                    match sender.send_txn(sig_clone, tx_bytes_clone).await {
-                        Ok(_) => {
-                            println!("[TPU] Transaction {} sent via TPU", sig_clone);
+            // Parallel TPU send (fire-and-forget if TPU is enabled).
+            // V1 uses RPC-only delivery until the TPU dependency supports it.
+            #[cfg(not(target_os = "ios"))]
+            {
+                if let Some(tpu_sender) = self.get_tpu_sender().await {
+                    let tpu_sender_clone = Arc::clone(&tpu_sender);
+                    let tx_bytes_clone = tx_bytes.clone();
+
+                    tokio::spawn(async move {
+                        let mut sender = tpu_sender_clone.lock().await;
+                        match sender.send_txn(signature, tx_bytes_clone).await {
+                            Ok(_) => println!("[TPU] Transaction {signature} sent via TPU"),
+                            Err(_error) => {
+                                println!("[TPU] Failed to send transaction via TPU: {_error:?}");
+                            }
                         }
-                        Err(e) => {
-                            println!("[TPU] Failed to send transaction via TPU: {:?}", e);
-                            // Don't fail the whole transaction - RPC might still work
-                        }
-                    }
-                });
+                    });
+                }
             }
-        }
 
-        #[cfg(target_os = "ios")]
-        {
+            #[cfg(target_os = "ios")]
             println!("[TPU] TPU disabled on iOS - using RPC-only submission");
+        } else {
+            println!("[TPU] Solana v1 transaction - using RPC-only submission");
         }
 
-        // RPC send (unchanged - this is the source of truth)
         let jito_settings = get_current_jito_settings();
 
-        // Prepare the request, potentially with Jito-specific parameters
-        let request = if jito_settings.jito_tx {
+        let request = if is_v1 {
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "sendTransaction",
+                "params": [
+                    BASE64_STANDARD.encode(&tx_bytes),
+                    {
+                        "encoding": "base64",
+                        "skipPreflight": false,
+                        "preflightCommitment": "confirmed"
+                    }
+                ]
+            })
+        } else if jito_settings.jito_tx {
             // If JitoTx is enabled, use base64 encoding as recommended by Jito
             // and skip preflight as required by Jito
             json!({

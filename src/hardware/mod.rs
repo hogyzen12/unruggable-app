@@ -1015,6 +1015,14 @@ impl HardwareWallet {
                             format!("Hardware wallet error: {}", ProtocolError::Locked).into()
                         );
                     }
+                    if message.first() == Some(&solana_sdk_v1::message::v1::V1_PREFIX)
+                        && !info.supports_transaction_v1
+                    {
+                        return Err(
+                            "Hardware wallet error: this firmware does not support Solana v1 transactions"
+                                .into(),
+                        );
+                    }
                     if let Err(err) = validate_signing_payload(
                         capability,
                         message.len(),

@@ -214,10 +214,33 @@ async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
     }
 }
 
-async fn uses_current_v2_marker(wallet: &Option<Arc<HardwareWallet>>) -> bool {
-    match wallet.as_ref() {
-        Some(wallet) => wallet.get_esp32_capability().await == Some(Esp32Capability::CurrentV2),
-        None => false,
+#[derive(Clone, Copy, Debug)]
+struct SwapTransactionCapabilities {
+    use_current_v2_marker: bool,
+    allow_transaction_v1: bool,
+}
+
+async fn swap_transaction_capabilities(
+    wallet: &Option<Arc<HardwareWallet>>,
+) -> SwapTransactionCapabilities {
+    let Some(wallet) = wallet.as_ref() else {
+        // Software wallets can sign both wire formats.
+        return SwapTransactionCapabilities {
+            use_current_v2_marker: false,
+            allow_transaction_v1: true,
+        };
+    };
+
+    let use_current_v2_marker =
+        wallet.get_esp32_capability().await == Some(Esp32Capability::CurrentV2);
+    let allow_transaction_v1 = wallet.get_cached_esp32_info().await.is_some_and(|info| {
+        info.supports_transaction_v1
+            && info.max_sign_message_bytes > crate::transaction_v1::V0_TRANSACTION_SIZE_LIMIT
+    });
+
+    SwapTransactionCapabilities {
+        use_current_v2_marker,
+        allow_transaction_v1,
     }
 }
 
@@ -336,6 +359,7 @@ async fn build_transaction_from_jupiter_build(
     payer: SolanaPubkey,
     rpc_url: &str,
     use_current_v2_marker: bool,
+    allow_transaction_v1: bool,
 ) -> Result<Vec<u8>, String> {
     let JupiterBuildResponse {
         compute_budget_instructions,
@@ -395,15 +419,13 @@ async fn build_transaction_from_jupiter_build(
     let recent_blockhash = Hash::new_from_array(blockhash_with_metadata.blockhash);
     let message = v0::Message::try_compile(&payer, &instructions, &lookup_tables, recent_blockhash)
         .map_err(|error| format!("Failed to compile Jupiter transaction: {error}"))?;
-    let transaction = VersionedTransaction {
-        signatures: vec![
-            solana_sdk::signature::Signature::default();
-            message.header.num_required_signatures as usize
-        ],
-        message: VersionedMessage::V0(message),
-    };
-    bincode::serialize(&transaction)
-        .map_err(|error| format!("Failed to serialize Jupiter transaction: {error}"))
+    crate::transaction_v1::serialize_with_v1_fallback(
+        VersionedMessage::V0(message),
+        &payer,
+        &instructions,
+        recent_blockhash,
+        allow_transaction_v1,
+    )
 }
 
 /// Build a DFlow transaction with the app's transaction guards.
@@ -417,6 +439,7 @@ async fn build_transaction_from_instructions(
     payer: SolanaPubkey,
     rpc_url: &str,
     use_current_v2_marker: bool,
+    allow_transaction_v1: bool,
 ) -> Result<Vec<u8>, String> {
     println!("🔧 Building transaction from swap instructions");
 
@@ -476,15 +499,13 @@ async fn build_transaction_from_instructions(
         v0::Message::try_compile(&payer, &all_instructions, &lookup_tables, recent_blockhash)
             .map_err(|e| format!("Failed to compile message: {}", e))?;
 
-    // Create versioned transaction
-    let transaction = VersionedTransaction {
-        signatures: vec![solana_sdk::signature::Signature::default()],
-        message: VersionedMessage::V0(message),
-    };
-
-    // Serialize to bytes
-    let serialized = bincode::serialize(&transaction)
-        .map_err(|e| format!("Failed to serialize transaction: {}", e))?;
+    let serialized = crate::transaction_v1::serialize_with_v1_fallback(
+        VersionedMessage::V0(message),
+        &payer,
+        &all_instructions,
+        recent_blockhash,
+        allow_transaction_v1,
+    )?;
 
     println!("   Transaction built: {} bytes", serialized.len());
 
@@ -507,11 +528,30 @@ async fn sign_jupiter_transaction(
 
     println!("📄 Decoded transaction: {} bytes", unsigned_tx_bytes.len());
 
-    // Deserialize the transaction
-    let mut transaction: VersionedTransaction = match bincode::deserialize(&unsigned_tx_bytes) {
-        Ok(tx) => tx,
-        Err(e) => return Err(format!("Failed to deserialize transaction: {}", e)),
-    };
+    if crate::transaction_v1::is_v1(&unsigned_tx_bytes) {
+        let mut transaction: solana_sdk_v1::transaction::VersionedTransaction =
+            wincode::deserialize(&unsigned_tx_bytes)
+                .map_err(|error| format!("Failed to deserialize Solana v1 transaction: {error}"))?;
+        let required_signatures = transaction.message.header().num_required_signatures as usize;
+        if required_signatures != 1 || transaction.signatures.len() != 1 {
+            return Err(format!(
+                "Swap transaction requires {required_signatures} signers; this wallet supports single-signer swaps"
+            ));
+        }
+
+        println!("📋 Transaction type: V1");
+        let message_bytes = transaction.message.serialize();
+        let signature_bytes = sign_swap_message(signer, &message_bytes).await?;
+        transaction.signatures[0] = solana_sdk_v1::signature::Signature::from(signature_bytes);
+        let signed_tx_bytes = wincode::serialize(&transaction).map_err(|error| {
+            format!("Failed to serialize signed Solana v1 transaction: {error}")
+        })?;
+        return Ok(BASE64_STANDARD.encode(signed_tx_bytes));
+    }
+
+    // Deserialize legacy and v0 transactions with the established Solana 3.x stack.
+    let mut transaction: VersionedTransaction = bincode::deserialize(&unsigned_tx_bytes)
+        .map_err(|error| format!("Failed to deserialize transaction: {error}"))?;
 
     // Log transaction type for debugging
     match &transaction.message {
@@ -523,10 +563,12 @@ async fn sign_jupiter_transaction(
         }
     }
 
-    println!(
-        "📋 Transaction has {} signatures expected",
-        transaction.signatures.len()
-    );
+    let required_signatures = transaction.message.header().num_required_signatures as usize;
+    if required_signatures != 1 || transaction.signatures.len() != 1 {
+        return Err(format!(
+            "Swap transaction requires {required_signatures} signers; this wallet supports single-signer swaps"
+        ));
+    }
 
     // Serialize the transaction message for signing
     let message_bytes = transaction.message.serialize();
@@ -536,37 +578,8 @@ async fn sign_jupiter_transaction(
         &message_bytes[..message_bytes.len().min(32)]
     );
 
-    // Sign the message
-    println!("⏳ Waiting for wallet signature...");
-    let signature_bytes = match signer.sign_message(&message_bytes).await {
-        Ok(sig) => {
-            println!("✅ Wallet returned signature: {} bytes", sig.len());
-            sig
-        }
-        Err(e) => {
-            println!("❌ Wallet signing failed: {}", e);
-            return Err(format!("Failed to sign message: {}", e));
-        }
-    };
-
-    // Ensure we have exactly 64 bytes for the signature
-    if signature_bytes.len() != 64 {
-        println!("❌ Invalid signature length from wallet");
-        return Err(format!(
-            "Invalid signature length: expected 64, got {}",
-            signature_bytes.len()
-        ));
-    }
-
-    println!(
-        "🔍 Signature bytes (first 32): {:02x?}",
-        &signature_bytes[..32]
-    );
-
-    // Convert to Solana signature
-    let mut sig_array = [0u8; 64];
-    sig_array.copy_from_slice(&signature_bytes);
-    let solana_signature = solana_sdk::signature::Signature::from(sig_array);
+    let signature_bytes = sign_swap_message(signer, &message_bytes).await?;
+    let solana_signature = solana_sdk::signature::Signature::from(signature_bytes);
 
     // Replace the first signature (assumes single signer)
     if transaction.signatures.is_empty() {
@@ -592,6 +605,28 @@ async fn sign_jupiter_transaction(
     );
 
     Ok(signed_transaction_b64)
+}
+
+async fn sign_swap_message(
+    signer: &dyn TransactionSigner,
+    message_bytes: &[u8],
+) -> Result<[u8; 64], String> {
+    println!("📝 Message to sign: {} bytes", message_bytes.len());
+    println!("⏳ Waiting for wallet signature...");
+    let signature = signer
+        .sign_message(message_bytes)
+        .await
+        .map_err(|error| format!("Failed to sign message: {error}"))?;
+    if signature.len() != 64 {
+        return Err(format!(
+            "Invalid signature length: expected 64, got {}",
+            signature.len()
+        ));
+    }
+
+    let mut bytes = [0_u8; 64];
+    bytes.copy_from_slice(&signature);
+    Ok(bytes)
 }
 
 // Jupiter Ultra API Types (simple order + execute flow)
@@ -2228,13 +2263,14 @@ pub fn SwapModal(
                             let rpc_url = custom_rpc_titan
                                 .as_deref()
                                 .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
-                            let use_current_v2_marker = uses_current_v2_marker(&hw_clone).await;
+                            let capabilities = swap_transaction_capabilities(&hw_clone).await;
                             let unsigned_tx_bytes = match build_transaction_from_route(
                                 &titan_route,
                                 user_pubkey,
                                 recent_blockhash,
                                 rpc_url,
-                                use_current_v2_marker,
+                                capabilities.use_current_v2_marker,
+                                capabilities.allow_transaction_v1,
                             )
                             .await
                             {
@@ -2536,12 +2572,13 @@ pub fn SwapModal(
                             let rpc_url = custom_rpc_jupiter
                                 .as_deref()
                                 .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
-                            let use_current_v2_marker = uses_current_v2_marker(&hw_clone).await;
+                            let capabilities = swap_transaction_capabilities(&hw_clone).await;
                             let unsigned_tx_bytes = match build_transaction_from_jupiter_build(
                                 build,
                                 payer,
                                 rpc_url,
-                                use_current_v2_marker,
+                                capabilities.use_current_v2_marker,
+                                capabilities.allow_transaction_v1,
                             )
                             .await
                             {
@@ -2788,7 +2825,7 @@ pub fn SwapModal(
                             let rpc_url = custom_rpc_dflow
                                 .as_deref()
                                 .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
-                            let use_current_v2_marker = uses_current_v2_marker(&hw_clone).await;
+                            let capabilities = swap_transaction_capabilities(&hw_clone).await;
 
                             // Build the route and add the CurrentV2 marker bundle when applicable.
                             let unsigned_tx_bytes = match build_transaction_from_instructions(
@@ -2800,7 +2837,8 @@ pub fn SwapModal(
                                 instructions.address_lookup_table_addresses,
                                 user_pubkey,
                                 rpc_url,
-                                use_current_v2_marker,
+                                capabilities.use_current_v2_marker,
+                                capabilities.allow_transaction_v1,
                             )
                             .await
                             {

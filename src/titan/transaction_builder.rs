@@ -11,8 +11,6 @@ use solana_sdk::{
     instruction::Instruction as SolanaInstruction,
     message::{v0, AddressLookupTableAccount, VersionedMessage},
     pubkey::Pubkey as SolanaPubkey,
-    signature::Signature as SolanaSignature,
-    transaction::VersionedTransaction,
 };
 
 use super::types::{AccountMeta, Instruction, Pubkey, SwapRoute};
@@ -143,6 +141,7 @@ fn parse_lookup_table_addresses(data: &[u8]) -> Result<Vec<SolanaPubkey>, String
 /// * `recent_blockhash` - Recent blockhash for the transaction
 /// * `rpc_url` - RPC endpoint to fetch lookup table accounts
 /// * `use_current_v2_marker` - Whether to include the finalized firmware marker guard
+/// * `allow_transaction_v1` - Whether the selected signer supports Solana v1
 ///
 /// # Returns
 /// Serialized transaction bytes ready for signing
@@ -152,6 +151,7 @@ pub async fn build_transaction_from_route(
     recent_blockhash: Hash,
     rpc_url: &str,
     use_current_v2_marker: bool,
+    allow_transaction_v1: bool,
 ) -> Result<Vec<u8>, String> {
     println!("Building transaction from Titan route");
     println!("   Instructions: {}", route.instructions.len());
@@ -213,18 +213,13 @@ pub async fn build_transaction_from_route(
         lookup_table_accounts.len()
     );
 
-    // Create versioned message
-    let versioned_message = VersionedMessage::V0(message);
-
-    // Create transaction with placeholder signature
-    let transaction = VersionedTransaction {
-        signatures: vec![SolanaSignature::default()],
-        message: versioned_message,
-    };
-
-    // Serialize to bytes
-    let serialized = bincode::serialize(&transaction)
-        .map_err(|e| format!("Failed to serialize transaction: {}", e))?;
+    let serialized = crate::transaction_v1::serialize_with_v1_fallback(
+        VersionedMessage::V0(message),
+        &payer,
+        &instructions,
+        recent_blockhash,
+        allow_transaction_v1,
+    )?;
 
     println!("   ✓ Transaction built: {} bytes", serialized.len());
 

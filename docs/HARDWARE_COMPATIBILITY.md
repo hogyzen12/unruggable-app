@@ -30,3 +30,9 @@ An interrupted setup where the PIN is finalized but the key remains uninitialize
 - OpenSSL is Android-only; the Windows desktop build no longer needs the two historical OpenSSL runtime DLLs.
 
 The app cannot repair a missing kernel COM device. A no-COM case still requires the driver matching the Device Manager Hardware ID, or correction of the cable, hub, or machine USB policy.
+
+## Swap transaction formats
+
+Swap routes stay on legacy/v0 whenever the serialized transaction fits Solana's 1,232-byte packet limit. If a Jupiter, DFlow, or Titan route is larger, the app can rebuild it as a Solana v1 transaction up to 4,096 bytes. This fallback is enabled for software wallets and for CurrentV2 hardware only when `GET_INFO` advertises both `TX_V1=1` and a signing limit above the v0 ceiling. Legacy hardware and Ledger fail before signing with an actionable route-compatibility message.
+
+V1 moves compute limits and priority fees from compute-budget instructions into the message configuration and does not use address lookup tables. The finalized MLH firmware accepts the v1 wire format, but v1 currently follows its blind-review signing path; structured **App markers verified** review remains available for fitting v0 transactions.

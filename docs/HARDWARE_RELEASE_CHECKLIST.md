@@ -16,6 +16,8 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Prefer computer PIN entry throughout connect and transaction flows, with on-wallet entry minimized as a CurrentV2 option.
 - [x] Lock only after five minutes of actual inactivity; changing window focus no longer immediately locks or disconnects the wallet.
 - [x] Add the firmware marker guard only to CurrentV2 tip-bearing transactions, with a 512-slot hardware review window; keep software and legacy transaction shapes unchanged.
+- [x] Keep fitting swaps on v0 and rebuild oversized Jupiter, DFlow, and Titan routes as Solana v1 only when the signer advertises v1 and sufficient signing capacity.
+- [x] Convert v0 compute-budget instructions into v1 transaction configuration and submit v1 as base64 with preflight.
 - [x] Refresh the active hardware address after send, token-send, stake, and swap rather than falling back to the selected software wallet.
 - [x] Require three consecutive failed USB-presence scans before clearing a connected hardware session.
 - [x] Add on-device receive QR show/hide behavior.
@@ -24,8 +26,10 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Make desktop CSS and essential images local rather than CDN-dependent.
 - [x] Desktop check passes.
 - [x] Windows MSVC cross-check passes.
+- [x] Locked Windows MSVC release cross-build passes with the v1 transaction stack.
+- [x] Solana v1 focused tests pass: 6 passed, 0 failed.
 - [x] Focused protocol/serial tests pass: 9 passed, 0 failed.
-- [x] Full desktop suite passes serially: 34 passed, 0 failed, 1 ignored physical test.
+- [x] Full desktop suite passes serially: 40 passed, 0 failed, 1 ignored physical test.
 - [x] Explicit configured-MLH USB identity test passes on macOS without a PIN attempt or signing action.
 
 ## Swap, stake, and RPC qualification
@@ -44,6 +48,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [ ] Confirm the production gateway's supported desktop authentication/access policy and release rate limits.
 - [ ] Complete a small controlled software-wallet swap on macOS.
 - [ ] Complete a small controlled CurrentV2 hardware-wallet swap on macOS.
+- [ ] Complete an oversized CurrentV2 hardware-wallet swap that falls back to v1 and no longer returns `decoded too large`.
 - [ ] Complete a small controlled CurrentV2 hardware-wallet stake on macOS.
 - [ ] Exercise stake-account discovery, deactivate, withdraw, partial-unstake, and merge flows against controlled accounts.
 
@@ -65,6 +70,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [ ] Configured wallet: sign and submit a small controlled transaction after reviewing it on-device.
 - [ ] Configured wallet: complete two consecutive sends without reconnecting and confirm the hardware balance refreshes after each send.
 - [ ] Configured wallet: verify the exact guard/action/Jito/Jules order produces **App markers verified** without separate marker/tip review screens.
+- [ ] Configured wallet: verify an oversized v1 swap clearly enters the firmware's blind-review flow, then signs and submits successfully.
 - [ ] Configured wallet: allow the session to expire, unlock again, disconnect, reconnect, and repeat signing.
 - [ ] Blank wallet: set PIN, unlock, generate, validate/read back the public key, and reconnect.
 - [ ] Interrupted setup: PIN finalized/key uninitialized resumes generation using the existing PIN.

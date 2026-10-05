@@ -635,6 +635,7 @@ mod tests {
         assert_eq!(info.authoritative_unlock_remaining_secs(), Some(0));
         assert_eq!(info.pin_backend.as_deref(), Some("SE050"));
         assert_eq!(info.solana_backend.as_deref(), Some("TROPIC"));
+        assert!(info.supports_transaction_v1);
         assert_eq!(info.max_sign_message_bytes, 4096);
         assert!(!info.reset_supported);
         assert_eq!(info.reset_policy.as_deref(), Some("PERMANENT_LOCKOUT"));

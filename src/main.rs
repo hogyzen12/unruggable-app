@@ -41,6 +41,7 @@ mod titan;
 mod token_utils;
 mod transaction;
 mod transaction_guards;
+mod transaction_v1;
 mod unstaking;
 mod validators;
 mod wallet;
