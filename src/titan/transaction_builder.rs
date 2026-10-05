@@ -17,8 +17,6 @@ use solana_sdk::{
 
 use super::types::{AccountMeta, Instruction, Pubkey, SwapRoute};
 use crate::storage::get_current_jito_settings;
-use crate::timeout;
-use crate::transaction::TransactionClient;
 
 /// Convert Titan's 32-byte pubkey to Solana Pubkey
 fn titan_pubkey_to_solana(pubkey: &Pubkey) -> Result<SolanaPubkey, String> {
@@ -159,22 +157,6 @@ pub async fn build_transaction_from_route(
     println!("   Instructions: {}", route.instructions.len());
     println!("   Lookup tables: {}", route.address_lookup_tables.len());
 
-    // Get current slot and build timeout instruction (FIRST)
-    let tx_client = TransactionClient::new(Some(rpc_url));
-    let current_slot = tx_client
-        .get_current_slot()
-        .await
-        .map_err(|e| format!("Failed to get current slot: {}", e))?;
-    let timeout_ix = timeout::build_timeout_instruction_from_current(
-        current_slot,
-        timeout::DEFAULT_SLOT_WINDOW,
-    )?;
-    println!(
-        "   Added timeout protection: current_slot={}, max_slot={}",
-        current_slot,
-        current_slot + timeout::DEFAULT_SLOT_WINDOW
-    );
-
     // Convert Titan instructions to Solana instructions
     let titan_instructions: Result<Vec<SolanaInstruction>, String> = route
         .instructions
@@ -188,18 +170,12 @@ pub async fn build_transaction_from_route(
         titan_instructions.len()
     );
 
-    // Build instructions with timeout FIRST
-    let mut instructions = vec![timeout_ix];
-    instructions.extend(titan_instructions);
+    let mut instructions = titan_instructions;
 
-    // Add the exact tip bundle recognized by the finalized firmware.
+    // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        crate::transaction_guards::append_jito_and_jules_tips(
-            &mut instructions,
-            &payer,
-            current_slot,
-        )?;
+        crate::transaction_guards::append_jito_and_jules_tips(&mut instructions, &payer)?;
     }
 
     // Fetch lookup table accounts if any are provided

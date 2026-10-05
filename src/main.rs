@@ -37,7 +37,6 @@ mod signing;
 mod sns;
 mod staking;
 mod storage;
-mod timeout;
 mod titan;
 mod token_utils;
 mod transaction;

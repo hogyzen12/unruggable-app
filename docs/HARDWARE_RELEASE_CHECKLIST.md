@@ -15,6 +15,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Invalidate uncertain serial sessions after timeout, cancellation, disconnect, or malformed/oversized responses.
 - [x] Prefer computer PIN entry throughout connect and transaction flows, with on-wallet entry minimized as a CurrentV2 option.
 - [x] Lock only after five minutes of actual inactivity; changing window focus no longer immediately locks or disconnects the wallet.
+- [x] Remove the custom on-chain slot guard and its transaction-construction `getSlot` dependency from every send, swap, stake, and unstake path.
 - [x] Add on-device receive QR show/hide behavior.
 - [x] Add Windows COM, USB-ID, open-error, PnP/no-COM, and manual-port diagnostics.
 - [x] Update to `serialport` 4.9 and remove the desktop Windows OpenSSL build/runtime requirement.
@@ -22,7 +23,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Desktop check passes.
 - [x] Windows MSVC cross-check passes.
 - [x] Focused protocol/serial tests pass: 9 passed, 0 failed.
-- [x] Full desktop suite passes: 36 passed, 0 failed, 1 ignored physical test.
+- [x] Full desktop suite passes serially: 33 passed, 0 failed, 1 ignored physical test.
 - [x] Explicit configured-MLH USB identity test passes on macOS without a PIN attempt or signing action.
 
 ## Swap, stake, and RPC qualification
@@ -31,7 +32,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Route DFlow quote and instruction requests through the managed API.
 - [x] Route Titan route requests through the managed API and remove embedded provider credentials/direct WebSocket code.
 - [x] Use managed RPC for swap transaction construction/submission by default while preserving custom RPC selection.
-- [x] Match the finalized firmware/pure-UX tip bundle: deterministic 4,200-lamport Jito tip plus 100,000-lamport Jules tip.
+- [x] Match the finalized tip amounts and account allow-list: deterministic 4,200-lamport Jito tip plus 100,000-lamport Jules tip, selected without a slot RPC call.
 - [x] Isolate provider failures so a 502 from one provider cannot replace a valid route from another.
 - [x] Build Jupiter swaps from managed gateway instructions and submit them through the configured RPC instead of Ultra execute.
 - [x] Verify live Jupiter quote/order/build and DFlow quote responses from the production gateway.
@@ -60,6 +61,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [ ] Configured wallet: expand the optional on-wallet PIN action and open an authenticated session.
 - [ ] Configured wallet: show receive QR, verify it matches the app address, close it, and return to the wallet home screen.
 - [ ] Configured wallet: sign and submit a small controlled transaction after reviewing it on-device.
+- [ ] Configured wallet: verify the removed slot guard is absent and the Jito/Jules transfers are shown explicitly with the expected amounts.
 - [ ] Configured wallet: allow the session to expire, unlock again, disconnect, reconnect, and repeat signing.
 - [ ] Blank wallet: set PIN, unlock, generate, validate/read back the public key, and reconnect.
 - [ ] Interrupted setup: PIN finalized/key uninitialized resumes generation using the existing PIN.

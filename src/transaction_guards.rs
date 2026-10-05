@@ -27,9 +27,8 @@ pub struct TipSummary {
 pub fn append_jito_and_jules_tips(
     instructions: &mut Vec<Instruction>,
     payer: &Pubkey,
-    current_slot: u64,
 ) -> Result<TipSummary, String> {
-    let jito_address = select_jito_tip_account(payer, current_slot)?;
+    let jito_address = select_jito_tip_account(payer)?;
     let jules_address = Pubkey::from_str(JULES_TIP_ADDRESS)
         .map_err(|error| format!("Invalid Jules tip address: {error}"))?;
 
@@ -52,44 +51,18 @@ pub fn append_jito_and_jules_tips(
     })
 }
 
-pub fn select_jito_tip_account(payer: &Pubkey, current_slot: u64) -> Result<Pubkey, String> {
+pub fn select_jito_tip_account(payer: &Pubkey) -> Result<Pubkey, String> {
     let payer_bytes = payer.to_bytes();
     let payer_entropy = u64::from_le_bytes(
         payer_bytes[..8]
             .try_into()
             .expect("a Solana public key always contains eight bytes"),
     );
-    let index = (payer_entropy ^ current_slot) as usize % JITO_TIP_ADDRESSES.len();
+    // Keep selection deterministic without adding an RPC slot dependency or an
+    // on-chain slot-guard instruction to the transaction.
+    let index = payer_entropy as usize % JITO_TIP_ADDRESSES.len();
     Pubkey::from_str(JITO_TIP_ADDRESSES[index])
         .map_err(|error| format!("Invalid Jito tip address: {error}"))
-}
-
-#[allow(dead_code)]
-pub async fn fetch_current_slot(rpc_url: &str) -> Result<u64, String> {
-    let response = reqwest::Client::new()
-        .post(rpc_url)
-        .json(&serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "getSlot",
-            "params": [{ "commitment": "confirmed" }]
-        }))
-        .send()
-        .await
-        .map_err(|error| format!("Failed to fetch current slot: {error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("Current-slot RPC error: {}", response.status()));
-    }
-    let json: serde_json::Value = response
-        .json()
-        .await
-        .map_err(|error| format!("Failed to parse current slot: {error}"))?;
-    if let Some(error) = json.get("error") {
-        return Err(format!("Current-slot RPC error: {error}"));
-    }
-    json.get("result")
-        .and_then(serde_json::Value::as_u64)
-        .ok_or_else(|| format!("Unexpected current-slot response: {json}"))
 }
 
 #[cfg(test)]
@@ -98,10 +71,10 @@ mod tests {
     use solana_system_interface::instruction::SystemInstruction;
 
     #[test]
-    fn matches_firmware_and_new_app_tip_bundle() {
+    fn matches_configured_tip_amounts_and_addresses() {
         let payer = Pubkey::new_unique();
         let mut instructions = Vec::new();
-        let summary = append_jito_and_jules_tips(&mut instructions, &payer, 1_000).unwrap();
+        let summary = append_jito_and_jules_tips(&mut instructions, &payer).unwrap();
 
         assert_eq!(instructions.len(), 2);
         assert!(JITO_TIP_ADDRESSES.contains(&summary.jito_address.to_string().as_str()));

@@ -35,7 +35,6 @@ enum SwapUpdate {
     HardwareApprovalRequired(bool),
     Result(SwapResult),
 }
-use crate::timeout;
 use crate::titan::build_transaction_from_route;
 use crate::titan::SwapRoute as TitanSwapRoute;
 use solana_sdk::{
@@ -328,7 +327,6 @@ async fn fetch_lookup_tables(
 async fn build_transaction_from_jupiter_build(
     build: JupiterBuildResponse,
     payer: SolanaPubkey,
-    rpc_url: &str,
 ) -> Result<Vec<u8>, String> {
     let JupiterBuildResponse {
         compute_budget_instructions,
@@ -340,16 +338,7 @@ async fn build_transaction_from_jupiter_build(
         blockhash_with_metadata,
     } = build;
 
-    let tx_client = TransactionClient::new(Some(rpc_url));
-    let current_slot = tx_client
-        .get_current_slot()
-        .await
-        .map_err(|error| format!("Failed to get current slot: {error}"))?;
-    let timeout_ix = timeout::build_timeout_instruction_from_current(
-        current_slot,
-        timeout::DEFAULT_SLOT_WINDOW,
-    )?;
-    let mut instructions = vec![timeout_ix];
+    let mut instructions = Vec::new();
     for instruction in compute_budget_instructions {
         instructions.push(swap_instruction_to_solana(&instruction)?);
     }
@@ -364,11 +353,7 @@ async fn build_transaction_from_jupiter_build(
         instructions.push(swap_instruction_to_solana(&instruction)?);
     }
     if get_current_jito_settings().jito_tx {
-        crate::transaction_guards::append_jito_and_jules_tips(
-            &mut instructions,
-            &payer,
-            current_slot,
-        )?;
+        crate::transaction_guards::append_jito_and_jules_tips(&mut instructions, &payer)?;
     }
 
     let mut lookup_entries = addresses_by_lookup_table_address
@@ -420,25 +405,14 @@ async fn build_transaction_from_instructions(
 ) -> Result<Vec<u8>, String> {
     println!("🔧 Building transaction from swap instructions");
 
-    // Get current blockhash and slot
+    // Get current blockhash.
     let tx_client = TransactionClient::new(Some(rpc_url));
     let recent_blockhash = tx_client
         .get_recent_blockhash()
         .await
         .map_err(|e| format!("Failed to get blockhash: {}", e))?;
-    let current_slot = tx_client
-        .get_current_slot()
-        .await
-        .map_err(|e| format!("Failed to get current slot: {}", e))?;
-
-    // Build timeout instruction (FIRST)
-    let timeout_ix = timeout::build_timeout_instruction_from_current(
-        current_slot,
-        timeout::DEFAULT_SLOT_WINDOW,
-    )?;
-
     // Convert all instructions to Solana instructions
-    let mut all_instructions = vec![timeout_ix];
+    let mut all_instructions = Vec::new();
 
     // Add compute budget instructions
     for ix in compute_budget_ixs {
@@ -464,11 +438,7 @@ async fn build_transaction_from_instructions(
     }
 
     if get_current_jito_settings().jito_tx {
-        crate::transaction_guards::append_jito_and_jules_tips(
-            &mut all_instructions,
-            &payer,
-            current_slot,
-        )?;
+        crate::transaction_guards::append_jito_and_jules_tips(&mut all_instructions, &payer)?;
     }
 
     println!("   Total instructions: {}", all_instructions.len());
@@ -2542,13 +2512,8 @@ pub fn SwapModal(
                                     return;
                                 }
                             };
-                            let rpc_url = custom_rpc_jupiter
-                                .as_deref()
-                                .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
                             let unsigned_tx_bytes =
-                                match build_transaction_from_jupiter_build(build, payer, rpc_url)
-                                    .await
-                                {
+                                match build_transaction_from_jupiter_build(build, payer).await {
                                     Ok(bytes) => bytes,
                                     Err(error) => {
                                         swapping.set(false);

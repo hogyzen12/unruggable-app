@@ -208,14 +208,12 @@ impl BonkStakingClient {
         );
         instructions.push(stake_ix);
 
-        // Add the exact tip bundle recognized by the finalized firmware.
+        // Add the configured Jito and Jules tips.
         let jito_settings = get_current_jito_settings();
         if jito_settings.jito_tx {
-            let current_slot = crate::transaction_guards::fetch_current_slot(&self.rpc_url).await?;
             crate::transaction_guards::append_jito_and_jules_tips(
                 &mut instructions,
                 &user_pubkey,
-                current_slot,
             )?;
         }
 

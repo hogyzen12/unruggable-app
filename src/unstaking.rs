@@ -210,9 +210,8 @@ fn build_instant_unstake_instruction(
 fn add_jito_tips(
     from_pubkey: &Pubkey,
     instructions: &mut Vec<Instruction>,
-    current_slot: u64,
 ) -> Result<(), Box<dyn Error>> {
-    crate::transaction_guards::append_jito_and_jules_tips(instructions, from_pubkey, current_slot)
+    crate::transaction_guards::append_jito_and_jules_tips(instructions, from_pubkey)
         .map_err(|error| -> Box<dyn Error> { error.into() })?;
     Ok(())
 }
@@ -280,14 +279,10 @@ pub async fn instant_unstake_stake_account(
     ));
     instructions.push(instant_unstake_ix);
 
-    // Add the exact tip bundle recognized by the finalized firmware.
+    // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        let current_slot = transaction_client
-            .get_current_slot()
-            .await
-            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {e}")))?;
-        add_jito_tips(&user_pubkey, &mut instructions, current_slot)
+        add_jito_tips(&user_pubkey, &mut instructions)
             .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
@@ -463,14 +458,10 @@ pub async fn normal_unstake_stake_account(
     // Add the main deactivate instruction
     instructions.push(deactivate_ix);
 
-    // Add the exact tip bundle recognized by the finalized firmware.
+    // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        let current_slot = transaction_client
-            .get_current_slot()
-            .await
-            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {e}")))?;
-        add_jito_tips(&user_pubkey, &mut instructions, current_slot)
+        add_jito_tips(&user_pubkey, &mut instructions)
             .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
@@ -719,14 +710,10 @@ pub async fn partial_unstake_stake_account(
     let deactivate_ix = build_deactivate_stake_instruction(&new_stake_pubkey, &user_pubkey)?;
     instructions.push(deactivate_ix);
 
-    // Add the exact tip bundle recognized by the finalized firmware.
+    // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        let current_slot = transaction_client
-            .get_current_slot()
-            .await
-            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {e}")))?;
-        add_jito_tips(&user_pubkey, &mut instructions, current_slot)
+        add_jito_tips(&user_pubkey, &mut instructions)
             .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
@@ -961,14 +948,10 @@ pub async fn withdraw_stake_account(
     // Add the main withdraw instruction
     instructions.push(withdraw_ix);
 
-    // Add the exact tip bundle recognized by the finalized firmware.
+    // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        let current_slot = transaction_client
-            .get_current_slot()
-            .await
-            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {e}")))?;
-        add_jito_tips(&user_pubkey, &mut instructions, current_slot)
+        add_jito_tips(&user_pubkey, &mut instructions)
             .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
