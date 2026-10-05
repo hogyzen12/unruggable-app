@@ -266,6 +266,10 @@ impl TransactionClient {
         }
     }
 
+    pub fn rpc_url(&self) -> &str {
+        &self.rpc_url
+    }
+
     /// Initialize TPU in the background (non-blocking)
     /// Call this at app startup to avoid lag on first transaction
     /// DISABLED ON iOS: iOS does not support TPU background spawning
@@ -464,7 +468,12 @@ impl TransactionClient {
 
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications to bulk transaction");
-            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+            self.apply_jito_modifications(
+                &from_pubkey,
+                &mut instructions,
+                signer.uses_current_v2_review().await,
+            )
+            .await?;
         }
 
         // Get recent blockhash
@@ -740,7 +749,12 @@ impl TransactionClient {
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
-            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+            self.apply_jito_modifications(
+                &from_pubkey,
+                &mut instructions,
+                signer.uses_current_v2_review().await,
+            )
+            .await?;
         }
 
         // Create a message with all instructions
@@ -823,7 +837,12 @@ impl TransactionClient {
         let mut instructions = vec![transfer_instruction];
 
         if jito_settings.jito_tx {
-            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+            self.apply_jito_modifications(
+                &from_pubkey,
+                &mut instructions,
+                signer.uses_current_v2_review().await,
+            )
+            .await?;
         }
 
         let mut message = Message::new(&instructions, Some(&from_pubkey));
@@ -962,7 +981,12 @@ impl TransactionClient {
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
-            self.apply_jito_modifications(&from_pubkey, &mut instructions)?;
+            self.apply_jito_modifications(
+                &from_pubkey,
+                &mut instructions,
+                signer.uses_current_v2_review().await,
+            )
+            .await?;
         }
 
         // Create a message with all instructions
@@ -1152,13 +1176,20 @@ impl TransactionClient {
     }
 
     //Jito tx options
-    fn apply_jito_modifications(
+    async fn apply_jito_modifications(
         &self,
         from_pubkey: &Pubkey,
         instructions: &mut Vec<solana_sdk::instruction::Instruction>,
+        use_current_v2_marker: bool,
     ) -> Result<(), Box<dyn Error>> {
-        crate::transaction_guards::append_jito_and_jules_tips(instructions, from_pubkey)
-            .map_err(|error| -> Box<dyn Error> { error.into() })?;
+        crate::transaction_guards::apply_jito_and_jules_tips(
+            instructions,
+            from_pubkey,
+            &self.rpc_url,
+            use_current_v2_marker,
+        )
+        .await
+        .map_err(|error| -> Box<dyn Error> { error.into() })?;
         Ok(())
     }
 }

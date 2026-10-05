@@ -207,12 +207,20 @@ fn build_instant_unstake_instruction(
 }
 
 /// Add Jito tip instructions
-fn add_jito_tips(
+async fn add_jito_tips(
     from_pubkey: &Pubkey,
     instructions: &mut Vec<Instruction>,
+    transaction_client: &TransactionClient,
+    use_current_v2_marker: bool,
 ) -> Result<(), Box<dyn Error>> {
-    crate::transaction_guards::append_jito_and_jules_tips(instructions, from_pubkey)
-        .map_err(|error| -> Box<dyn Error> { error.into() })?;
+    crate::transaction_guards::apply_jito_and_jules_tips(
+        instructions,
+        from_pubkey,
+        transaction_client.rpc_url(),
+        use_current_v2_marker,
+    )
+    .await
+    .map_err(|error| -> Box<dyn Error> { error.into() })?;
     Ok(())
 }
 
@@ -282,8 +290,14 @@ pub async fn instant_unstake_stake_account(
     // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        add_jito_tips(&user_pubkey, &mut instructions)
-            .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
+        add_jito_tips(
+            &user_pubkey,
+            &mut instructions,
+            &transaction_client,
+            signer.uses_current_v2_review().await,
+        )
+        .await
+        .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
     // Get recent blockhash
@@ -461,8 +475,14 @@ pub async fn normal_unstake_stake_account(
     // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        add_jito_tips(&user_pubkey, &mut instructions)
-            .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
+        add_jito_tips(
+            &user_pubkey,
+            &mut instructions,
+            &transaction_client,
+            signer.uses_current_v2_review().await,
+        )
+        .await
+        .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
     // Get recent blockhash
@@ -713,8 +733,14 @@ pub async fn partial_unstake_stake_account(
     // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        add_jito_tips(&user_pubkey, &mut instructions)
-            .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
+        add_jito_tips(
+            &user_pubkey,
+            &mut instructions,
+            &transaction_client,
+            signer.uses_current_v2_review().await,
+        )
+        .await
+        .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
     // Get recent blockhash
@@ -951,8 +977,14 @@ pub async fn withdraw_stake_account(
     // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        add_jito_tips(&user_pubkey, &mut instructions)
-            .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
+        add_jito_tips(
+            &user_pubkey,
+            &mut instructions,
+            &transaction_client,
+            signer.uses_current_v2_review().await,
+        )
+        .await
+        .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
     // Get recent blockhash

@@ -3,7 +3,7 @@
 use crate::components::common::Token;
 use crate::config::tokens::get_token_catalog;
 use crate::gateway;
-use crate::hardware::{AuthMode, HardwareWallet};
+use crate::hardware::{AuthMode, Esp32Capability, HardwareWallet};
 use crate::prices;
 use crate::signing::hardware::HardwareSigner;
 use crate::signing::software::SoftwareSigner;
@@ -214,6 +214,13 @@ async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
     }
 }
 
+async fn uses_current_v2_marker(wallet: &Option<Arc<HardwareWallet>>) -> bool {
+    match wallet.as_ref() {
+        Some(wallet) => wallet.get_esp32_capability().await == Some(Esp32Capability::CurrentV2),
+        None => false,
+    }
+}
+
 /// Convert SwapInstruction to Solana Instruction
 fn swap_instruction_to_solana(swap_ix: &SwapInstruction) -> Result<SolanaInstruction, String> {
     let program_id = SolanaPubkey::from_str(&swap_ix.program_id)
@@ -327,6 +334,8 @@ async fn fetch_lookup_tables(
 async fn build_transaction_from_jupiter_build(
     build: JupiterBuildResponse,
     payer: SolanaPubkey,
+    rpc_url: &str,
+    use_current_v2_marker: bool,
 ) -> Result<Vec<u8>, String> {
     let JupiterBuildResponse {
         compute_budget_instructions,
@@ -353,7 +362,13 @@ async fn build_transaction_from_jupiter_build(
         instructions.push(swap_instruction_to_solana(&instruction)?);
     }
     if get_current_jito_settings().jito_tx {
-        crate::transaction_guards::append_jito_and_jules_tips(&mut instructions, &payer)?;
+        crate::transaction_guards::apply_jito_and_jules_tips(
+            &mut instructions,
+            &payer,
+            rpc_url,
+            use_current_v2_marker,
+        )
+        .await?;
     }
 
     let mut lookup_entries = addresses_by_lookup_table_address
@@ -401,7 +416,7 @@ async fn build_transaction_from_instructions(
     lookup_table_addresses: Vec<String>,
     payer: SolanaPubkey,
     rpc_url: &str,
-    _is_hardware_wallet: bool,
+    use_current_v2_marker: bool,
 ) -> Result<Vec<u8>, String> {
     println!("🔧 Building transaction from swap instructions");
 
@@ -438,7 +453,13 @@ async fn build_transaction_from_instructions(
     }
 
     if get_current_jito_settings().jito_tx {
-        crate::transaction_guards::append_jito_and_jules_tips(&mut all_instructions, &payer)?;
+        crate::transaction_guards::apply_jito_and_jules_tips(
+            &mut all_instructions,
+            &payer,
+            rpc_url,
+            use_current_v2_marker,
+        )
+        .await?;
     }
 
     println!("   Total instructions: {}", all_instructions.len());
@@ -2207,13 +2228,13 @@ pub fn SwapModal(
                             let rpc_url = custom_rpc_titan
                                 .as_deref()
                                 .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
-                            let is_hardware = hw_clone.is_some();
+                            let use_current_v2_marker = uses_current_v2_marker(&hw_clone).await;
                             let unsigned_tx_bytes = match build_transaction_from_route(
                                 &titan_route,
                                 user_pubkey,
                                 recent_blockhash,
                                 rpc_url,
-                                is_hardware,
+                                use_current_v2_marker,
                             )
                             .await
                             {
@@ -2512,17 +2533,27 @@ pub fn SwapModal(
                                     return;
                                 }
                             };
-                            let unsigned_tx_bytes =
-                                match build_transaction_from_jupiter_build(build, payer).await {
-                                    Ok(bytes) => bytes,
-                                    Err(error) => {
-                                        swapping.set(false);
-                                        error_message.set(Some(format!(
-                                            "Could not prepare the Jupiter transaction: {error}"
-                                        )));
-                                        return;
-                                    }
-                                };
+                            let rpc_url = custom_rpc_jupiter
+                                .as_deref()
+                                .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
+                            let use_current_v2_marker = uses_current_v2_marker(&hw_clone).await;
+                            let unsigned_tx_bytes = match build_transaction_from_jupiter_build(
+                                build,
+                                payer,
+                                rpc_url,
+                                use_current_v2_marker,
+                            )
+                            .await
+                            {
+                                Ok(bytes) => bytes,
+                                Err(error) => {
+                                    swapping.set(false);
+                                    error_message.set(Some(format!(
+                                        "Could not prepare the Jupiter transaction: {error}"
+                                    )));
+                                    return;
+                                }
+                            };
                             let unsigned_tx_b64 = BASE64_STANDARD.encode(unsigned_tx_bytes);
 
                             // Determine if hardware wallet
@@ -2757,9 +2788,9 @@ pub fn SwapModal(
                             let rpc_url = custom_rpc_dflow
                                 .as_deref()
                                 .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
-                            let is_hardware = hw_clone.is_some();
+                            let use_current_v2_marker = uses_current_v2_marker(&hw_clone).await;
 
-                            // Build transaction using unified builder (includes timeout + Jules tip unless hardware wallet)
+                            // Build the route and add the CurrentV2 marker bundle when applicable.
                             let unsigned_tx_bytes = match build_transaction_from_instructions(
                                 instructions.compute_budget_instructions,
                                 instructions.setup_instructions,
@@ -2769,7 +2800,7 @@ pub fn SwapModal(
                                 instructions.address_lookup_table_addresses,
                                 user_pubkey,
                                 rpc_url,
-                                is_hardware,
+                                use_current_v2_marker,
                             )
                             .await
                             {

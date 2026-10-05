@@ -142,7 +142,7 @@ fn parse_lookup_table_addresses(data: &[u8]) -> Result<Vec<SolanaPubkey>, String
 /// * `payer` - The transaction fee payer pubkey
 /// * `recent_blockhash` - Recent blockhash for the transaction
 /// * `rpc_url` - RPC endpoint to fetch lookup table accounts
-/// * `is_hardware_wallet` - Whether a hardware wallet is being used
+/// * `use_current_v2_marker` - Whether to include the finalized firmware marker guard
 ///
 /// # Returns
 /// Serialized transaction bytes ready for signing
@@ -151,7 +151,7 @@ pub async fn build_transaction_from_route(
     payer: SolanaPubkey,
     recent_blockhash: Hash,
     rpc_url: &str,
-    _is_hardware_wallet: bool,
+    use_current_v2_marker: bool,
 ) -> Result<Vec<u8>, String> {
     println!("Building transaction from Titan route");
     println!("   Instructions: {}", route.instructions.len());
@@ -175,7 +175,13 @@ pub async fn build_transaction_from_route(
     // Add the configured Jito and Jules tips.
     let jito_settings = get_current_jito_settings();
     if jito_settings.jito_tx {
-        crate::transaction_guards::append_jito_and_jules_tips(&mut instructions, &payer)?;
+        crate::transaction_guards::apply_jito_and_jules_tips(
+            &mut instructions,
+            &payer,
+            rpc_url,
+            use_current_v2_marker,
+        )
+        .await?;
     }
 
     // Fetch lookup table accounts if any are provided

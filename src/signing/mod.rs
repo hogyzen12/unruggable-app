@@ -30,6 +30,11 @@ pub trait TransactionSigner: Send + Sync {
     fn is_hardware(&self) -> bool {
         false
     }
+
+    /// Whether the signer uses the finalized CurrentV2 on-device review policy.
+    async fn uses_current_v2_review(&self) -> bool {
+        false
+    }
 }
 
 /// Enum to hold different signer types
@@ -86,6 +91,13 @@ impl TransactionSigner for SignerType {
         match self {
             SignerType::Software(s) => s.is_hardware(),
             SignerType::Hardware(h) => h.is_hardware(),
+        }
+    }
+
+    async fn uses_current_v2_review(&self) -> bool {
+        match self {
+            SignerType::Software(s) => s.uses_current_v2_review().await,
+            SignerType::Hardware(h) => h.uses_current_v2_review().await,
         }
     }
 }

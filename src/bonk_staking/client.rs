@@ -211,10 +211,13 @@ impl BonkStakingClient {
         // Add the configured Jito and Jules tips.
         let jito_settings = get_current_jito_settings();
         if jito_settings.jito_tx {
-            crate::transaction_guards::append_jito_and_jules_tips(
+            crate::transaction_guards::apply_jito_and_jules_tips(
                 &mut instructions,
                 &user_pubkey,
-            )?;
+                &self.rpc_url,
+                signer.uses_current_v2_review().await,
+            )
+            .await?;
         }
 
         // Get recent blockhash

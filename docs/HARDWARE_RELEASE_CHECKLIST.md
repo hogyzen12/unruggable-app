@@ -15,7 +15,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Invalidate uncertain serial sessions after timeout, cancellation, disconnect, or malformed/oversized responses.
 - [x] Prefer computer PIN entry throughout connect and transaction flows, with on-wallet entry minimized as a CurrentV2 option.
 - [x] Lock only after five minutes of actual inactivity; changing window focus no longer immediately locks or disconnects the wallet.
-- [x] Remove the custom on-chain slot guard and its transaction-construction `getSlot` dependency from every send, swap, stake, and unstake path.
+- [x] Add the firmware marker guard only to CurrentV2 tip-bearing transactions, with a 512-slot hardware review window; keep software and legacy transaction shapes unchanged.
 - [x] Refresh the active hardware address after send, token-send, stake, and swap rather than falling back to the selected software wallet.
 - [x] Require three consecutive failed USB-presence scans before clearing a connected hardware session.
 - [x] Add on-device receive QR show/hide behavior.
@@ -25,7 +25,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Desktop check passes.
 - [x] Windows MSVC cross-check passes.
 - [x] Focused protocol/serial tests pass: 9 passed, 0 failed.
-- [x] Full desktop suite passes serially: 33 passed, 0 failed, 1 ignored physical test.
+- [x] Full desktop suite passes serially: 34 passed, 0 failed, 1 ignored physical test.
 - [x] Explicit configured-MLH USB identity test passes on macOS without a PIN attempt or signing action.
 
 ## Swap, stake, and RPC qualification
@@ -64,7 +64,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [ ] Configured wallet: show receive QR, verify it matches the app address, close it, and return to the wallet home screen.
 - [ ] Configured wallet: sign and submit a small controlled transaction after reviewing it on-device.
 - [ ] Configured wallet: complete two consecutive sends without reconnecting and confirm the hardware balance refreshes after each send.
-- [ ] Configured wallet: verify the removed slot guard is absent and the Jito/Jules transfers are shown explicitly with the expected amounts.
+- [ ] Configured wallet: verify the exact guard/action/Jito/Jules order produces **App markers verified** without separate marker/tip review screens.
 - [ ] Configured wallet: allow the session to expire, unlock again, disconnect, reconnect, and repeat signing.
 - [ ] Blank wallet: set PIN, unlock, generate, validate/read back the public key, and reconnect.
 - [ ] Interrupted setup: PIN finalized/key uninitialized resumes generation using the existing PIN.

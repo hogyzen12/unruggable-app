@@ -150,13 +150,20 @@ impl StakingClient {
     }
 
     /// Apply Jito modifications to staking instructions (same as transfer logic)
-    fn apply_jito_modifications(
+    async fn apply_jito_modifications(
         &self,
         from_pubkey: &Pubkey,
         instructions: &mut Vec<solana_sdk::instruction::Instruction>,
+        use_current_v2_marker: bool,
     ) -> Result<(), Box<dyn Error>> {
-        crate::transaction_guards::append_jito_and_jules_tips(instructions, from_pubkey)
-            .map_err(|error| -> Box<dyn Error> { error.into() })?;
+        crate::transaction_guards::apply_jito_and_jules_tips(
+            instructions,
+            from_pubkey,
+            &self.rpc_url,
+            use_current_v2_marker,
+        )
+        .await
+        .map_err(|error| -> Box<dyn Error> { error.into() })?;
         Ok(())
     }
 
@@ -315,13 +322,18 @@ impl StakingClient {
         // Add the configured Jito and Jules tips.
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications to staking transaction");
-            self.apply_jito_modifications(&authority_pubkey, &mut instructions)
-                .map_err(|e| {
-                    StakingError::TransactionFailed(format!(
-                        "Failed to apply Jito modifications: {}",
-                        e
-                    ))
-                })?;
+            self.apply_jito_modifications(
+                &authority_pubkey,
+                &mut instructions,
+                signer.uses_current_v2_review().await,
+            )
+            .await
+            .map_err(|e| {
+                StakingError::TransactionFailed(format!(
+                    "Failed to apply Jito modifications: {}",
+                    e
+                ))
+            })?;
         }
 
         // Create a message with all instructions
@@ -753,7 +765,12 @@ pub async fn merge_stake_accounts(
     if jito_settings.jito_tx {
         println!("Applying Jito modifications");
         staking_client
-            .apply_jito_modifications(&authority_pubkey, &mut instructions)
+            .apply_jito_modifications(
+                &authority_pubkey,
+                &mut instructions,
+                signer.uses_current_v2_review().await,
+            )
+            .await
             .map_err(|e| StakingError::TransactionFailed(format!("Jito error: {}", e)))?;
     }
 

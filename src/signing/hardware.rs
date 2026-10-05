@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::hardware::HardwareWallet;
+use crate::hardware::{Esp32Capability, HardwareWallet};
 use crate::signing::TransactionSigner;
 use async_trait::async_trait;
 use std::error::Error;
@@ -55,5 +55,9 @@ impl TransactionSigner for HardwareSigner {
 
     fn is_hardware(&self) -> bool {
         true
+    }
+
+    async fn uses_current_v2_review(&self) -> bool {
+        self.wallet.get_esp32_capability().await == Some(Esp32Capability::CurrentV2)
     }
 }
