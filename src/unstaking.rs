@@ -210,23 +210,10 @@ fn build_instant_unstake_instruction(
 fn add_jito_tips(
     from_pubkey: &Pubkey,
     instructions: &mut Vec<Instruction>,
+    current_slot: u64,
 ) -> Result<(), Box<dyn Error>> {
-    let jito_address1 = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
-    let jito_address2 = Pubkey::from_str("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL")?;
-
-    // system_instruction already returns solana_sdk::Instruction, use directly
-    instructions.push(system_instruction::transfer(
-        from_pubkey,
-        &jito_address1,
-        100_000,
-    ));
-    instructions.push(system_instruction::transfer(
-        from_pubkey,
-        &jito_address2,
-        100_000,
-    ));
-
-    println!("Added Jito tip instructions");
+    crate::transaction_guards::append_jito_and_jules_tips(instructions, from_pubkey, current_slot)
+        .map_err(|error| -> Box<dyn Error> { error.into() })?;
     Ok(())
 }
 
@@ -293,15 +280,15 @@ pub async fn instant_unstake_stake_account(
     ));
     instructions.push(instant_unstake_ix);
 
-    // Add Jito tips if enabled AND not using hardware wallet
+    // Add the exact tip bundle recognized by the finalized firmware.
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx && hardware_wallet.is_none() {
-        println!("Adding Jito tips");
-        if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
-            println!("Jito tips failed: {}, continuing", e);
-        }
-    } else if hardware_wallet.is_some() {
-        println!("Hardware wallet detected - skipping Jito tips");
+    if jito_settings.jito_tx {
+        let current_slot = transaction_client
+            .get_current_slot()
+            .await
+            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {e}")))?;
+        add_jito_tips(&user_pubkey, &mut instructions, current_slot)
+            .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
     // Get recent blockhash
@@ -476,15 +463,15 @@ pub async fn normal_unstake_stake_account(
     // Add the main deactivate instruction
     instructions.push(deactivate_ix);
 
-    // Add Jito tips if enabled AND not using hardware wallet
+    // Add the exact tip bundle recognized by the finalized firmware.
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx && hardware_wallet.is_none() {
-        println!("Adding Jito tips");
-        if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
-            println!("Jito tips failed: {}, continuing", e);
-        }
-    } else if hardware_wallet.is_some() {
-        println!("Hardware wallet detected - skipping Jito tips");
+    if jito_settings.jito_tx {
+        let current_slot = transaction_client
+            .get_current_slot()
+            .await
+            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {e}")))?;
+        add_jito_tips(&user_pubkey, &mut instructions, current_slot)
+            .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
     // Get recent blockhash
@@ -732,15 +719,15 @@ pub async fn partial_unstake_stake_account(
     let deactivate_ix = build_deactivate_stake_instruction(&new_stake_pubkey, &user_pubkey)?;
     instructions.push(deactivate_ix);
 
-    // Add Jito tips if enabled AND not using hardware wallet
+    // Add the exact tip bundle recognized by the finalized firmware.
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx && hardware_wallet.is_none() {
-        println!("Adding Jito tips");
-        if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
-            println!("Jito tips failed: {}, continuing", e);
-        }
-    } else if hardware_wallet.is_some() {
-        println!("Hardware wallet detected - skipping Jito tips");
+    if jito_settings.jito_tx {
+        let current_slot = transaction_client
+            .get_current_slot()
+            .await
+            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {e}")))?;
+        add_jito_tips(&user_pubkey, &mut instructions, current_slot)
+            .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
     // Get recent blockhash
@@ -974,15 +961,15 @@ pub async fn withdraw_stake_account(
     // Add the main withdraw instruction
     instructions.push(withdraw_ix);
 
-    // Add Jito tips if enabled AND not using hardware wallet
+    // Add the exact tip bundle recognized by the finalized firmware.
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx && hardware_wallet.is_none() {
-        println!("Adding Jito tips");
-        if let Err(e) = add_jito_tips(&user_pubkey, &mut instructions) {
-            println!("Jito tips failed: {}, continuing", e);
-        }
-    } else if hardware_wallet.is_some() {
-        println!("Hardware wallet detected - skipping Jito tips");
+    if jito_settings.jito_tx {
+        let current_slot = transaction_client
+            .get_current_slot()
+            .await
+            .map_err(|e| StakingError::RpcError(format!("Failed to get current slot: {e}")))?;
+        add_jito_tips(&user_pubkey, &mut instructions, current_slot)
+            .map_err(|e| StakingError::TransactionFailed(format!("Jito tip error: {e}")))?;
     }
 
     // Get recent blockhash

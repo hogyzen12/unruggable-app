@@ -8,6 +8,7 @@ use crate::prices;
 use crate::signing::hardware::HardwareSigner;
 use crate::signing::software::SoftwareSigner;
 use crate::signing::TransactionSigner;
+use crate::storage::get_current_jito_settings;
 use crate::transaction::TransactionClient;
 use crate::wallet::Wallet;
 use crate::wallet::WalletInfo;
@@ -16,6 +17,7 @@ use base64::Engine as _;
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -37,22 +39,19 @@ use crate::timeout;
 use crate::titan::build_transaction_from_route;
 use crate::titan::SwapRoute as TitanSwapRoute;
 use solana_sdk::{
+    hash::Hash,
     instruction::AccountMeta as SolanaAccountMeta,
     instruction::Instruction as SolanaInstruction,
     message::{v0, AddressLookupTableAccount, VersionedMessage},
     pubkey::Pubkey as SolanaPubkey,
     transaction::VersionedTransaction,
 };
-use solana_system_interface::instruction as system_instruction;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 const ICON_SWITCH: &str =
     "https://cdn.jsdelivr.net/gh/hogyzen12/unruggable-app@main/assets/icons/SWITCH.svg";
 
-// Jules tip address for monetization (0.0001 SOL per swap)
-const JULES_TIP_ADDRESS: &str = "juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp";
-const JULES_TIP_LAMPORTS: u64 = 100_000; //  0.0001 SOL
 const JUPITER_ORDER_MAX_AGE: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +117,26 @@ fn swap_http_client() -> reqwest::Client {
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new())
+}
+
+async fn swap_provider_error(provider: &str, response: reqwest::Response) -> String {
+    let status = response.status();
+    let body = response.text().await.unwrap_or_default();
+    let detail = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|json| {
+            json.pointer("/error/message")
+                .or_else(|| json.get("errorMessage"))
+                .or_else(|| json.get("error"))
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .or_else(|| {
+            let trimmed = body.trim();
+            (!trimmed.is_empty() && trimmed.len() <= 240).then(|| trimmed.to_string())
+        })
+        .unwrap_or_else(|| status.to_string());
+    format!("{provider}: {detail}")
 }
 
 fn is_jupiter_order_stale(fetched_at: Instant) -> bool {
@@ -306,7 +325,88 @@ async fn fetch_lookup_tables(
     Ok(lookup_tables)
 }
 
-/// Build transaction from swap instructions and add Jules tip (unless hardware wallet)
+async fn build_transaction_from_jupiter_build(
+    build: JupiterBuildResponse,
+    payer: SolanaPubkey,
+    rpc_url: &str,
+) -> Result<Vec<u8>, String> {
+    let JupiterBuildResponse {
+        compute_budget_instructions,
+        setup_instructions,
+        swap_instruction,
+        cleanup_instruction,
+        other_instructions,
+        addresses_by_lookup_table_address,
+        blockhash_with_metadata,
+    } = build;
+
+    let tx_client = TransactionClient::new(Some(rpc_url));
+    let current_slot = tx_client
+        .get_current_slot()
+        .await
+        .map_err(|error| format!("Failed to get current slot: {error}"))?;
+    let timeout_ix = timeout::build_timeout_instruction_from_current(
+        current_slot,
+        timeout::DEFAULT_SLOT_WINDOW,
+    )?;
+    let mut instructions = vec![timeout_ix];
+    for instruction in compute_budget_instructions {
+        instructions.push(swap_instruction_to_solana(&instruction)?);
+    }
+    for instruction in setup_instructions {
+        instructions.push(swap_instruction_to_solana(&instruction)?);
+    }
+    instructions.push(swap_instruction_to_solana(&swap_instruction)?);
+    if let Some(instruction) = cleanup_instruction {
+        instructions.push(swap_instruction_to_solana(&instruction)?);
+    }
+    for instruction in other_instructions {
+        instructions.push(swap_instruction_to_solana(&instruction)?);
+    }
+    if get_current_jito_settings().jito_tx {
+        crate::transaction_guards::append_jito_and_jules_tips(
+            &mut instructions,
+            &payer,
+            current_slot,
+        )?;
+    }
+
+    let mut lookup_entries = addresses_by_lookup_table_address
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    lookup_entries.sort_by(|left, right| left.0.cmp(&right.0));
+    let lookup_tables = lookup_entries
+        .into_iter()
+        .map(|(key, addresses)| {
+            let key = SolanaPubkey::from_str(&key)
+                .map_err(|error| format!("Invalid Jupiter lookup table: {error}"))?;
+            let addresses = addresses
+                .into_iter()
+                .map(|address| {
+                    SolanaPubkey::from_str(&address)
+                        .map_err(|error| format!("Invalid Jupiter lookup address: {error}"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(AddressLookupTableAccount { key, addresses })
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let recent_blockhash = Hash::new_from_array(blockhash_with_metadata.blockhash);
+    let message = v0::Message::try_compile(&payer, &instructions, &lookup_tables, recent_blockhash)
+        .map_err(|error| format!("Failed to compile Jupiter transaction: {error}"))?;
+    let transaction = VersionedTransaction {
+        signatures: vec![
+            solana_sdk::signature::Signature::default();
+            message.header.num_required_signatures as usize
+        ],
+        message: VersionedMessage::V0(message),
+    };
+    bincode::serialize(&transaction)
+        .map_err(|error| format!("Failed to serialize Jupiter transaction: {error}"))
+}
+
+/// Build a DFlow transaction with the app's transaction guards.
 async fn build_transaction_from_instructions(
     compute_budget_ixs: Vec<SwapInstruction>,
     setup_ixs: Vec<SwapInstruction>,
@@ -316,7 +416,7 @@ async fn build_transaction_from_instructions(
     lookup_table_addresses: Vec<String>,
     payer: SolanaPubkey,
     rpc_url: &str,
-    is_hardware_wallet: bool,
+    _is_hardware_wallet: bool,
 ) -> Result<Vec<u8>, String> {
     println!("🔧 Building transaction from swap instructions");
 
@@ -363,16 +463,12 @@ async fn build_transaction_from_instructions(
         all_instructions.push(swap_instruction_to_solana(&ix)?);
     }
 
-    // Add Jules tip instruction (LAST) - skip for hardware wallets
-    if !is_hardware_wallet {
-        let jules_tip_address = SolanaPubkey::from_str(JULES_TIP_ADDRESS)
-            .map_err(|e| format!("Invalid Jules tip address: {}", e))?;
-        let tip_ix = system_instruction::transfer(&payer, &jules_tip_address, JULES_TIP_LAMPORTS);
-        all_instructions.push(tip_ix);
-
-        println!("   Added Jules tip (0.0001 SOL) to swap transaction");
-    } else {
-        println!("   Hardware wallet detected - skipping Jules tip");
+    if get_current_jito_settings().jito_tx {
+        crate::transaction_guards::append_jito_and_jules_tips(
+            &mut all_instructions,
+            &payer,
+            current_slot,
+        )?;
     }
 
     println!("   Total instructions: {}", all_instructions.len());
@@ -556,6 +652,29 @@ pub struct JupiterUltraExecuteResponse {
     pub status: String, // "Success" or "Failed"
     pub signature: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct JupiterBuildBlockhash {
+    blockhash: [u8; 32],
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct JupiterBuildResponse {
+    #[serde(rename = "computeBudgetInstructions")]
+    compute_budget_instructions: Vec<SwapInstruction>,
+    #[serde(rename = "setupInstructions")]
+    setup_instructions: Vec<SwapInstruction>,
+    #[serde(rename = "swapInstruction")]
+    swap_instruction: SwapInstruction,
+    #[serde(rename = "cleanupInstruction")]
+    cleanup_instruction: Option<SwapInstruction>,
+    #[serde(rename = "otherInstructions", default)]
+    other_instructions: Vec<SwapInstruction>,
+    #[serde(rename = "addressesByLookupTableAddress", default)]
+    addresses_by_lookup_table_address: Option<HashMap<String, Vec<String>>>,
+    #[serde(rename = "blockhashWithMetadata")]
+    blockhash_with_metadata: JupiterBuildBlockhash,
 }
 
 // Instruction-based API Types (for Dflow only now)
@@ -1025,17 +1144,20 @@ pub fn SwapModal(
     let mut jupiter_order_fetched_at = use_signal(|| None as Option<Instant>);
     let mut fetching_jupiter = use_signal(|| false);
     let mut active_jupiter_quote_generation = use_signal(|| None as Option<u64>);
+    let mut jupiter_quote_error = use_signal(|| None as Option<String>);
 
     // Dflow instruction-based API state
     let mut dflow_quote = use_signal(|| None as Option<DflowQuoteResponse>);
     let _dflow_instructions = use_signal(|| None as Option<DflowSwapInstructionsResponse>);
     let mut fetching_dflow = use_signal(|| false);
     let mut active_dflow_quote_generation = use_signal(|| None as Option<u64>);
+    let mut dflow_quote_error = use_signal(|| None as Option<String>);
 
     // Titan Exchange state
     let mut titan_quote = use_signal(|| None as Option<(String, TitanSwapRoute)>); // (provider_name, route)
     let mut fetching_titan = use_signal(|| false);
     let mut active_titan_quote_generation = use_signal(|| None as Option<u64>);
+    let mut titan_quote_error = use_signal(|| None as Option<String>);
     let mut quote_generation = use_signal(|| 0u64);
     let mut selected_provider = use_signal(|| None as Option<String>); // "Jupiter" or "Titan"
 
@@ -1476,6 +1598,8 @@ pub fn SwapModal(
                 None => {
                     if active_titan_quote_generation() == Some(generation) {
                         titan_quote.set(None);
+                        titan_quote_error
+                            .set(Some("Titan: wallet address unavailable".to_string()));
                         fetching_titan.set(false);
                     }
                     return;
@@ -1500,20 +1624,26 @@ pub fn SwapModal(
                     Ok(response) if response.status().is_success() => {
                         match response.json::<TitanGatewayRouteResponse>().await {
                             Ok(response) => {
+                                titan_quote_error.set(None);
                                 titan_quote.set(Some(("Titan".to_string(), response.route)))
                             }
                             Err(error) => {
                                 eprintln!("Failed to parse Titan gateway response: {error}");
+                                titan_quote_error
+                                    .set(Some("Titan: invalid gateway response".to_string()));
                                 titan_quote.set(None);
                             }
                         }
                     }
                     Ok(response) => {
-                        eprintln!("Titan gateway returned {}", response.status());
+                        let error = swap_provider_error("Titan", response).await;
+                        eprintln!("{error}");
+                        titan_quote_error.set(Some(error));
                         titan_quote.set(None);
                     }
                     Err(error) => {
                         eprintln!("Titan gateway request failed: {error}");
+                        titan_quote_error.set(Some(format!("Titan: {error}")));
                         titan_quote.set(None);
                     }
                 }
@@ -1562,6 +1692,7 @@ pub fn SwapModal(
                                 );
 
                                 // Store quote for comparison
+                                dflow_quote_error.set(None);
                                 dflow_quote.set(Some(quote.clone()));
 
                                 // Step 2: Instructions will be fetched in CHUNK 5 during swap execution
@@ -1571,17 +1702,22 @@ pub fn SwapModal(
                             }
                             Err(e) => {
                                 println!("❌ Failed to parse Dflow quote: {}", e);
+                                dflow_quote_error
+                                    .set(Some("DFlow: invalid gateway response".to_string()));
                                 dflow_quote.set(None);
                             }
                         }
                     } else {
-                        println!("❌ Dflow quote API error: {}", response.status());
+                        let error = swap_provider_error("DFlow", response).await;
+                        println!("❌ {error}");
+                        dflow_quote_error.set(Some(error));
                         dflow_quote.set(None);
                     }
                 }
                 Err(e) => {
                     println!("❌ Dflow quote request failed: {}", e);
                     if active_dflow_quote_generation() == Some(generation) {
+                        dflow_quote_error.set(Some(format!("DFlow: {e}")));
                         dflow_quote.set(None);
                     }
                 }
@@ -1641,17 +1777,10 @@ pub fn SwapModal(
                                     println!("❌ Jupiter Ultra API Error: {}", error_msg);
                                     jupiter_order_fetched_at.set(None);
                                     jupiter_order.set(None);
-                                    error_message.set(Some(match error_msg.as_str() {
-                                        "Taker has insufficient input" => {
-                                            "Insufficient balance for this swap".to_string()
-                                        }
-                                        msg if msg.contains("insufficient") => {
-                                            "Insufficient balance".to_string()
-                                        }
-                                        _ => format!("Swap error: {}", error_msg),
-                                    }));
+                                    jupiter_quote_error.set(Some(format!("Jupiter: {error_msg}")));
                                 } else {
                                     // Store order for comparison and swap execution
+                                    jupiter_quote_error.set(None);
                                     jupiter_order_fetched_at.set(Some(Instant::now()));
                                     jupiter_order.set(Some(order));
                                 }
@@ -1660,17 +1789,16 @@ pub fn SwapModal(
                                 println!("❌ Failed to parse Jupiter Ultra response: {}", e);
                                 jupiter_order_fetched_at.set(None);
                                 jupiter_order.set(None);
-                                error_message.set(Some("Failed to get swap quote".to_string()));
+                                jupiter_quote_error
+                                    .set(Some("Jupiter: invalid gateway response".to_string()));
                             }
                         }
                     } else {
-                        println!(
-                            "❌ Jupiter Ultra API returned error status: {}",
-                            response.status()
-                        );
+                        let error = swap_provider_error("Jupiter", response).await;
+                        println!("❌ {error}");
                         jupiter_order_fetched_at.set(None);
                         jupiter_order.set(None);
-                        error_message.set(Some(format!("API error: {}", response.status())));
+                        jupiter_quote_error.set(Some(error));
                     }
                 }
                 Err(e) => {
@@ -1678,8 +1806,8 @@ pub fn SwapModal(
                     if active_jupiter_quote_generation() == Some(generation) {
                         jupiter_order_fetched_at.set(None);
                         jupiter_order.set(None);
+                        jupiter_quote_error.set(Some(format!("Jupiter: {e}")));
                     }
-                    error_message.set(Some("Network error - please try again".to_string()));
                 }
             }
 
@@ -1702,6 +1830,9 @@ pub fn SwapModal(
             fetching_jupiter.set(true);
             fetching_dflow.set(true);
             fetching_titan.set(true);
+            jupiter_quote_error.set(None);
+            dflow_quote_error.set(None);
+            titan_quote_error.set(None);
 
             spawn(async move {
                 tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -1923,6 +2054,12 @@ pub fn SwapModal(
         let jupiter_o = jupiter_order();
         let dflow_q = dflow_quote();
         let titan_q = titan_quote();
+        let quote_errors = [
+            jupiter_quote_error(),
+            dflow_quote_error(),
+            titan_quote_error(),
+        ];
+        let quote_fetching = fetching_jupiter() || fetching_dflow() || fetching_titan();
 
         // Collect all available quotes with their output amounts
         let mut quotes = Vec::new();
@@ -1968,6 +2105,19 @@ pub fn SwapModal(
                 format!("{:.2}", converted_amount)
             };
             buying_amount.set(formatted);
+        } else if !quote_fetching && !selling_amount().is_empty() {
+            selected_provider.set(None);
+            buying_amount.set("0.00".to_string());
+            let details = quote_errors
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" • ");
+            error_message.set(Some(if details.is_empty() {
+                "No swap route is currently available for this pair.".to_string()
+            } else {
+                format!("No swap route is currently available. {details}")
+            }));
         }
     });
 
@@ -2265,10 +2415,11 @@ pub fn SwapModal(
                         error_message.set(Some("No Titan quote available".to_string()));
                     }
                 } else if provider == Some("Jupiter".to_string()) {
-                    // Jupiter won - use Ultra API (simple sign + execute)
+                    // Jupiter won - rebuild the route through the managed instruction API,
+                    // then sign locally and submit through the configured RPC.
                     let cached_jupiter_order = jupiter_order();
                     if let Some(order) = cached_jupiter_order {
-                        println!("✅ Using Jupiter Ultra for swap");
+                        println!("✅ Using Jupiter managed build for swap");
 
                         let order_fetched_at = jupiter_order_fetched_at();
                         if order_fetched_at.map(is_jupiter_order_stale).unwrap_or(true) {
@@ -2323,15 +2474,14 @@ pub fn SwapModal(
                             return;
                         }
 
-                        // Check for transaction
-                        let unsigned_tx_b64 = match &order.transaction {
-                            Some(tx) if !tx.is_empty() => tx.clone(),
-                            _ => {
-                                error_message
-                                    .set(Some("No transaction in Jupiter order".to_string()));
-                                return;
-                            }
+                        let Some(user_pubkey_str) = get_user_pubkey() else {
+                            error_message.set(Some("No wallet available".to_string()));
+                            return;
                         };
+                        let input_mint = order.input_mint.clone();
+                        let output_mint = order.output_mint.clone();
+                        let amount_lamports = order.in_amount.clone();
+                        let custom_rpc_jupiter = Some(swap_rpc_url.clone());
 
                         swapping.set(true);
                         swap_progress_stage.set(SwapProgressStage::Preparing);
@@ -2340,10 +2490,76 @@ pub fn SwapModal(
                         // Clone values for async block
                         let hw_clone = hardware_wallet_clone2.clone();
                         let wallet_info_clone = wallet_clone2.clone();
-                        let request_id = order.request_id.clone();
 
                         spawn(async move {
                             tokio::task::yield_now().await;
+                            let payer = match user_pubkey_str.parse::<SolanaPubkey>() {
+                                Ok(payer) => payer,
+                                Err(error) => {
+                                    swapping.set(false);
+                                    error_message
+                                        .set(Some(format!("Invalid wallet address: {error}")));
+                                    return;
+                                }
+                            };
+                            let build_parameters = HashMap::from([
+                                ("inputMint", input_mint),
+                                ("outputMint", output_mint),
+                                ("amount", amount_lamports),
+                                ("taker", user_pubkey_str),
+                                ("slippageBps", "50".to_string()),
+                            ]);
+                            let response = match swap_http_client()
+                                .post(gateway::endpoint("/v1/swap/jupiter/build"))
+                                .json(&build_parameters)
+                                .send()
+                                .await
+                            {
+                                Ok(response) if response.status().is_success() => response,
+                                Ok(response) => {
+                                    let error = swap_provider_error("Jupiter", response).await;
+                                    swapping.set(false);
+                                    error_message.set(Some(format!(
+                                        "Could not build the Jupiter route. {error}"
+                                    )));
+                                    return;
+                                }
+                                Err(error) => {
+                                    swapping.set(false);
+                                    error_message.set(Some(format!(
+                                        "Could not reach the Jupiter route builder: {error}"
+                                    )));
+                                    return;
+                                }
+                            };
+                            let build = match response.json::<JupiterBuildResponse>().await {
+                                Ok(build) => build,
+                                Err(error) => {
+                                    swapping.set(false);
+                                    error_message.set(Some(format!(
+                                        "Invalid Jupiter build response: {error}"
+                                    )));
+                                    return;
+                                }
+                            };
+                            let rpc_url = custom_rpc_jupiter
+                                .as_deref()
+                                .unwrap_or("https://johna-k3cr1v-fast-mainnet.helius-rpc.com");
+                            let unsigned_tx_bytes =
+                                match build_transaction_from_jupiter_build(build, payer, rpc_url)
+                                    .await
+                                {
+                                    Ok(bytes) => bytes,
+                                    Err(error) => {
+                                        swapping.set(false);
+                                        error_message.set(Some(format!(
+                                            "Could not prepare the Jupiter transaction: {error}"
+                                        )));
+                                        return;
+                                    }
+                                };
+                            let unsigned_tx_b64 = BASE64_STANDARD.encode(unsigned_tx_bytes);
+
                             // Determine if hardware wallet
                             let is_hardware = hw_clone.is_some();
                             was_hardware_transaction.set(is_hardware);
@@ -2355,7 +2571,7 @@ pub fn SwapModal(
                                 swap_progress_stage.set(SwapProgressStage::Signing);
                             }
 
-                            println!("🔐 Signing Jupiter Ultra transaction...");
+                            println!("🔐 Signing Jupiter transaction...");
 
                             // Sign transaction
                             let hw_for_unlock = hw_clone.clone();
@@ -2384,85 +2600,32 @@ pub fn SwapModal(
                             match signing_result {
                                 Ok(signed_transaction_b64) => {
                                     println!("✅ Jupiter transaction signed!");
-                                    println!("🚀 Executing via Jupiter Ultra API...");
+                                    println!("🚀 Submitting Jupiter transaction via Solana RPC...");
                                     swap_progress_stage.set(SwapProgressStage::Sending);
-
-                                    // Execute via Jupiter Ultra execute endpoint
-                                    let client = swap_http_client();
-                                    let execute_request = JupiterUltraExecuteRequest {
-                                        signed_transaction: signed_transaction_b64,
-                                        request_id,
-                                    };
-
-                                    match client
-                                        .post(gateway::endpoint("/v1/swap/jupiter/execute"))
-                                        .json(&execute_request)
-                                        .send()
-                                        .await
-                                    {
-                                        Ok(response) => {
-                                            if response.status().is_success() {
-                                                match response
-                                                    .json::<JupiterUltraExecuteResponse>()
-                                                    .await
-                                                {
-                                                    Ok(result) => {
-                                                        if result.status == "Success" {
-                                                            if let Some(signature) =
-                                                                result.signature
-                                                            {
-                                                                println!("✅ Jupiter Ultra swap executed! Signature: {}", signature);
-                                                                transaction_signature
-                                                                    .set(signature);
-                                                                swapping.set(false);
-                                                                show_success_modal.set(true);
-                                                            } else {
-                                                                println!("❌ No signature in success response");
-                                                                swapping.set(false);
-                                                                error_message.set(Some(
-                                                                    "No signature returned"
-                                                                        .to_string(),
-                                                                ));
-                                                            }
-                                                        } else {
-                                                            let error = result.error.unwrap_or(
-                                                                "Unknown error".to_string(),
-                                                            );
-                                                            println!("❌ Jupiter Ultra execute failed: {}", error);
-                                                            swapping.set(false);
-                                                            error_message.set(Some(format!(
-                                                                "Swap failed: {}",
-                                                                error
-                                                            )));
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        println!("❌ Failed to parse execute response: {}", e);
-                                                        swapping.set(false);
-                                                        error_message.set(Some(
-                                                            "Failed to parse response".to_string(),
-                                                        ));
-                                                    }
-                                                }
-                                            } else {
-                                                println!(
-                                                    "❌ Jupiter Ultra execute error: {}",
-                                                    response.status()
-                                                );
+                                    let signed_tx_bytes =
+                                        match BASE64_STANDARD.decode(&signed_transaction_b64) {
+                                            Ok(bytes) => bytes,
+                                            Err(error) => {
                                                 swapping.set(false);
                                                 error_message.set(Some(format!(
-                                                    "Execute error: {}",
-                                                    response.status()
+                                                    "Transaction decode error: {error}"
                                                 )));
+                                                return;
                                             }
-                                        }
-                                        Err(e) => {
-                                            println!(
-                                                "❌ Jupiter Ultra execute request failed: {}",
-                                                e
-                                            );
+                                        };
+                                    let signed_tx_b58 = bs58::encode(signed_tx_bytes).into_string();
+                                    let tx_client =
+                                        TransactionClient::new(custom_rpc_jupiter.as_deref());
+                                    match tx_client.send_transaction(&signed_tx_b58).await {
+                                        Ok(signature) => {
+                                            transaction_signature.set(signature);
                                             swapping.set(false);
-                                            error_message.set(Some("Network error".to_string()));
+                                            show_success_modal.set(true);
+                                        }
+                                        Err(error) => {
+                                            swapping.set(false);
+                                            error_message
+                                                .set(Some(format!("Swap failed: {error}")));
                                         }
                                     }
                                 }

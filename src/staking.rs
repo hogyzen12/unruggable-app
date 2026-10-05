@@ -155,31 +155,14 @@ impl StakingClient {
         &self,
         from_pubkey: &Pubkey,
         instructions: &mut Vec<solana_sdk::instruction::Instruction>,
+        current_slot: u64,
     ) -> Result<(), Box<dyn Error>> {
-        // First Jito address (as per your existing implementation)
-        let jito_address1 = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
-
-        // Second Jito address (as per your existing implementation)
-        let jito_address2 = Pubkey::from_str("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL")?;
-
-        // Add two transfer instructions as tips to Jito (same as transfers)
-        let tip_instruction1 = system_instruction::transfer(
+        crate::transaction_guards::append_jito_and_jules_tips(
+            instructions,
             from_pubkey,
-            &jito_address1,
-            100_000, // 0.0001 SOL in lamports
-        );
-
-        let tip_instruction2 = system_instruction::transfer(
-            from_pubkey,
-            &jito_address2,
-            100_000, // 0.0001 SOL in lamports
-        );
-
-        // Add the tip instructions to the existing instructions list
-        instructions.push(tip_instruction1);
-        instructions.push(tip_instruction2);
-
-        println!("Added Jito tip instructions to staking transaction");
+            current_slot,
+        )
+        .map_err(|error| -> Box<dyn Error> { error.into() })?;
         Ok(())
     }
 
@@ -245,7 +228,6 @@ impl StakingClient {
         signer: &dyn TransactionSigner,
         validator_vote_account: &str,
         stake_amount_sol: f64,
-        is_hardware_wallet: bool,
     ) -> Result<StakeAccountInfo, StakingError> {
         // Convert SOL to lamports
         let stake_amount_lamports = (stake_amount_sol * 1_000_000_000.0) as u64;
@@ -289,7 +271,7 @@ impl StakingClient {
 
         // Calculate total required including Jito tips if enabled
         let jito_settings = get_current_jito_settings();
-        let jito_tip_amount = if jito_settings.jito_tx { 200_000 } else { 0 }; // 0.0002 SOL total for tips
+        let jito_tip_amount = if jito_settings.jito_tx { 104_200 } else { 0 };
         let total_required = stake_amount_lamports + rent_exemption + 5_000_000 + jito_tip_amount; // 0.005 SOL for fees + Jito tips
 
         if balance_lamports < (total_required as f64 / 1_000_000_000.0) {
@@ -357,18 +339,16 @@ impl StakingClient {
             delegate_stake(&stake_account_pubkey, &authority_pubkey, &validator_pubkey),
         ];
 
-        // Apply Jito modifications if JitoTx is enabled AND not using hardware wallet
-        if jito_settings.jito_tx && !is_hardware_wallet {
+        // Apply the exact tip bundle recognized by the finalized firmware.
+        if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications to staking transaction");
-            self.apply_jito_modifications(&authority_pubkey, &mut instructions)
+            self.apply_jito_modifications(&authority_pubkey, &mut instructions, current_slot)
                 .map_err(|e| {
                     StakingError::TransactionFailed(format!(
                         "Failed to apply Jito modifications: {}",
                         e
                     ))
                 })?;
-        } else if is_hardware_wallet {
-            println!("Hardware wallet detected - skipping Jito tips");
         }
 
         // Create a message with all instructions
@@ -477,8 +457,6 @@ pub async fn create_stake_account(
 ) -> Result<StakeAccountInfo, StakingError> {
     let staking_client = StakingClient::new(rpc_url);
 
-    let is_hardware_wallet = hardware_wallet.is_some();
-
     // Create the appropriate signer based on what's provided
     let signer: Box<dyn TransactionSigner> = if let Some(ref hw) = hardware_wallet {
         // Create HardwareSigner from the HardwareWallet
@@ -495,12 +473,7 @@ pub async fn create_stake_account(
     };
 
     staking_client
-        .create_stake_account_with_jito(
-            signer.as_ref(),
-            validator_vote_account,
-            stake_amount_sol,
-            is_hardware_wallet,
-        )
+        .create_stake_account_with_jito(signer.as_ref(), validator_vote_account, stake_amount_sol)
         .await
 }
 
@@ -824,16 +797,13 @@ pub async fn merge_stake_accounts(
     // Prepend timeout instruction
     instructions.insert(0, timeout_ix);
 
-    // Apply Jito tips if enabled AND not using hardware wallet
+    // Apply the exact tip bundle recognized by the finalized firmware.
     let jito_settings = get_current_jito_settings();
-    let is_hardware_wallet = hardware_wallet.is_some();
-    if jito_settings.jito_tx && !is_hardware_wallet {
+    if jito_settings.jito_tx {
         println!("Applying Jito modifications");
         staking_client
-            .apply_jito_modifications(&authority_pubkey, &mut instructions)
+            .apply_jito_modifications(&authority_pubkey, &mut instructions, current_slot)
             .map_err(|e| StakingError::TransactionFailed(format!("Jito error: {}", e)))?;
-    } else if is_hardware_wallet {
-        println!("Hardware wallet detected - skipping Jito tips");
     }
 
     // Create and sign transaction (reuse existing pattern)

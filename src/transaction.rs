@@ -480,8 +480,7 @@ impl TransactionClient {
 
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications to bulk transaction");
-            // Note: bulk transactions currently don't support hardware wallets, defaulting to false
-            self.apply_jito_modifications(&from_pubkey, &mut instructions, false)?;
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, current_slot)?;
         }
 
         // Get recent blockhash
@@ -802,7 +801,7 @@ impl TransactionClient {
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
-            self.apply_jito_modifications(&from_pubkey, &mut instructions, signer.is_hardware())?;
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, current_slot)?;
         }
 
         // Create a message with all instructions
@@ -884,7 +883,8 @@ impl TransactionClient {
         let mut instructions = vec![transfer_instruction];
 
         if jito_settings.jito_tx {
-            self.apply_jito_modifications(&from_pubkey, &mut instructions, signer.is_hardware())?;
+            let current_slot = self.get_current_slot().await?;
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, current_slot)?;
         }
 
         let mut message = Message::new(&instructions, Some(&from_pubkey));
@@ -1036,7 +1036,7 @@ impl TransactionClient {
         // Apply Jito modifications if JitoTx is enabled
         if jito_settings.jito_tx {
             println!("JitoTx is enabled, applying Jito modifications");
-            self.apply_jito_modifications(&from_pubkey, &mut instructions, signer.is_hardware())?;
+            self.apply_jito_modifications(&from_pubkey, &mut instructions, current_slot)?;
         }
 
         // Create a message with all instructions
@@ -1230,38 +1230,14 @@ impl TransactionClient {
         &self,
         from_pubkey: &Pubkey,
         instructions: &mut Vec<solana_sdk::instruction::Instruction>,
-        is_hardware_wallet: bool,
+        current_slot: u64,
     ) -> Result<(), Box<dyn Error>> {
-        // Skip Jito tips for hardware wallet transactions
-        if is_hardware_wallet {
-            println!("Hardware wallet detected - skipping Jito tips");
-            return Ok(());
-        }
-
-        // First Jito address (as per JS example)
-        let jito_address1 = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
-
-        // Second Jito address (as per JS example)
-        let jito_address2 = Pubkey::from_str("DttWaMuVvTiduZRnguLF7jNxTgiMBZ1hyAumKUiL2KRL")?;
-
-        // Add two transfer instructions as tips to Jito
-        let tip_instruction1 = system_instruction::transfer(
+        crate::transaction_guards::append_jito_and_jules_tips(
+            instructions,
             from_pubkey,
-            &jito_address1,
-            100_000, // 0.0001 SOL in lamports
-        );
-
-        let tip_instruction2 = system_instruction::transfer(
-            from_pubkey,
-            &jito_address2,
-            100_000, // 0.0001 SOL in lamports
-        );
-
-        // Add the tip instructions to the existing instructions list
-        instructions.push(tip_instruction1);
-        instructions.push(tip_instruction2);
-
-        println!("Added Jito tip instructions to transaction");
+            current_slot,
+        )
+        .map_err(|error| -> Box<dyn Error> { error.into() })?;
         Ok(())
     }
 }

@@ -9,7 +9,6 @@ use solana_sdk::{
     transaction::VersionedTransaction,
     message::VersionedMessage,
 };
-use solana_system_interface::instruction as system_instruction;
 use std::error::Error as StdError;
 use std::str::FromStr;
 use serde_json::{json, Value};
@@ -157,7 +156,7 @@ impl BonkStakingClient {
         amount: u64,
         duration_days: u64,
         nonce: Option<u32>,
-        is_hardware_wallet: bool,
+        _is_hardware_wallet: bool,
     ) -> Result<StakeResult> {
         let user_pubkey_str = signer.get_public_key().await?;
         let user_pubkey = Pubkey::from_str(&user_pubkey_str)?;
@@ -209,12 +208,15 @@ impl BonkStakingClient {
         );
         instructions.push(stake_ix);
 
-        // Check Jito settings and add tip if enabled AND not using hardware wallet
+        // Add the exact tip bundle recognized by the finalized firmware.
         let jito_settings = get_current_jito_settings();
-        if jito_settings.jito_tx && !is_hardware_wallet {
-            let jito_tip_address = Pubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")?;
-            let tip_ix = system_instruction::transfer(&user_pubkey, &jito_tip_address, 100_000);
-            instructions.push(tip_ix);
+        if jito_settings.jito_tx {
+            let current_slot = crate::transaction_guards::fetch_current_slot(&self.rpc_url).await?;
+            crate::transaction_guards::append_jito_and_jules_tips(
+                &mut instructions,
+                &user_pubkey,
+                current_slot,
+            )?;
         }
 
         // Get recent blockhash

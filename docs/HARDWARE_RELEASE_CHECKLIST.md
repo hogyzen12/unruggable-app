@@ -22,7 +22,7 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Desktop check passes.
 - [x] Windows MSVC cross-check passes.
 - [x] Focused protocol/serial tests pass: 9 passed, 0 failed.
-- [x] Full desktop suite passes: 34 passed, 0 failed, 1 ignored physical test.
+- [x] Full desktop suite passes: 36 passed, 0 failed, 1 ignored physical test.
 - [x] Explicit configured-MLH USB identity test passes on macOS without a PIN attempt or signing action.
 
 ## Swap, stake, and RPC qualification
@@ -31,7 +31,10 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Route DFlow quote and instruction requests through the managed API.
 - [x] Route Titan route requests through the managed API and remove embedded provider credentials/direct WebSocket code.
 - [x] Use managed RPC for swap transaction construction/submission by default while preserving custom RPC selection.
-- [x] Verify live Jupiter quote/order and DFlow quote responses from the production gateway.
+- [x] Match the finalized firmware/pure-UX tip bundle: deterministic 4,200-lamport Jito tip plus 100,000-lamport Jules tip.
+- [x] Isolate provider failures so a 502 from one provider cannot replace a valid route from another.
+- [x] Build Jupiter swaps from managed gateway instructions and submit them through the configured RPC instead of Ultra execute.
+- [x] Verify live Jupiter quote/order/build and DFlow quote responses from the production gateway.
 - [x] Verify live managed RPC latest-blockhash and epoch calls.
 - [x] Read and enforce the live native-stake minimum in both the UI and transaction layer.
 - [x] Verify the configured staking RPC and the preselected Unruggable validator vote account.
@@ -87,7 +90,7 @@ For each Windows run, record Windows version, PC model, cable/hub, Hardware ID, 
 
 ## Packaging and release gates
 
-- [ ] Review and commit the v2 compatibility implementation on `dev/v2.0.0`.
+- [x] Review and commit the initial v2 compatibility implementation on `dev/v2.0.0`.
 - [ ] Bump `Cargo.toml` from `1.1.1` to `2.0.0` after physical qualification.
 - [ ] Build all release artifacts from a clean commit and record the commit in each artifact.
 - [ ] Build the macOS app/DMG, verify local assets, code-sign, notarize, and verify the checksum.

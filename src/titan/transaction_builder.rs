@@ -14,8 +14,6 @@ use solana_sdk::{
     signature::Signature as SolanaSignature,
     transaction::VersionedTransaction,
 };
-use solana_system_interface::instruction as system_instruction;
-use std::str::FromStr;
 
 use super::types::{AccountMeta, Instruction, Pubkey, SwapRoute};
 use crate::storage::get_current_jito_settings;
@@ -155,7 +153,7 @@ pub async fn build_transaction_from_route(
     payer: SolanaPubkey,
     recent_blockhash: Hash,
     rpc_url: &str,
-    is_hardware_wallet: bool,
+    _is_hardware_wallet: bool,
 ) -> Result<Vec<u8>, String> {
     println!("Building transaction from Titan route");
     println!("   Instructions: {}", route.instructions.len());
@@ -194,20 +192,14 @@ pub async fn build_transaction_from_route(
     let mut instructions = vec![timeout_ix];
     instructions.extend(titan_instructions);
 
-    // Add Jito tip if enabled AND not using hardware wallet
+    // Add the exact tip bundle recognized by the finalized firmware.
     let jito_settings = get_current_jito_settings();
-    if jito_settings.jito_tx && !is_hardware_wallet {
-        let jito_tip_address =
-            SolanaPubkey::from_str("juLesoSmdTcRtzjCzYzRoHrnF8GhVu6KCV7uxq7nJGp")
-                .map_err(|e| format!("Invalid Jito tip address: {}", e))?;
-
-        // Add 0.0001 SOL tip (100,000 lamports)
-        let tip_ix = system_instruction::transfer(&payer, &jito_tip_address, 100_000);
-        instructions.push(tip_ix);
-
-        println!("   Added Jito tip (0.0001 SOL) to Titan swap");
-    } else if is_hardware_wallet {
-        println!("   Hardware wallet detected - skipping Jito tips");
+    if jito_settings.jito_tx {
+        crate::transaction_guards::append_jito_and_jules_tips(
+            &mut instructions,
+            &payer,
+            current_slot,
+        )?;
     }
 
     // Fetch lookup table accounts if any are provided

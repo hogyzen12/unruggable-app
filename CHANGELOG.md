@@ -37,6 +37,8 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Jupiter, DFlow, and Titan swap requests now use the managed API backend. Provider credentials and the obsolete direct Titan WebSocket client are no longer shipped in the desktop binary.
 - Swap transaction RPC calls use the managed RPC by default while continuing to honor a user-selected custom RPC.
 - Native staking reads and enforces Solana's live minimum delegation instead of assuming 0.01 SOL.
+- Jito-enabled transactions now use the same firmware-recognized tip bundle as the finalized wallet and pure-UX app: one deterministic 4,200-lamport Jito tip plus the 100,000-lamport Jules tip.
+- Jupiter swaps are built from managed gateway instructions and submitted through the configured RPC, avoiding the unreliable Ultra execute path while preserving local hardware signing and review.
 
 ### Fixed
 
@@ -46,6 +48,7 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Fixed inconsistent hardware unlock choices between connect and transaction flows.
 - Fixed stale Jupiter order data remaining selectable after a later order error.
 - Fixed staking accepting amounts below the network's current minimum delegation.
+- Fixed a failed swap provider (including a 502 Bad Gateway response) overriding a valid route returned by another provider. Provider failures are now isolated and only surfaced when every provider fails.
 - Fixed the desktop UI losing its CSS/images after the old `dev-app-release` branch was archived.
 - Fixed the existing synchronous SNS test so the full desktop suite runs inside a Tokio runtime.
 
@@ -61,10 +64,10 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Desktop `cargo check` passes.
 - Windows MSVC `cargo xwin check` passes.
 - All focused protocol and bounded-serial tests pass.
-- Full desktop suite passes: 34 passed, 0 failed, 1 deliberately ignored physical-device test.
+- Full desktop suite passes: 36 passed, 0 failed, 1 deliberately ignored physical-device test.
 - The ignored physical-device test was run explicitly against the connected finalized MLH wallet and passed CurrentV2 classification, firmware-state checks, real Solana public-key validation, and clean disconnect.
 - The macOS desktop app builds, launches, and loads CSS/images from the local asset handler.
-- Live managed API checks pass for Jupiter quote/order, DFlow quote, latest blockhash, and epoch RPC requests.
+- Live managed API checks pass for Jupiter quote/order/build, DFlow quote, latest blockhash, and epoch RPC requests.
 - The configured staking RPC reports the current 1 SOL minimum, and the preselected Unruggable vote account is active and owned by the Solana vote program.
 
 ### Required before release
