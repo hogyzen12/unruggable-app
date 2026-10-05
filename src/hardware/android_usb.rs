@@ -45,11 +45,19 @@ pub struct AndroidUsbDevice {
 impl AndroidUsbSerial {
     fn response_profile_for(command: &Command) -> (i32, i32) {
         match command {
+            Command::UnlockOnDevice => (360, 250), // ~90s for local PIN entry
+            Command::SignMessage(_) => (300, 250), // ~75s for paged transaction review
             Command::SetModeNone
             | Command::SetModePin(_)
             | Command::SetModeOtpBegin
-            | Command::SignMessage(_) => (180, 250), // ~45s total wait for button-confirm flows
-            _ => (40, 250), // ~10s default
+            | Command::SetModeOtpConfirm(_)
+            | Command::UnlockPin(_)
+            | Command::UnlockOtp(_)
+            | Command::Generate
+            | Command::ShowReceiveQr
+            | Command::HideReceiveQr
+            | Command::WipeKeys => (180, 250), // ~45s total wait for button-confirm flows
+            _ => (40, 250),                        // ~10s default
         }
     }
 
@@ -150,7 +158,7 @@ impl AndroidUsbSerial {
             .ok_or(StorageError("Not connected to hardware wallet".to_string()))?
             .clone();
         let (max_reads, read_timeout_ms) = Self::response_profile_for(&command);
-        let cmd_data = format_esp32_command(&command);
+        let cmd_data = zeroize::Zeroizing::new(format_esp32_command(command));
         let (tx, rx) = std::sync::mpsc::channel();
 
         dispatch(move |env, activity, _webview| {

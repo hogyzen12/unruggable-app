@@ -23,14 +23,10 @@ solana-compute-budget-interface = "2.0"
 solana-instruction = "2.0"
 solana-pubkey = "2.0"
 solana-account-decoder = "3.0.0"
-openssl = { version = "0.10", features = ["vendored"] }
 bincode = "1.3"
 base64 = "0.22"
+zeroize = "1.8"
 tokio = { version = "1.47.1", features = ["full"] }
-# Use native-tls for iOS (uses iOS Security framework), rustls for other platforms
-tokio-tungstenite = { version = "0.20", features = ["native-tls"] }
-futures-util = "0.3"
-rmp-serde = "1.1"
 sha2 = "0.10"
 async-trait = "0.1"
 log = { version = "0.4", features = ["max_level_warn"] }
@@ -60,7 +56,7 @@ solana-offchain-message = "3.0.0"
 # Desktop/non-mobile specific dependencies
 [target.'cfg(not(any(target_os = "android")))'.dependencies]
 # Add full§stack feature only for non-mobile platforms
-serialport = "4.3.0"
+serialport = "4.9.0"
 tokio-serial = "5.4.4"
 arboard = "3.2"
 
@@ -80,6 +76,7 @@ jni = "0.21.1"
 anyhow = "1.0.98"
 async-channel = "2.3.1"
 once_cell = "1.21.3"
+openssl = { version = "0.10", features = ["vendored"] }
 
 [package.metadata.cargo-apple.ios]
 frameworks = [ "WebKit" ]

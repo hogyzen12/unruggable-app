@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 // Titan API type definitions
 // All types follow MessagePack encoding as specified in Titan API docs
 

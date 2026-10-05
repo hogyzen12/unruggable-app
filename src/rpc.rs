@@ -173,6 +173,47 @@ pub async fn get_minimum_balance_for_rent_exemption(
         .ok_or("Invalid rent exemption response")?)
 }
 
+/// Return the network's current minimum native stake delegation in lamports.
+pub async fn get_stake_minimum_delegation(rpc_url: Option<&str>) -> Result<u64, String> {
+    let client = Client::new();
+    let url = rpc_url.unwrap_or(DEFAULT_RPC_URL);
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getStakeMinimumDelegation",
+        "params": [{ "commitment": "finalized" }]
+    });
+
+    let response = client
+        .post(url)
+        .json(&request)
+        .send()
+        .await
+        .map_err(|error| format!("Failed to fetch stake minimum delegation: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "Stake minimum delegation RPC error: {}",
+            response.status()
+        ));
+    }
+    let json: Value = response
+        .json()
+        .await
+        .map_err(|error| format!("Failed to parse stake minimum delegation: {error}"))?;
+    parse_stake_minimum_delegation_response(&json)
+}
+
+fn parse_stake_minimum_delegation_response(json: &Value) -> Result<u64, String> {
+    if let Some(error) = json.get("error") {
+        return Err(format!("Stake minimum delegation RPC error: {error}"));
+    }
+
+    json.pointer("/result/value")
+        .and_then(Value::as_u64)
+        .or_else(|| json.get("result").and_then(Value::as_u64))
+        .ok_or_else(|| format!("Unexpected stake minimum delegation response: {json}"))
+}
+
 #[derive(Debug, Deserialize)]
 struct TokenAccountsResult {
     context: RpcContext,
@@ -1387,6 +1428,28 @@ pub async fn fetch_nft_metadata(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn parses_stake_minimum_delegation_response_shapes() {
+        assert_eq!(
+            parse_stake_minimum_delegation_response(&json!({
+                "result": { "value": 1_000_000_000 }
+            }))
+            .unwrap(),
+            1_000_000_000
+        );
+        assert_eq!(
+            parse_stake_minimum_delegation_response(&json!({
+                "result": 1_000_000_000
+            }))
+            .unwrap(),
+            1_000_000_000
+        );
+        assert!(parse_stake_minimum_delegation_response(&json!({
+            "error": { "code": -32601, "message": "unsupported" }
+        }))
+        .is_err());
+    }
 
     #[test]
     fn parse_collectible_info_filters_unverified_airdrop_spam() {

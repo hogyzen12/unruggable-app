@@ -16,6 +16,9 @@ for software wallets, Ledger devices, and Unruggable hardware wallets.
 See [Repository workflow](docs/REPOSITORY_WORKFLOW.md) for the branch and
 release policy.
 
+The current v2 work and remaining qualification steps are tracked in the
+[changelog](CHANGELOG.md) and [hardware release checklist](docs/HARDWARE_RELEASE_CHECKLIST.md).
+
 ## Desktop development
 
 Install Rust and the platform dependencies required by Dioxus, then use the
@@ -40,11 +43,10 @@ macOS packaging:
 sh macos_package.sh
 ```
 
-Windows cross-builds require `cargo-xwin` and a Windows OpenSSL SDK. Set
-`X86_64_PC_WINDOWS_MSVC_OPENSSL_DIR` to that SDK before building:
+Windows cross-builds require `cargo-xwin`. OpenSSL is scoped to Android and is
+not required by the Windows desktop build:
 
 ```sh
-export X86_64_PC_WINDOWS_MSVC_OPENSSL_NO_VENDOR=1
 cargo xwin build --locked --target x86_64-pc-windows-msvc --release \
   --no-default-features --features desktop
 sh scripts/package-windows-release.sh
@@ -67,4 +69,3 @@ steps.
 Generated packages, installers, checksums, and mobile bundles are attached to
 GitHub Releases; they are not committed to the source branch. Release builds
 must come from a clean, tested commit and use an annotated version tag.
-

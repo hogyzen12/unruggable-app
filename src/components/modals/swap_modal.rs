@@ -2,8 +2,8 @@
 
 use crate::components::common::Token;
 use crate::config::tokens::get_token_catalog;
+use crate::gateway;
 use crate::hardware::{AuthMode, HardwareWallet};
-use crate::partner_secrets;
 use crate::prices;
 use crate::signing::hardware::HardwareSigner;
 use crate::signing::software::SoftwareSigner;
@@ -34,8 +34,8 @@ enum SwapUpdate {
     Result(SwapResult),
 }
 use crate::timeout;
+use crate::titan::build_transaction_from_route;
 use crate::titan::SwapRoute as TitanSwapRoute;
-use crate::titan::{build_transaction_from_route, TitanClient};
 use solana_sdk::{
     instruction::AccountMeta as SolanaAccountMeta,
     instruction::Instruction as SolanaInstruction,
@@ -57,6 +57,8 @@ const JUPITER_ORDER_MAX_AGE: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnlockMode {
+    DevicePin,
+    PinWithDeviceOption,
     Pin,
     Otp,
 }
@@ -68,6 +70,22 @@ enum SwapProgressStage {
     AwaitingApproval,
     Signing,
     Sending,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TitanGatewayRouteRequest {
+    input_mint: String,
+    output_mint: String,
+    amount: u64,
+    user_public_key: String,
+    slippage_bps: u16,
+    provider_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct TitanGatewayRouteResponse {
+    route: TitanSwapRoute,
 }
 
 fn swap_progress_label(stage: SwapProgressStage) -> &'static str {
@@ -127,16 +145,22 @@ fn format_unlock_error_message(err: &str) -> String {
         return match code.as_str() {
             "AUTH_FAILED" | "OTP_BAD_CODE" => "Incorrect code. Please try again.".to_string(),
             "AUTH_LOCKED" => {
-                "Too many failed attempts. Device auth is locked. Use physical factory wipe to recover."
+                "Too many failed PIN attempts. This wallet is permanently locked and cannot be reset."
                     .to_string()
             }
             "BAD_PIN_FORMAT" | "BAD_OTP_FORMAT" => {
                 "Code must be exactly 6 digits.".to_string()
             }
-            "BUTTON_TIMEOUT" => {
-                "No button press detected. Submit the code again, then press the device button within 8 seconds."
-                    .to_string()
-            }
+            "BUTTON_TIMEOUT" | "CONFIRM_TIMEOUT" =>
+                "Confirmation timed out. Retry and follow the prompts on the hardware wallet."
+                    .to_string(),
+            "USER_REJECTED" => "Request rejected on the hardware wallet.".to_string(),
+            "BUSY" =>
+                "Finish or cancel the action currently shown on the hardware wallet, then retry."
+                    .to_string(),
+            "KEYSTORE_CORRUPT" =>
+                "The hardware wallet secure elements reported a fault. Disconnect it and contact support."
+                    .to_string(),
             "AUTH_MODE_MISMATCH" => {
                 "Unlock method does not match the device mode. Open hardware connect and try again."
                     .to_string()
@@ -154,6 +178,7 @@ fn format_unlock_error_message(err: &str) -> String {
 async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
     if let Ok(Some(info)) = wallet.refresh_esp32_info().await {
         return match info.auth_mode {
+            AuthMode::Pin if info.supports_device_pin => Some(UnlockMode::PinWithDeviceOption),
             AuthMode::Pin => Some(UnlockMode::Pin),
             AuthMode::Otp => Some(UnlockMode::Otp),
             _ => None,
@@ -162,6 +187,7 @@ async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
 
     match wallet.get_cached_esp32_info().await {
         Some(info) => match info.auth_mode {
+            AuthMode::Pin if info.supports_device_pin => Some(UnlockMode::PinWithDeviceOption),
             AuthMode::Pin => Some(UnlockMode::Pin),
             AuthMode::Otp => Some(UnlockMode::Otp),
             _ => None,
@@ -1007,14 +1033,6 @@ pub fn SwapModal(
     let mut active_dflow_quote_generation = use_signal(|| None as Option<u64>);
 
     // Titan Exchange state
-    let titan_client = use_signal(|| {
-        // Initialize Titan client with production global endpoint and JWT token
-        let client = TitanClient::new(
-            "partners.api.titan.exchange".to_string(),
-            partner_secrets::titan_jwt().to_string(),
-        );
-        Arc::new(tokio::sync::Mutex::new(client))
-    });
     let mut titan_quote = use_signal(|| None as Option<(String, TitanSwapRoute)>); // (provider_name, route)
     let mut fetching_titan = use_signal(|| false);
     let mut active_titan_quote_generation = use_signal(|| None as Option<u64>);
@@ -1085,40 +1103,60 @@ pub fn SwapModal(
                     h2 { class: "modal-title", "Unlock Hardware Device" }
                     p { class: "success-message",
                         match (unlock_mode(), unlock_in_progress()) {
-                            (Some(UnlockMode::Pin), true) => "Unlocking device...",
-                            (Some(UnlockMode::Pin), false) => "Enter your 6-digit Device PIN to continue signing.",
+                            (Some(UnlockMode::DevicePin), true) => "Enter your PIN on the hardware wallet.",
+                            (Some(UnlockMode::DevicePin), false) => "Continue on the hardware wallet to keep your PIN off this computer.",
+                            (Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin), true) => "Unlocking device...",
+                            (Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin), false) => "Enter your 6-digit hardware-wallet PIN to continue signing.",
                             (Some(UnlockMode::Otp), true) => "Code accepted. Press the hardware button once within 8 seconds to continue the swap.",
                             (Some(UnlockMode::Otp), false) => "Enter your 6-digit authenticator code. After you submit it, press the hardware button once to continue the swap.",
                             (None, _) => "Enter device unlock code to continue signing.",
                         }
                     }
-                    div {
-                        class: "wallet-field",
-                        label {
-                            match unlock_mode() {
-                                Some(UnlockMode::Pin) => "Device PIN",
-                                Some(UnlockMode::Otp) => "Authenticator Code",
-                                None => "Unlock Code",
+                    if unlock_mode() != Some(UnlockMode::DevicePin) {
+                        div {
+                            class: "wallet-field",
+                            label {
+                                match unlock_mode() {
+                                    Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin) => "Hardware-wallet PIN",
+                                    Some(UnlockMode::Otp) => "Authenticator Code",
+                                    _ => "Unlock Code",
+                                }
+                            }
+                            input {
+                                r#type: "password",
+                                value: "{unlock_code}",
+                                oninput: move |e| {
+                                    unlock_code.set(
+                                        e.value()
+                                            .chars()
+                                            .filter(|c| c.is_ascii_digit())
+                                            .take(6)
+                                            .collect(),
+                                    )
+                                },
+                                placeholder: "6 digits",
+                                maxlength: "6",
+                                autocomplete: "off",
+                                inputmode: "numeric",
+                                pattern: "[0-9]*",
+                                disabled: unlock_in_progress()
                             }
                         }
-                        input {
-                            r#type: "password",
-                            value: "{unlock_code}",
-                            oninput: move |e| {
-                                unlock_code.set(
-                                    e.value()
-                                        .chars()
-                                        .filter(|c| c.is_ascii_digit())
-                                        .take(6)
-                                        .collect(),
-                                )
-                            },
-                            placeholder: "6 digits",
-                            maxlength: "6",
-                            autocomplete: "off",
-                            inputmode: "numeric",
-                            pattern: "[0-9]*",
-                            disabled: unlock_in_progress()
+                    }
+                    if unlock_mode() == Some(UnlockMode::PinWithDeviceOption) {
+                        details {
+                            class: "hardware-inline-note",
+                            summary { "Prefer to enter the PIN on the wallet?" }
+                            button {
+                                class: "connect-device-button rescan-button",
+                                disabled: unlock_in_progress(),
+                                onclick: move |_| {
+                                    unlock_code.set(String::new());
+                                    unlock_error.set(None);
+                                    unlock_mode.set(Some(UnlockMode::DevicePin));
+                                },
+                                "Use PIN on Wallet"
+                            }
                         }
                     }
                     if let Some(err) = unlock_error() {
@@ -1153,18 +1191,21 @@ pub fn SwapModal(
                                     };
 
                                     let code = unlock_code();
-                                    if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+                                    let mode = unlock_mode();
+                                    if mode != Some(UnlockMode::DevicePin)
+                                        && (code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()))
+                                    {
                                         unlock_error.set(Some("Code must be exactly 6 digits.".to_string()));
                                         return;
                                     }
 
-                                    let mode = unlock_mode();
                                     spawn(async move {
                                         unlock_in_progress.set(true);
                                         unlock_error.set(None);
 
                                         let unlock_result = match mode {
-                                            Some(UnlockMode::Pin) => hw.unlock_pin(&code).await.map(|_| ()),
+                                            Some(UnlockMode::DevicePin) => hw.unlock_on_device().await.map(|_| ()),
+                                            Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin) => hw.unlock_pin(&code).await.map(|_| ()),
                                             Some(UnlockMode::Otp) => hw.unlock_otp(&code).await.map(|_| ()),
                                             None => Err("Unknown unlock mode".into()),
                                         };
@@ -1188,11 +1229,15 @@ pub fn SwapModal(
                             },
                             if unlock_in_progress() {
                                 match unlock_mode() {
+                                    Some(UnlockMode::DevicePin) => "Waiting for Device...",
                                     Some(UnlockMode::Otp) => "Press Device Button...",
                                     _ => "Unlocking...",
                                 }
                             } else {
-                                "Unlock Device"
+                                match unlock_mode() {
+                                    Some(UnlockMode::DevicePin) => "Enter PIN on Device",
+                                    _ => "Unlock Device",
+                                }
                             }
                         }
                     }
@@ -1417,35 +1462,18 @@ pub fn SwapModal(
         }
     };
 
-    // Titan Exchange: Fetch quotes with WebSocket streaming
+    // Titan Exchange: Fetch a complete route through the managed API.
     let mut fetch_titan_quotes = move |input_mint: String,
                                        output_mint: String,
                                        amount_lamports: u64,
                                        user_pubkey: Option<String>,
                                        generation: u64| {
-        println!(
-            "[TITAN-DEBUG] fetch_titan_quotes called with input={}, output={}, amount={}, generation={}",
-            input_mint, output_mint, amount_lamports, generation
-        );
-
-        let client = titan_client();
         active_titan_quote_generation.set(Some(generation));
         fetching_titan.set(true);
-
-        println!("[TITAN-DEBUG] About to spawn async task");
         spawn(async move {
-            println!("[TITAN-DEBUG] Inside spawned async task");
-
-            println!("🔷 Fetching Titan quotes...");
-
-            // Get user pubkey - require valid address for transaction generation
             let user_pk = match user_pubkey {
-                Some(pk) => {
-                    println!("📍 Titan user pubkey: {}", pk);
-                    pk
-                }
+                Some(pk) => pk,
                 None => {
-                    println!("❌ No user pubkey available - cannot generate Titan transaction");
                     if active_titan_quote_generation() == Some(generation) {
                         titan_quote.set(None);
                         fetching_titan.set(false);
@@ -1453,105 +1481,42 @@ pub fn SwapModal(
                     return;
                 }
             };
+            let request = TitanGatewayRouteRequest {
+                input_mint,
+                output_mint,
+                amount: amount_lamports,
+                user_public_key: user_pk,
+                slippage_bps: 50,
+                provider_id: "titan".to_string(),
+            };
+            let result = swap_http_client()
+                .post(gateway::endpoint("/v1/swap/titan/route"))
+                .json(&request)
+                .send()
+                .await;
 
-            println!("[TITAN-DEBUG] User pubkey validated: {}", user_pk);
-
-            // iOS-SAFE: Use timeout wrapper for all operations to prevent iOS from killing the task
-            let timeout_duration = std::time::Duration::from_secs(10);
-
-            // Connect with timeout - release lock immediately after
-            println!("[Titan] Connecting to WebSocket...");
-            let connect_result = tokio::time::timeout(timeout_duration, async {
-                let client_lock = client.lock().await;
-                client_lock.connect().await
-            })
-            .await;
-
-            match connect_result {
-                Ok(Ok(())) => {
-                    println!("[Titan] ✓ Connected successfully");
-                }
-                Ok(Err(e)) => {
-                    println!("❌ Failed to connect to Titan: {}", e);
-                    if active_titan_quote_generation() == Some(generation) {
-                        titan_quote.set(None);
-                        fetching_titan.set(false);
-                    }
-                    return;
-                }
-                Err(_) => {
-                    println!("❌ Titan connection timeout (iOS network issue)");
-                    if active_titan_quote_generation() == Some(generation) {
-                        titan_quote.set(None);
-                        fetching_titan.set(false);
-                    }
-                    return;
-                }
-            }
-
-            // Request quotes with timeout - shorter lock duration
-            println!("[Titan] Requesting swap quotes...");
-            let quote_result = tokio::time::timeout(timeout_duration, async {
-                let client_lock = client.lock().await;
-                client_lock
-                    .request_swap_quotes(
-                        &input_mint,
-                        &output_mint,
-                        amount_lamports,
-                        &user_pk,
-                        Some(50), // 0.5% slippage
-                    )
-                    .await
-            })
-            .await;
-
-            match quote_result {
-                Ok(Ok((provider_name, route))) => {
-                    if active_titan_quote_generation() == Some(generation) {
-                        println!("✅ Titan quote received from provider: {}", provider_name);
-                        println!("📊 Output amount: {} lamports", route.out_amount);
-                        println!(
-                            "🔍 Transaction field present: {}",
-                            route.transaction.is_some()
-                        );
-                        if let Some(ref tx) = route.transaction {
-                            println!("📄 Transaction size: {} bytes", tx.len());
-                        } else {
-                            println!("⚠️ No transaction data in Titan quote!");
+            if active_titan_quote_generation() == Some(generation) {
+                match result {
+                    Ok(response) if response.status().is_success() => {
+                        match response.json::<TitanGatewayRouteResponse>().await {
+                            Ok(response) => {
+                                titan_quote.set(Some(("Titan".to_string(), response.route)))
+                            }
+                            Err(error) => {
+                                eprintln!("Failed to parse Titan gateway response: {error}");
+                                titan_quote.set(None);
+                            }
                         }
-                        titan_quote.set(Some((provider_name, route)));
-                    } else {
-                        println!(
-                            "[Titan] Ignoring stale quote response for generation {generation}"
-                        );
                     }
-                }
-                Ok(Err(e)) => {
-                    println!("❌ Failed to get Titan quote: {}", e);
-                    if active_titan_quote_generation() == Some(generation) {
+                    Ok(response) => {
+                        eprintln!("Titan gateway returned {}", response.status());
+                        titan_quote.set(None);
+                    }
+                    Err(error) => {
+                        eprintln!("Titan gateway request failed: {error}");
                         titan_quote.set(None);
                     }
                 }
-                Err(_) => {
-                    println!("❌ Titan quote request timeout (took > 10s)");
-                    if active_titan_quote_generation() == Some(generation) {
-                        titan_quote.set(None);
-                    }
-                }
-            }
-
-            // Close connection with timeout
-            println!("[Titan] Closing connection...");
-            let close_result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                let client_lock = client.lock().await;
-                client_lock.close().await
-            })
-            .await;
-
-            match close_result {
-                Ok(Ok(())) => println!("[Titan] ✓ Connection closed"),
-                Ok(Err(e)) => println!("[Titan] Warning: close error: {}", e),
-                Err(_) => println!("[Titan] Warning: close timeout"),
             }
 
             if active_titan_quote_generation() == Some(generation) {
@@ -1572,18 +1537,17 @@ pub fn SwapModal(
             let client = swap_http_client();
             // Step 1: Get quote from Dflow
             let quote_url = format!(
-                "https://quote-api.dflow.net/quote?inputMint={}&outputMint={}&amount={}&slippageBps={}",
-                input_mint, output_mint, amount_lamports, slippage_bps
+                "{}?inputMint={}&outputMint={}&amount={}&slippageBps={}",
+                gateway::endpoint("/v1/swap/dflow/quote"),
+                input_mint,
+                output_mint,
+                amount_lamports,
+                slippage_bps
             );
 
             println!("💜 Fetching Dflow quote: {}", quote_url);
 
-            match client
-                .get(&quote_url)
-                .header("x-api-key", partner_secrets::dflow_api_key())
-                .send()
-                .await
-            {
+            match client.get(&quote_url).send().await {
                 Ok(response) => {
                     if active_dflow_quote_generation() != Some(generation) {
                         println!("💜 Ignoring stale Dflow response for generation {generation}");
@@ -1642,8 +1606,11 @@ pub fn SwapModal(
 
             // Build Jupiter Ultra order URL
             let mut url = format!(
-                "https://api.jup.ag/ultra/v1/order?inputMint={}&outputMint={}&amount={}",
-                input_mint, output_mint, amount_lamports
+                "{}?inputMint={}&outputMint={}&amount={}",
+                gateway::endpoint("/v1/swap/jupiter/order"),
+                input_mint,
+                output_mint,
+                amount_lamports
             );
 
             // Add taker (user pubkey) if available for unsigned transaction
@@ -1653,12 +1620,7 @@ pub fn SwapModal(
 
             println!("🪐 Fetching Jupiter Ultra order: {}", url);
 
-            match client
-                .get(&url)
-                .header("x-api-key", partner_secrets::jupiter_api_key())
-                .send()
-                .await
-            {
+            match client.get(&url).send().await {
                 Ok(response) => {
                     if active_jupiter_quote_generation() != Some(generation) {
                         println!(
@@ -1678,6 +1640,7 @@ pub fn SwapModal(
                                 if let Some(error_msg) = &order.error_message {
                                     println!("❌ Jupiter Ultra API Error: {}", error_msg);
                                     jupiter_order_fetched_at.set(None);
+                                    jupiter_order.set(None);
                                     error_message.set(Some(match error_msg.as_str() {
                                         "Taker has insufficient input" => {
                                             "Insufficient balance for this swap".to_string()
@@ -2024,8 +1987,9 @@ pub fn SwapModal(
                 return;
             }
 
-            // Clone custom_rpc at the start so it can be used in multiple spawn blocks
-            let custom_rpc_for_titan = custom_rpc_clone.clone();
+            // Swap traffic uses the managed RPC unless the user chose a custom endpoint.
+            let swap_rpc_url = custom_rpc_clone.clone().unwrap_or_else(gateway::rpc_url);
+            let custom_rpc_for_titan = Some(swap_rpc_url.clone());
 
             // Double-check balance validation
             if let Ok(amount) = selling_amount().parse::<f64>() {
@@ -2282,7 +2246,7 @@ pub fn SwapModal(
                                                 }
                                                 "AUTH_LOCKED" => {
                                                     swapping.set(false);
-                                                    error_message.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                    error_message.set(Some("Too many failed PIN attempts. This wallet is permanently locked and cannot be reset.".to_string()));
                                                     return;
                                                 }
                                                 _ => {}
@@ -2431,8 +2395,7 @@ pub fn SwapModal(
                                     };
 
                                     match client
-                                        .post("https://api.jup.ag/ultra/v1/execute")
-                                        .header("x-api-key", partner_secrets::jupiter_api_key())
+                                        .post(gateway::endpoint("/v1/swap/jupiter/execute"))
                                         .json(&execute_request)
                                         .send()
                                         .await
@@ -2532,7 +2495,7 @@ pub fn SwapModal(
                                                 }
                                                 "AUTH_LOCKED" => {
                                                     swapping.set(false);
-                                                    error_message.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                    error_message.set(Some("Too many failed PIN attempts. This wallet is permanently locked and cannot be reset.".to_string()));
                                                     return;
                                                 }
                                                 _ => {}
@@ -2590,7 +2553,7 @@ pub fn SwapModal(
                         // Clone values for async block
                         let hw_clone = hardware_wallet_clone2.clone();
                         let wallet_info_clone = wallet_clone2.clone();
-                        let custom_rpc_dflow = custom_rpc_clone.clone();
+                        let custom_rpc_dflow = Some(swap_rpc_url.clone());
 
                         // Fetch Dflow swap instructions then build transaction
                         spawn(async move {
@@ -2609,8 +2572,7 @@ pub fn SwapModal(
                             };
 
                             let instructions = match client
-                                .post("https://quote-api.dflow.net/swap-instructions")
-                                .header("x-api-key", partner_secrets::dflow_api_key())
+                                .post(gateway::endpoint("/v1/swap/dflow/instructions"))
                                 .json(&instructions_request)
                                 .send()
                                 .await
@@ -2828,7 +2790,7 @@ pub fn SwapModal(
                                                 }
                                                 "AUTH_LOCKED" => {
                                                     swapping.set(false);
-                                                    error_message.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                    error_message.set(Some("Too many failed PIN attempts. This wallet is permanently locked and cannot be reset.".to_string()));
                                                     return;
                                                 }
                                                 _ => {}

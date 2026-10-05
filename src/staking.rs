@@ -250,11 +250,15 @@ impl StakingClient {
         // Convert SOL to lamports
         let stake_amount_lamports = (stake_amount_sol * 1_000_000_000.0) as u64;
 
-        // Validate minimum stake amount (0.1 SOL)
-        if stake_amount_lamports < 10_000_000 {
-            return Err(StakingError::InvalidAmount(
-                "Minimum stake amount is 0.01 SOL".to_string(),
-            ));
+        // Solana's minimum delegation is network-controlled and can change.
+        let minimum_stake_lamports = crate::rpc::get_stake_minimum_delegation(Some(&self.rpc_url))
+            .await
+            .unwrap_or(1_000_000_000);
+        if stake_amount_lamports < minimum_stake_lamports {
+            return Err(StakingError::InvalidAmount(format!(
+                "Minimum stake amount is {} SOL",
+                minimum_stake_lamports as f64 / 1_000_000_000.0
+            )));
         }
 
         // Parse validator vote account

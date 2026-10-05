@@ -25,6 +25,8 @@ enum ModalMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnlockMode {
+    DevicePin,
+    PinWithDeviceOption,
     Pin,
     Otp,
 }
@@ -50,16 +52,22 @@ fn format_unlock_error_message(err: &str) -> String {
         return match code.as_str() {
             "AUTH_FAILED" | "OTP_BAD_CODE" => "Incorrect code. Please try again.".to_string(),
             "AUTH_LOCKED" => {
-                "Too many failed attempts. Device auth is locked. Use physical factory wipe to recover."
+                "Too many failed PIN attempts. This wallet is permanently locked and cannot be reset."
                     .to_string()
             }
             "BAD_PIN_FORMAT" | "BAD_OTP_FORMAT" => {
                 "Code must be exactly 6 digits.".to_string()
             }
-            "BUTTON_TIMEOUT" => {
-                "No button press detected. Submit the code again, then press the device button within 8 seconds."
-                    .to_string()
-            }
+            "BUTTON_TIMEOUT" | "CONFIRM_TIMEOUT" =>
+                "Confirmation timed out. Retry and follow the prompts on the hardware wallet."
+                    .to_string(),
+            "USER_REJECTED" => "Request rejected on the hardware wallet.".to_string(),
+            "BUSY" =>
+                "Finish or cancel the action currently shown on the hardware wallet, then retry."
+                    .to_string(),
+            "KEYSTORE_CORRUPT" =>
+                "The hardware wallet secure elements reported a fault. Disconnect it and contact support."
+                    .to_string(),
             "AUTH_MODE_MISMATCH" => {
                 "Unlock method does not match the device mode. Open hardware connect and try again."
                     .to_string()
@@ -95,6 +103,7 @@ fn abbreviate_middle(value: &str, prefix_chars: usize, suffix_chars: usize) -> S
 async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
     if let Ok(Some(info)) = wallet.refresh_esp32_info().await {
         return match info.auth_mode {
+            AuthMode::Pin if info.supports_device_pin => Some(UnlockMode::PinWithDeviceOption),
             AuthMode::Pin => Some(UnlockMode::Pin),
             AuthMode::Otp => Some(UnlockMode::Otp),
             _ => None,
@@ -103,6 +112,7 @@ async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
 
     match wallet.get_cached_esp32_info().await {
         Some(info) => match info.auth_mode {
+            AuthMode::Pin if info.supports_device_pin => Some(UnlockMode::PinWithDeviceOption),
             AuthMode::Pin => Some(UnlockMode::Pin),
             AuthMode::Otp => Some(UnlockMode::Otp),
             _ => None,
@@ -514,6 +524,7 @@ pub fn StakeModal(
     let mut error_message = use_signal(|| None as Option<String>);
     let mut validators = use_signal(|| Vec::<ValidatorInfo>::new());
     let mut stake_accounts = use_signal(|| Vec::<DetailedStakeAccount>::new());
+    let mut minimum_stake_sol = use_signal(|| 1.0_f64);
 
     // Add state for staking success modal
     let mut show_success_modal = use_signal(|| false);
@@ -548,8 +559,10 @@ pub fn StakeModal(
     let mut unstake_success_operation = use_signal(|| "".to_string());
     let mut unstake_success_amount = use_signal(|| 0.0);
 
-    // Load validators on component mount
+    // Load validators and the network-controlled minimum delegation on mount.
+    let custom_rpc_for_metadata = custom_rpc.clone();
     use_effect(move || {
+        let custom_rpc_for_metadata = custom_rpc_for_metadata.clone();
         spawn(async move {
             println!("📋 Stake modal opened - loading validators with live data...");
 
@@ -558,7 +571,14 @@ pub fn StakeModal(
             // - Updates with real commission, stake, and skip rates
             // - Falls back to static data if RPC fails
             // - Prints detailed debug info to console
-            let validator_list = get_recommended_validators().await;
+            let (validator_list, minimum_result) = tokio::join!(
+                get_recommended_validators(),
+                crate::rpc::get_stake_minimum_delegation(custom_rpc_for_metadata.as_deref())
+            );
+
+            if let Ok(minimum_lamports) = minimum_result {
+                minimum_stake_sol.set(minimum_lamports as f64 / 1_000_000_000.0);
+            }
 
             // Set default validator (the first one marked as default)
             if let Some(default_validator) = validator_list.iter().find(|v| v.is_default).cloned() {
@@ -872,7 +892,7 @@ pub fn StakeModal(
                                                                     return;
                                                                 }
                                                                 "AUTH_LOCKED" => {
-                                                                    error_message_clone.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                                    error_message_clone.set(Some("Too many failed PIN attempts. This wallet is permanently locked and cannot be reset.".to_string()));
                                                                     show_hardware_approval_clone.set(false);
                                                                     partial_unstaking_clone.set(false);
                                                                     return;
@@ -980,40 +1000,60 @@ pub fn StakeModal(
                             h2 { class: "modal-title", "Unlock Hardware Device" }
                             p { class: "success-message",
                                 match (unlock_mode(), unlock_in_progress()) {
-                                    (Some(UnlockMode::Pin), true) => "Unlocking device...",
-                                    (Some(UnlockMode::Pin), false) => "Enter your 6-digit Device PIN to continue.",
+                                    (Some(UnlockMode::DevicePin), true) => "Enter your PIN on the hardware wallet.",
+                                    (Some(UnlockMode::DevicePin), false) => "Continue on the hardware wallet to keep your PIN off this computer.",
+                                    (Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin), true) => "Unlocking device...",
+                                    (Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin), false) => "Enter your 6-digit hardware-wallet PIN to continue.",
                                     (Some(UnlockMode::Otp), true) => "Code accepted. Press the hardware button once within 8 seconds to continue.",
                                     (Some(UnlockMode::Otp), false) => "Enter your 6-digit authenticator code. After you submit it, press the hardware button once to continue.",
                                     (None, _) => "Enter device unlock code to continue.",
                                 }
                             }
-                            div {
-                                class: "wallet-field",
-                                label {
-                                    match unlock_mode() {
-                                        Some(UnlockMode::Pin) => "Device PIN",
-                                        Some(UnlockMode::Otp) => "Authenticator Code",
-                                        None => "Unlock Code",
+                            if unlock_mode() != Some(UnlockMode::DevicePin) {
+                                div {
+                                    class: "wallet-field",
+                                    label {
+                                        match unlock_mode() {
+                                            Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin) => "Hardware-wallet PIN",
+                                            Some(UnlockMode::Otp) => "Authenticator Code",
+                                            _ => "Unlock Code",
+                                        }
+                                    }
+                                    input {
+                                        r#type: "password",
+                                        value: "{unlock_code}",
+                                        oninput: move |e| {
+                                            unlock_code.set(
+                                                e.value()
+                                                    .chars()
+                                                    .filter(|c| c.is_ascii_digit())
+                                                    .take(6)
+                                                    .collect(),
+                                            )
+                                        },
+                                        placeholder: "6 digits",
+                                        maxlength: "6",
+                                        autocomplete: "off",
+                                        inputmode: "numeric",
+                                        pattern: "[0-9]*",
+                                        disabled: unlock_in_progress()
                                     }
                                 }
-                                input {
-                                    r#type: "password",
-                                    value: "{unlock_code}",
-                                    oninput: move |e| {
-                                        unlock_code.set(
-                                            e.value()
-                                                .chars()
-                                                .filter(|c| c.is_ascii_digit())
-                                                .take(6)
-                                                .collect(),
-                                        )
-                                    },
-                                    placeholder: "6 digits",
-                                    maxlength: "6",
-                                    autocomplete: "off",
-                                    inputmode: "numeric",
-                                    pattern: "[0-9]*",
-                                    disabled: unlock_in_progress()
+                            }
+                            if unlock_mode() == Some(UnlockMode::PinWithDeviceOption) {
+                                details {
+                                    class: "hardware-inline-note",
+                                    summary { "Prefer to enter the PIN on the wallet?" }
+                                    button {
+                                        class: "connect-device-button rescan-button",
+                                        disabled: unlock_in_progress(),
+                                        onclick: move |_| {
+                                            unlock_code.set(String::new());
+                                            unlock_error.set(None);
+                                            unlock_mode.set(Some(UnlockMode::DevicePin));
+                                        },
+                                        "Use PIN on Wallet"
+                                    }
                                 }
                             }
                             if let Some(err) = unlock_error() {
@@ -1048,18 +1088,21 @@ pub fn StakeModal(
                                             };
 
                                             let code = unlock_code();
-                                            if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+                                            let mode = unlock_mode();
+                                            if mode != Some(UnlockMode::DevicePin)
+                                                && (code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()))
+                                            {
                                                 unlock_error.set(Some("Code must be exactly 6 digits.".to_string()));
                                                 return;
                                             }
 
-                                            let mode = unlock_mode();
                                             spawn(async move {
                                                 unlock_in_progress.set(true);
                                                 unlock_error.set(None);
 
                                                 let unlock_result = match mode {
-                                                    Some(UnlockMode::Pin) => hw.unlock_pin(&code).await.map(|_| ()),
+                                                    Some(UnlockMode::DevicePin) => hw.unlock_on_device().await.map(|_| ()),
+                                                    Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin) => hw.unlock_pin(&code).await.map(|_| ()),
                                                     Some(UnlockMode::Otp) => hw.unlock_otp(&code).await.map(|_| ()),
                                                     None => Err("Unknown unlock mode".into()),
                                                 };
@@ -1083,11 +1126,15 @@ pub fn StakeModal(
                                     },
                                     if unlock_in_progress() {
                                         match unlock_mode() {
+                                            Some(UnlockMode::DevicePin) => "Waiting for Device...",
                                             Some(UnlockMode::Otp) => "Press Device Button...",
                                             _ => "Unlocking...",
                                         }
                                     } else {
-                                        "Unlock Device"
+                                        match unlock_mode() {
+                                            Some(UnlockMode::DevicePin) => "Enter PIN on Device",
+                                            _ => "Unlock Device",
+                                        }
                                     }
                                 }
                             }
@@ -1242,7 +1289,7 @@ pub fn StakeModal(
                                 class: "amount-input-field",
                                 r#type: "number",
                                 step: "0.000001",
-                                min: "0.01",
+                                min: "{minimum_stake_sol()}",
                                 max: "{current_balance}",
                                 placeholder: "0.0",
                                 value: "{amount}",
@@ -1253,7 +1300,7 @@ pub fn StakeModal(
                             }
                             div {
                                 class: "field-hint",
-                                "Minimum stake amount: 0.01 SOL"
+                                {format!("Minimum stake amount: {} SOL", minimum_stake_sol())}
                             }
                         }
 
@@ -1299,7 +1346,7 @@ pub fn StakeModal(
                                     div {
                                         class: "no-stakes-description",
                                         {
-                                            if current_balance >= 0.01 {
+                                            if current_balance >= minimum_stake_sol() {
                                                 let recommended_validator = selected_validator()
                                                     .map(|validator| validator.name)
                                                     .unwrap_or_else(|| "the recommended validator".to_string());
@@ -1308,13 +1355,13 @@ pub fn StakeModal(
                                                     recommended_validator
                                                 )
                                             } else {
-                                                "This wallet does not have any stake accounts yet. Add at least 0.01 SOL plus fees, then stake to get started.".to_string()
+                                                format!("This wallet does not have any stake accounts yet. Add at least {} SOL plus fees, then stake to get started.", minimum_stake_sol())
                                             }
                                         }
                                     }
                                     div {
                                         class: "no-stakes-hint",
-                                        if current_balance >= 0.01 {
+                                        if current_balance >= minimum_stake_sol() {
                                             "Your recommended validator is already preselected in the Stake SOL tab."
                                         } else {
                                             "Open Stake SOL to see the recommended validator and the minimum amount required."
@@ -1329,7 +1376,7 @@ pub fn StakeModal(
                                                 error_message.set(None);
                                                 show_validator_dropdown.set(false);
                                             },
-                                            if current_balance >= 0.01 {
+                                            if current_balance >= minimum_stake_sol() {
                                                 "Stake SOL"
                                             } else {
                                                 "View Staking Setup"
@@ -1593,7 +1640,7 @@ pub fn StakeModal(
                                                                                             return;
                                                                                         }
                                                                                         "AUTH_LOCKED" => {
-                                                                                            error_message_clone.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                                                            error_message_clone.set(Some("Too many failed PIN attempts. This wallet is permanently locked and cannot be reset.".to_string()));
                                                                                             show_hardware_approval_clone.set(false);
                                                                                             withdrawing_clone.set(false);
                                                                                             return;
@@ -1715,7 +1762,7 @@ pub fn StakeModal(
                                                                                             return;
                                                                                         }
                                                                                         "AUTH_LOCKED" => {
-                                                                                            error_message_clone.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                                                            error_message_clone.set(Some("Too many failed PIN attempts. This wallet is permanently locked and cannot be reset.".to_string()));
                                                                                             show_hardware_approval_clone.set(false);
                                                                                             instant_unstaking_clone.set(false);
                                                                                             return;
@@ -1849,7 +1896,7 @@ pub fn StakeModal(
                                                                                             return;
                                                                                         }
                                                                                         "AUTH_LOCKED" => {
-                                                                                            error_message_clone.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                                                            error_message_clone.set(Some("Too many failed PIN attempts. This wallet is permanently locked and cannot be reset.".to_string()));
                                                                                             show_hardware_approval_clone.set(false);
                                                                                             normal_unstaking_clone.set(false);
                                                                                             return;
@@ -1889,15 +1936,15 @@ pub fn StakeModal(
                     if mode() == ModalMode::Stake {
                         button {
                             class: "button-standard primary",
-                            disabled: staking() || amount().is_empty() || amount().parse::<f64>().unwrap_or(0.0) < 0.01 || selected_validator().is_none(),
+                            disabled: staking() || amount().is_empty() || amount().parse::<f64>().unwrap_or(0.0) < minimum_stake_sol() || selected_validator().is_none(),
                             onclick: move |_| {
                                 error_message.set(None);
 
                                 // Validate amount
                                 let stake_amount = match amount().parse::<f64>() {
-                                    Ok(amt) if amt >= 0.01 && amt <= current_balance => amt,
+                                    Ok(amt) if amt >= minimum_stake_sol() && amt <= current_balance => amt,
                                     _ => {
-                                        error_message.set(Some("Please enter a valid amount between 0.01 SOL and your available balance".to_string()));
+                                        error_message.set(Some(format!("Please enter a valid amount between {} SOL and your available balance", minimum_stake_sol())));
                                         return;
                                     }
                                 };
@@ -1975,7 +2022,7 @@ pub fn StakeModal(
                                                             return;
                                                         }
                                                         "AUTH_LOCKED" => {
-                                                            error_message.set(Some("Device auth is locked. Use physical factory wipe to recover.".to_string()));
+                                                            error_message.set(Some("Too many failed PIN attempts. This wallet is permanently locked and cannot be reset.".to_string()));
                                                             staking.set(false);
                                                             show_hardware_approval.set(false);
                                                             return;

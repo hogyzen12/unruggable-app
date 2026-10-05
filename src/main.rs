@@ -20,14 +20,14 @@ macro_rules! eprintln {
     ($($arg:tt)*) => {{}};
 }
 
+mod asset_hosting;
 mod clipboard;
 mod components;
 mod config;
 mod currency;
 mod currency_utils;
-mod asset_hosting;
+mod gateway;
 mod hardware;
-mod partner_secrets;
 mod pin;
 mod prices;
 mod privacycash;
@@ -83,10 +83,9 @@ const DESKTOP_LOCK_MONITOR_SCRIPT: &str = r#"
         } catch (_) {}
     };
 
-    window.addEventListener("blur", () => safeSend("blur"));
     window.addEventListener("focus", () => safeSend("focus"));
     document.addEventListener("visibilitychange", () => {
-        safeSend(document.hidden ? "hidden" : "focus");
+        if (!document.hidden) safeSend("focus");
     });
 
     safeSend("ready");
@@ -176,6 +175,7 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    crate::asset_hosting::use_app_asset_handler();
     let main_css_href = crate::asset_hosting::app_asset("main.css");
     let pin_css_href = crate::asset_hosting::app_asset("pin-premium.css");
     let mut show_onboarding =
@@ -264,12 +264,7 @@ fn App() -> Element {
                         .unwrap_or_default();
 
                     match event_type {
-                        "focus" => app_security.record_activity(),
-                        "blur" | "hidden" => {
-                            if storage::has_pin() && !show_onboarding() && !is_locked() {
-                                app_security.lock_now("window backgrounded");
-                            }
-                        }
+                        "focus" | "ready" => app_security.record_activity(),
                         _ => {}
                     }
                 }

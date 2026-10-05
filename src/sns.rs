@@ -252,11 +252,14 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_sync_resolution() {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_sync_resolution() {
         let resolver = SnsResolver::new("dummy".to_string());
 
-        match resolver.resolve_address("bonfida.sol") {
+        let result = tokio::task::spawn_blocking(move || resolver.resolve_address("bonfida.sol"))
+            .await
+            .expect("sync resolver task should not panic");
+        match result {
             Ok(pubkey) => {
                 println!("✅ Sync resolution: bonfida.sol -> {}", pubkey);
             }

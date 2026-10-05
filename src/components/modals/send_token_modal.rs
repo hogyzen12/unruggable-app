@@ -23,6 +23,8 @@ const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com"
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum UnlockMode {
+    DevicePin,
+    PinWithDeviceOption,
     Pin,
     Otp,
 }
@@ -48,16 +50,22 @@ fn format_unlock_error_message(err: &str) -> String {
         return match code.as_str() {
             "AUTH_FAILED" | "OTP_BAD_CODE" => "Incorrect code. Please try again.".to_string(),
             "AUTH_LOCKED" => {
-                "Too many failed attempts. Device auth is locked. Use physical factory wipe to recover."
+                "Too many failed PIN attempts. This wallet is permanently locked and cannot be reset."
                     .to_string()
             }
             "BAD_PIN_FORMAT" | "BAD_OTP_FORMAT" => {
                 "Code must be exactly 6 digits.".to_string()
             }
-            "BUTTON_TIMEOUT" => {
-                "No button press detected. Submit the code again, then press the device button within 8 seconds."
-                    .to_string()
-            }
+            "BUTTON_TIMEOUT" | "CONFIRM_TIMEOUT" =>
+                "Confirmation timed out. Retry and follow the prompts on the hardware wallet."
+                    .to_string(),
+            "USER_REJECTED" => "Request rejected on the hardware wallet.".to_string(),
+            "BUSY" =>
+                "Finish or cancel the action currently shown on the hardware wallet, then retry."
+                    .to_string(),
+            "KEYSTORE_CORRUPT" =>
+                "The hardware wallet secure elements reported a fault. Disconnect it and contact support."
+                    .to_string(),
             "AUTH_MODE_MISMATCH" => {
                 "Unlock method does not match the device mode. Open hardware connect and try again."
                     .to_string()
@@ -75,6 +83,7 @@ fn format_unlock_error_message(err: &str) -> String {
 async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
     if let Ok(Some(info)) = wallet.refresh_esp32_info().await {
         return match info.auth_mode {
+            AuthMode::Pin if info.supports_device_pin => Some(UnlockMode::PinWithDeviceOption),
             AuthMode::Pin => Some(UnlockMode::Pin),
             AuthMode::Otp => Some(UnlockMode::Otp),
             _ => None,
@@ -83,6 +92,7 @@ async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
 
     match wallet.get_cached_esp32_info().await {
         Some(info) => match info.auth_mode {
+            AuthMode::Pin if info.supports_device_pin => Some(UnlockMode::PinWithDeviceOption),
             AuthMode::Pin => Some(UnlockMode::Pin),
             AuthMode::Otp => Some(UnlockMode::Otp),
             _ => None,
@@ -287,7 +297,7 @@ pub fn SendTokenModal(
     // Add state for hardware wallet approval overlay - always declared
     let mut show_hardware_approval = use_signal(|| false);
     let mut show_unlock_modal = use_signal(|| false);
-    let unlock_mode = use_signal(|| None as Option<UnlockMode>);
+    let mut unlock_mode = use_signal(|| None as Option<UnlockMode>);
     let mut unlock_code = use_signal(|| "".to_string());
     let mut unlock_error = use_signal(|| None as Option<String>);
     let mut unlock_in_progress = use_signal(|| false);
@@ -557,7 +567,7 @@ pub fn SendTokenModal(
                                         return;
                                     } else if code == "AUTH_LOCKED" {
                                         error_message.set(Some(
-                                            "Device auth is locked. Use physical factory wipe to recover."
+                                            "Too many failed PIN attempts. This wallet is permanently locked and cannot be reset."
                                                 .to_string(),
                                         ));
                                         sending.set(false);
@@ -793,7 +803,7 @@ pub fn SendTokenModal(
                                     return;
                                 } else if code == "AUTH_LOCKED" {
                                     error_message.set(Some(
-                                        "Device auth is locked. Use physical factory wipe to recover."
+                                        "Too many failed PIN attempts. This wallet is permanently locked and cannot be reset."
                                             .to_string(),
                                     ));
                                     sending.set(false);
@@ -924,40 +934,60 @@ pub fn SendTokenModal(
                             h2 { class: "modal-title", "Unlock Hardware Device" }
                             p { class: "success-message",
                                 match (unlock_mode(), unlock_in_progress()) {
-                                    (Some(UnlockMode::Pin), true) => "Unlocking device...",
-                                    (Some(UnlockMode::Pin), false) => "Enter your 6-digit Device PIN to continue signing.",
+                                    (Some(UnlockMode::DevicePin), true) => "Enter your PIN on the hardware wallet.",
+                                    (Some(UnlockMode::DevicePin), false) => "Continue on the hardware wallet to keep your PIN off this computer.",
+                                    (Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin), true) => "Unlocking device...",
+                                    (Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin), false) => "Enter your 6-digit hardware-wallet PIN to continue signing.",
                                     (Some(UnlockMode::Otp), true) => "Code accepted. Press the hardware button once within 8 seconds to continue signing.",
                                     (Some(UnlockMode::Otp), false) => "Enter your 6-digit authenticator code. After you submit it, press the hardware button once to continue signing.",
                                     (None, _) => "Enter device unlock code to continue signing.",
                                 }
                             }
-                            div {
-                                class: "wallet-field",
-                                label {
-                                    match unlock_mode() {
-                                        Some(UnlockMode::Pin) => "Device PIN",
-                                        Some(UnlockMode::Otp) => "Authenticator Code",
-                                        None => "Unlock Code",
+                            if unlock_mode() != Some(UnlockMode::DevicePin) {
+                                div {
+                                    class: "wallet-field",
+                                    label {
+                                        match unlock_mode() {
+                                            Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin) => "Hardware-wallet PIN",
+                                            Some(UnlockMode::Otp) => "Authenticator Code",
+                                            _ => "Unlock Code",
+                                        }
+                                    }
+                                    input {
+                                        r#type: "password",
+                                        value: "{unlock_code}",
+                                        oninput: move |e| {
+                                            unlock_code.set(
+                                                e.value()
+                                                    .chars()
+                                                    .filter(|c| c.is_ascii_digit())
+                                                    .take(6)
+                                                    .collect(),
+                                            )
+                                        },
+                                        placeholder: "6 digits",
+                                        maxlength: "6",
+                                        autocomplete: "off",
+                                        inputmode: "numeric",
+                                        pattern: "[0-9]*",
+                                        disabled: unlock_in_progress()
                                     }
                                 }
-                                input {
-                                    r#type: "password",
-                                    value: "{unlock_code}",
-                                    oninput: move |e| {
-                                        unlock_code.set(
-                                            e.value()
-                                                .chars()
-                                                .filter(|c| c.is_ascii_digit())
-                                                .take(6)
-                                                .collect(),
-                                        )
-                                    },
-                                    placeholder: "6 digits",
-                                    maxlength: "6",
-                                    autocomplete: "off",
-                                    inputmode: "numeric",
-                                    pattern: "[0-9]*",
-                                    disabled: unlock_in_progress()
+                            }
+                            if unlock_mode() == Some(UnlockMode::PinWithDeviceOption) {
+                                details {
+                                    class: "hardware-inline-note",
+                                    summary { "Prefer to enter the PIN on the wallet?" }
+                                    button {
+                                        class: "connect-device-button rescan-button",
+                                        disabled: unlock_in_progress(),
+                                        onclick: move |_| {
+                                            unlock_code.set(String::new());
+                                            unlock_error.set(None);
+                                            unlock_mode.set(Some(UnlockMode::DevicePin));
+                                        },
+                                        "Use PIN on Wallet"
+                                    }
                                 }
                             }
                             if let Some(err) = unlock_error() {
@@ -991,19 +1021,22 @@ pub fn SendTokenModal(
                                             };
 
                                             let code = unlock_code();
-                                            if code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()) {
+                                            let mode = unlock_mode();
+                                            if mode != Some(UnlockMode::DevicePin)
+                                                && (code.len() != 6 || !code.chars().all(|c| c.is_ascii_digit()))
+                                            {
                                                 unlock_error.set(Some("Code must be exactly 6 digits.".to_string()));
                                                 return;
                                             }
 
-                                            let mode = unlock_mode();
                                             let execute_send_for_unlock = Rc::clone(&execute_send_for_unlock);
                                             spawn(async move {
                                                 unlock_in_progress.set(true);
                                                 unlock_error.set(None);
 
                                                 let unlock_result = match mode {
-                                                    Some(UnlockMode::Pin) => hw.unlock_pin(&code).await.map(|_| ()),
+                                                    Some(UnlockMode::DevicePin) => hw.unlock_on_device().await.map(|_| ()),
+                                                    Some(UnlockMode::PinWithDeviceOption | UnlockMode::Pin) => hw.unlock_pin(&code).await.map(|_| ()),
                                                     Some(UnlockMode::Otp) => hw.unlock_otp(&code).await.map(|_| ()),
                                                     None => Err("Unknown unlock mode".into()),
                                                 };
@@ -1026,11 +1059,15 @@ pub fn SendTokenModal(
                                     },
                                     if unlock_in_progress() {
                                         match unlock_mode() {
+                                            Some(UnlockMode::DevicePin) => "Waiting for Device...",
                                             Some(UnlockMode::Otp) => "Press Device Button...",
                                             _ => "Unlocking...",
                                         }
                                     } else {
-                                        "Unlock and Retry"
+                                        match unlock_mode() {
+                                            Some(UnlockMode::DevicePin) => "Enter PIN on Device",
+                                            _ => "Unlock and Retry",
+                                        }
                                     }
                                 }
                             }
