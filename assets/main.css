@@ -7931,6 +7931,12 @@ body:has(.token-item-selected) .token-item:hover {
     color: #f59e0b;
 }
 
+.status-badge.deactivating {
+    background: #2a2a2a;
+    border-color: #4a4a4a;
+    color: #fb923c;
+}
+
 .status-badge.inactive {
     background: #2a2a2a;
     border-color: #4a4a4a;

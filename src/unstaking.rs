@@ -237,16 +237,16 @@ pub async fn instant_unstake_stake_account(
     );
 
     // Validate active stake account
-    if stake_account.state != StakeAccountState::Delegated {
+    if stake_account.state != StakeAccountState::Delegated
+        || !stake_account.is_staker_authority
+        || !stake_account.is_withdrawer_authority
+    {
         return Err(StakingError::InvalidAmount(
-            "Can only instant unstake active stake accounts".to_string(),
+            "Instant unstake requires an active account controlled by this wallet's stake and withdraw authorities".to_string(),
         ));
     }
 
-    let stake_balance_sol = (stake_account
-        .balance
-        .saturating_sub(stake_account.rent_exempt_reserve)) as f64
-        / 1_000_000_000.0;
+    let stake_balance_sol = stake_account.displayed_stake_lamports() as f64 / 1_000_000_000.0;
     println!("Stake account balance: {:.6} SOL", stake_balance_sol);
 
     // Create transaction client
@@ -367,6 +367,8 @@ pub async fn instant_unstake_stake_account(
 /// Check if a stake account can be instantly unstaked
 pub fn can_instant_unstake(stake_account: &DetailedStakeAccount) -> bool {
     stake_account.state == StakeAccountState::Delegated
+        && stake_account.is_staker_authority
+        && stake_account.is_withdrawer_authority
 }
 
 // Build a normal deactivate stake instruction for regular unstaking
@@ -421,16 +423,19 @@ pub async fn normal_unstake_stake_account(
     );
 
     // Validate that this is an active stake account that can be deactivated
-    if stake_account.state != StakeAccountState::Delegated {
+    if !matches!(
+        stake_account.state,
+        StakeAccountState::Delegated | StakeAccountState::Initialized
+    ) || stake_account.delegated_stake == 0
+        || !stake_account.is_staker_authority
+    {
         return Err(StakingError::InvalidAmount(
-            "Can only deactivate delegated stake accounts".to_string(),
+            "This wallet is not the stake authority for an active or activating delegation"
+                .to_string(),
         ));
     }
 
-    let stake_balance_sol = (stake_account
-        .balance
-        .saturating_sub(stake_account.rent_exempt_reserve)) as f64
-        / 1_000_000_000.0;
+    let stake_balance_sol = stake_account.displayed_stake_lamports() as f64 / 1_000_000_000.0;
     println!("Stake account balance: {:.6} SOL", stake_balance_sol);
 
     // Create transaction client
@@ -551,8 +556,11 @@ pub async fn normal_unstake_stake_account(
 
 /// Check if a stake account can be normally unstaked (deactivated)
 pub fn can_normal_unstake(stake_account: &DetailedStakeAccount) -> bool {
-    // Can only deactivate delegated (active) stake accounts
-    stake_account.state == StakeAccountState::Delegated
+    matches!(
+        stake_account.state,
+        StakeAccountState::Delegated | StakeAccountState::Initialized
+    ) && stake_account.delegated_stake > 0
+        && stake_account.is_staker_authority
 }
 
 /// Build a split stake instruction
@@ -616,10 +624,17 @@ pub async fn partial_unstake_stake_account(
     );
     println!("  Amount to unstake: {:.6} SOL", amount_to_unstake_sol);
 
-    // Validate that this is an active stake account
-    if stake_account.state != StakeAccountState::Delegated {
+    if !amount_to_unstake_sol.is_finite() || amount_to_unstake_sol <= 0.0 {
         return Err(StakingError::InvalidAmount(
-            "Can only partially unstake delegated stake accounts".to_string(),
+            "Partial unstake amount must be a positive number".to_string(),
+        ));
+    }
+
+    // Validate that this is an active stake account
+    if stake_account.state != StakeAccountState::Delegated || !stake_account.is_staker_authority {
+        return Err(StakingError::InvalidAmount(
+            "Partial unstake requires an active account controlled by this wallet's stake authority"
+                .to_string(),
         ));
     }
 
@@ -627,30 +642,28 @@ pub async fn partial_unstake_stake_account(
     let amount_to_unstake_lamports = (amount_to_unstake_sol * 1_000_000_000.0) as u64;
 
     // Get current staked amount (excluding rent reserve)
-    let current_staked = stake_account
-        .balance
-        .saturating_sub(stake_account.rent_exempt_reserve);
+    let current_staked = stake_account.delegated_stake;
 
     // Validate amount
-    if amount_to_unstake_lamports == 0 {
+    if amount_to_unstake_lamports < crate::staking::APP_MINIMUM_STAKE_LAMPORTS {
         return Err(StakingError::InvalidAmount(
-            "Amount must be greater than 0".to_string(),
+            "Partial unstake amount must be at least 1 SOL".to_string(),
         ));
     }
 
-    if amount_to_unstake_lamports > current_staked {
+    if amount_to_unstake_lamports >= current_staked {
         return Err(StakingError::InvalidAmount(format!(
-            "Cannot unstake {} SOL - only {} SOL available (excluding rent)",
+            "Cannot partially unstake {} SOL from {} SOL; use full unstake instead",
             amount_to_unstake_sol,
             current_staked as f64 / 1_000_000_000.0
         )));
     }
 
-    // Require minimum balance remaining (0.01 SOL)
+    // Both sides of a split delegation must respect the product/network floor.
     let remaining_balance = current_staked.saturating_sub(amount_to_unstake_lamports);
-    if remaining_balance > 0 && remaining_balance < 10_000_000 {
+    if remaining_balance < crate::staking::APP_MINIMUM_STAKE_LAMPORTS {
         return Err(StakingError::InvalidAmount(
-            "Remaining stake must be at least 0.01 SOL or 0 (full unstake)".to_string(),
+            "At least 1 SOL must remain delegated; use full unstake instead".to_string(),
         ));
     }
 
@@ -832,13 +845,10 @@ pub async fn partial_unstake_stake_account(
 
 /// Check if a stake account can be partially unstaked
 pub fn can_partial_unstake(stake_account: &DetailedStakeAccount) -> bool {
-    // Can only partially unstake delegated (active) stake accounts
-    // And must have more than minimum (0.01 SOL) to make splitting worthwhile
-    let available = stake_account
-        .balance
-        .saturating_sub(stake_account.rent_exempt_reserve);
-    stake_account.state == StakeAccountState::Delegated && available > 20_000_000
-    // > 0.02 SOL
+    stake_account.state == StakeAccountState::Delegated
+        && stake_account.is_staker_authority
+        && stake_account.delegated_stake
+            >= crate::staking::APP_MINIMUM_STAKE_LAMPORTS.saturating_mul(2)
 }
 
 /// Build a withdraw stake instruction
@@ -909,7 +919,9 @@ pub async fn withdraw_stake_account(
     );
 
     // Validate that this is an inactive stake account
-    if stake_account.state != StakeAccountState::Uninitialized {
+    if stake_account.state != StakeAccountState::Uninitialized
+        || !stake_account.is_withdrawer_authority
+    {
         return Err(StakingError::InvalidAmount(
             "Can only withdraw from inactive stake accounts. Account must be fully deactivated first.".to_string()
         ));
@@ -1050,6 +1062,7 @@ pub async fn withdraw_stake_account(
 
 /// Check if a stake account can be withdrawn
 pub fn can_withdraw(stake_account: &DetailedStakeAccount) -> bool {
-    // Can only withdraw from inactive (uninitialized) stake accounts with a balance
-    stake_account.state == StakeAccountState::Uninitialized && stake_account.balance > 0
+    stake_account.state == StakeAccountState::Uninitialized
+        && stake_account.is_withdrawer_authority
+        && stake_account.balance > 0
 }

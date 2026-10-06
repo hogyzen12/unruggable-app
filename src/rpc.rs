@@ -3,7 +3,7 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::error::Error;
 
 const DEFAULT_RPC_URL: &str = "https://johna-k3cr1v-fast-mainnet.helius-rpc.com";
@@ -391,13 +391,13 @@ pub async fn get_token_accounts_by_owner(
 // =================== STAKE ACCOUNT SUPPORT ===================
 
 /// Stake account specific structures for parsing getProgramAccounts response
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeAccountRpcData {
     pub account: StakeAccountData,
     pub pubkey: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeAccountData {
     pub data: StakeParsedData,
     pub executable: bool,
@@ -405,30 +405,31 @@ pub struct StakeAccountData {
     pub owner: String,
     #[serde(rename = "rentEpoch")]
     pub rent_epoch: u64,
-    pub space: u64,
+    #[serde(default)]
+    pub space: Option<u64>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeParsedData {
     pub parsed: StakeParsedInfo,
     pub program: String,
     pub space: u64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeParsedInfo {
     pub info: StakeInfo,
     #[serde(rename = "type")]
     pub account_type: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeInfo {
-    pub meta: StakeMeta,
+    pub meta: Option<StakeMeta>,
     pub stake: Option<StakeDetails>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeMeta {
     pub authorized: StakeAuthorized,
     pub lockup: StakeLockup,
@@ -436,28 +437,28 @@ pub struct StakeMeta {
     pub rent_exempt_reserve: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeAuthorized {
     pub staker: String,
     pub withdrawer: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeLockup {
     pub custodian: String,
     pub epoch: u64,
     #[serde(rename = "unixTimestamp")]
-    pub unix_timestamp: u64,
+    pub unix_timestamp: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeDetails {
     #[serde(rename = "creditsObserved")]
     pub credits_observed: u64,
     pub delegation: StakeDelegation,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct StakeDelegation {
     #[serde(rename = "activationEpoch")]
     pub activation_epoch: String,
@@ -466,7 +467,8 @@ pub struct StakeDelegation {
     pub stake: String,
     pub voter: String,
     #[serde(rename = "warmupCooldownRate")]
-    pub warmup_cooldown_rate: f64,
+    #[serde(default)]
+    pub warmup_cooldown_rate: Option<f64>,
 }
 
 /// Epoch information structure
@@ -495,18 +497,46 @@ pub async fn get_stake_accounts_by_owner(
 
     println!("🔍 Fetching stake accounts for wallet: {}", wallet_address);
 
+    // A stake account has separate staker and withdraw authorities. Query both
+    // canonical bincode offsets and de-duplicate the result so delegated,
+    // deactivating, and withdraw-only accounts all remain visible.
+    let (staker_accounts, withdrawer_accounts) = tokio::join!(
+        fetch_stake_accounts_at_authority_offset(&client, url, wallet_address, 12, 1),
+        fetch_stake_accounts_at_authority_offset(&client, url, wallet_address, 44, 2),
+    );
+    let mut accounts = BTreeMap::new();
+    for account in staker_accounts?
+        .into_iter()
+        .chain(withdrawer_accounts?.into_iter())
+    {
+        accounts.insert(account.pubkey.clone(), account);
+    }
+
+    let accounts = accounts.into_values().collect::<Vec<_>>();
+    println!("✅ Found {} unique stake accounts", accounts.len());
+    Ok(accounts)
+}
+
+async fn fetch_stake_accounts_at_authority_offset(
+    client: &Client,
+    url: &str,
+    wallet_address: &str,
+    offset: usize,
+    request_id: u64,
+) -> Result<Vec<StakeAccountRpcData>, String> {
     let request = RpcRequest {
         jsonrpc: "2.0".to_string(),
-        id: 1,
+        id: request_id,
         method: "getProgramAccounts".to_string(),
         params: vec![
             serde_json::Value::String("Stake11111111111111111111111111111111111111".to_string()),
             serde_json::json!({
                 "encoding": "jsonParsed",
+                "commitment": "confirmed",
                 "filters": [
                     {
                         "memcmp": {
-                            "offset": 44,
+                            "offset": offset,
                             "bytes": wallet_address
                         }
                     }
@@ -541,7 +571,6 @@ pub async fn get_stake_accounts_by_owner(
     let rpc_response: RpcResponse<Vec<StakeAccountRpcData>> = serde_json::from_value(json)
         .map_err(|e| format!("Failed to deserialize response: {}", e))?;
 
-    println!("✅ Found {} stake accounts", rpc_response.result.len());
     Ok(rpc_response.result)
 }
 
@@ -1449,6 +1478,80 @@ mod tests {
             "error": { "code": -32601, "message": "unsupported" }
         }))
         .is_err());
+    }
+
+    #[test]
+    fn parses_current_stake_account_without_legacy_warmup_rate() {
+        let response: RpcResponse<Vec<StakeAccountRpcData>> = serde_json::from_value(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": [{
+                "pubkey": "Stake11111111111111111111111111111111111111",
+                "account": {
+                    "data": {
+                        "parsed": {
+                            "info": {
+                                "meta": {
+                                    "authorized": {
+                                        "staker": "11111111111111111111111111111111",
+                                        "withdrawer": "11111111111111111111111111111111"
+                                    },
+                                    "lockup": {
+                                        "custodian": "11111111111111111111111111111111",
+                                        "epoch": 0,
+                                        "unixTimestamp": -1
+                                    },
+                                    "rentExemptReserve": "2282880"
+                                },
+                                "stake": {
+                                    "creditsObserved": 123,
+                                    "delegation": {
+                                        "activationEpoch": "800",
+                                        "deactivationEpoch": "18446744073709551615",
+                                        "stake": "1500000000",
+                                        "voter": "Vote111111111111111111111111111111111111111"
+                                    }
+                                }
+                            },
+                            "type": "delegated"
+                        },
+                        "program": "stake",
+                        "space": 200
+                    },
+                    "executable": false,
+                    "lamports": 1502282880,
+                    "owner": "Stake11111111111111111111111111111111111111",
+                    "rentEpoch": u64::MAX
+                }
+            }]
+        }))
+        .expect("current jsonParsed stake response should deserialize");
+
+        let account = &response.result[0];
+        let delegation = &account
+            .account
+            .data
+            .parsed
+            .info
+            .stake
+            .as_ref()
+            .unwrap()
+            .delegation;
+        assert_eq!(delegation.stake, "1500000000");
+        assert_eq!(delegation.warmup_cooldown_rate, None);
+        assert_eq!(
+            account
+                .account
+                .data
+                .parsed
+                .info
+                .meta
+                .as_ref()
+                .unwrap()
+                .lockup
+                .unix_timestamp,
+            -1
+        );
     }
 
     #[test]

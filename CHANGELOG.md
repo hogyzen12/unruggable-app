@@ -2,7 +2,7 @@
 
 ## Unreleased — v2.0.0
 
-Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The package version remains `1.1.1` until release qualification is complete.
+Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The package version remains `1.1.1` until release qualification is complete.
 
 ### Added
 
@@ -37,7 +37,7 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - App locking now occurs after five minutes of actual inactivity. Merely switching windows no longer locks the app or tears down the hardware session.
 - Jupiter, DFlow, and Titan swap requests now use the managed API backend. Provider credentials and the obsolete direct Titan WebSocket client are no longer shipped in the desktop binary.
 - Swap transaction RPC calls use the managed RPC by default while continuing to honor a user-selected custom RPC.
-- Native staking reads and enforces Solana's live minimum delegation instead of assuming 0.01 SOL.
+- Native staking uses the managed RPC by default, reads Solana's live minimum delegation, and enforces the greater of that value and the app's 1 SOL floor in both the UI and transaction layer.
 - Jito-enabled transactions retain the finalized 4,200-lamport Jito tip and 100,000-lamport Jules tip, using the official eight-account Jito allow-list.
 - Jupiter swaps are built from managed gateway instructions and submitted through the configured RPC, avoiding the unreliable Ultra execute path while preserving local hardware signing and review.
 - CurrentV2 hardware transactions with the tip bundle include the exact firmware marker guard as instruction one, using a 512-slot review window. Software and legacy transactions do not add this marker-only instruction or slot lookup.
@@ -60,6 +60,11 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - Fixed the existing synchronous SNS test so the full desktop suite runs inside a Tokio runtime.
 - Fixed some larger swaps failing at RPC submission with `Invalid Request: decoded too large`.
 - Fixed the connected hardware-wallet row overflowing and inheriting the transaction-approval icon layout in the wallet selector.
+- Fixed native stake scans failing against current `jsonParsed` RPC responses that omit the legacy `warmupCooldownRate` field.
+- Fixed stake discovery to inspect both stake and withdrawal authorities, then de-duplicate accounts controlled through both roles.
+- Fixed displayed and aggregate stake balances using total account lamports minus rent instead of the RPC's delegated stake amount.
+- Fixed activation/deactivation epoch boundaries, added a distinct deactivating state, and restricted deactivate, split, instant-unstake, and withdraw actions to the authority required by each operation.
+- Fixed staking insufficient-balance errors reporting the wallet's SOL balance as though it were lamports.
 
 ### Compatibility and operations
 
@@ -75,7 +80,8 @@ Status as of 2026-10-05: implementation is in progress on `dev/v2.0.0`. The pack
 - The locked Windows MSVC release cross-build passes with Solana v1 support enabled.
 - Six focused Solana v1 tests pass: v0 preservation, oversized fallback/round-trip, capability rejection, compute-budget conversion, and malformed/duplicate budget rejection.
 - All focused protocol and bounded-serial tests pass.
-- Full desktop suite passes serially: 40 passed, 0 failed, 1 deliberately ignored physical-device test. The serial run avoids the existing process-global PIN-state race between parallel tests.
+- Deterministic desktop suite passes serially: 40 passed, 0 failed, 1 deliberately ignored physical-device test, with four live-network tests excluded from the offline run. The serial run avoids the existing process-global PIN-state race between parallel tests.
+- Four focused staking regressions pass for the current RPC fixture, the 1 SOL floor, delegated-balance accounting, and activation/deactivation epoch boundaries.
 - The ignored physical-device test was run explicitly against the connected finalized MLH wallet and passed CurrentV2 classification, firmware-state checks, real Solana public-key validation, and clean disconnect.
 - The macOS desktop app builds, launches, and loads CSS/images from the local asset handler.
 - Live managed API checks pass for Jupiter quote/order/build, DFlow quote, latest blockhash, and epoch RPC requests.

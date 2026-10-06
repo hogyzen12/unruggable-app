@@ -1,6 +1,6 @@
 # v2.0.0 hardware compatibility release checklist
 
-Status snapshot: 2026-10-05. Checked items have evidence from this working branch; unchecked items remain release blockers or manual qualification work.
+Status snapshot: 2026-10-06. Checked items have evidence from this working branch; unchecked items remain release blockers or manual qualification work.
 
 ## Implementation and automated verification
 
@@ -29,7 +29,8 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Locked Windows MSVC release cross-build passes with the v1 transaction stack.
 - [x] Solana v1 focused tests pass: 6 passed, 0 failed.
 - [x] Focused protocol/serial tests pass: 9 passed, 0 failed.
-- [x] Full desktop suite passes serially: 40 passed, 0 failed, 1 ignored physical test.
+- [x] Deterministic desktop suite passes serially: 40 passed, 0 failed, 1 ignored physical test; four explicitly live-network tests are excluded from the offline run.
+- [x] Staking/RPC regressions pass for the current parsed-account shape, 1 SOL floor, delegated balances, and epoch-boundary states: 4 passed, 0 failed.
 - [x] Explicit configured-MLH USB identity test passes on macOS without a PIN attempt or signing action.
 
 ## Swap, stake, and RPC qualification
@@ -43,7 +44,12 @@ Status snapshot: 2026-10-05. Checked items have evidence from this working branc
 - [x] Build Jupiter swaps from managed gateway instructions and submit them through the configured RPC instead of Ultra execute.
 - [x] Verify live Jupiter quote/order/build and DFlow quote responses from the production gateway.
 - [x] Verify live managed RPC latest-blockhash and epoch calls.
-- [x] Read and enforce the live native-stake minimum in both the UI and transaction layer.
+- [x] Use managed RPC for native staking by default while preserving custom RPC selection.
+- [x] Read the live native-stake minimum and enforce the greater of that value and 1 SOL in both the UI and transaction layer.
+- [x] Parse current stake RPC responses without the removed legacy warmup field.
+- [x] Discover both stake-authority and withdrawal-authority accounts and de-duplicate accounts returned by both filters.
+- [x] Display delegated stake rather than total account lamports, preserve inactive withdrawable balances, and authority-gate each stake action.
+- [x] Distinguish activating, active, deactivating, and inactive epoch-boundary states in the staking UI.
 - [x] Verify the configured staking RPC and the preselected Unruggable validator vote account.
 - [ ] Confirm the production gateway's supported desktop authentication/access policy and release rate limits.
 - [ ] Complete a small controlled software-wallet swap on macOS.

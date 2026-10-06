@@ -513,6 +513,10 @@ pub fn StakeModal(
     onclose: EventHandler<()>,
     onsuccess: EventHandler<String>,
 ) -> Element {
+    // Native staking uses the managed RPC by default, matching swap and other
+    // release traffic, while still honoring an explicitly selected custom RPC.
+    let custom_rpc = custom_rpc.or_else(|| Some(crate::gateway::rpc_url()));
+
     // State management
     let mut mode = use_signal(|| ModalMode::Stake);
     let mut amount = use_signal(|| "".to_string());
@@ -577,7 +581,10 @@ pub fn StakeModal(
             );
 
             if let Ok(minimum_lamports) = minimum_result {
-                minimum_stake_sol.set(minimum_lamports as f64 / 1_000_000_000.0);
+                minimum_stake_sol.set(
+                    staking::effective_minimum_stake_lamports(minimum_lamports) as f64
+                        / 1_000_000_000.0,
+                );
             }
 
             // Set default validator (the first one marked as default)
@@ -705,9 +712,7 @@ pub fn StakeModal(
                 "🔍 DEBUG: Calculating merge opportunities for {} accounts",
                 accounts.len()
             );
-            // Use current epoch 835 for now (from your logs)
-            let current_epoch = 835;
-            let groups = find_mergeable_stake_accounts(&accounts, current_epoch);
+            let groups = find_mergeable_stake_accounts(&accounts);
             println!("🔗 DEBUG: Found {} merge groups", groups.len());
             merge_groups.set(groups);
         } else {
@@ -718,9 +723,7 @@ pub fn StakeModal(
     // Show partial unstake modal if requested
     if show_partial_unstake_modal() {
         if let Some(account) = partial_unstake_account() {
-            let available_sol = (account.balance.saturating_sub(account.rent_exempt_reserve))
-                as f64
-                / 1_000_000_000.0;
+            let available_sol = account.displayed_stake_lamports() as f64 / 1_000_000_000.0;
 
             return rsx! {
                 div {
@@ -752,7 +755,7 @@ pub fn StakeModal(
                                     class: "amount-input-field",
                                     r#type: "number",
                                     step: "0.000001",
-                                    min: "0.01",
+                                    min: "{minimum_stake_sol()}",
                                     max: "{available_sol}",
                                     placeholder: "0.0",
                                     value: "{partial_unstake_amount}",
@@ -767,12 +770,16 @@ pub fn StakeModal(
                                         if let Ok(amount) = partial_unstake_amount().parse::<f64>() {
                                             if amount > 0.0 && amount < avail {
                                                 let remaining = avail - amount;
-                                                format!("Remaining staked: {:.6} SOL", remaining)
+                                                if remaining + f64::EPSILON < minimum_stake_sol() {
+                                                    format!("At least {} SOL must remain staked", minimum_stake_sol())
+                                                } else {
+                                                    format!("Remaining staked: {:.6} SOL", remaining)
+                                                }
                                             } else {
-                                                "Enter amount between 0.01 and available balance".to_string()
+                                                format!("Enter at least {} SOL and leave at least {} SOL staked", minimum_stake_sol(), minimum_stake_sol())
                                             }
                                         } else {
-                                            "Enter amount between 0.01 and available balance".to_string()
+                                            format!("Enter at least {} SOL and leave at least {} SOL staked", minimum_stake_sol(), minimum_stake_sol())
                                         }
                                     }
                                 }
@@ -796,7 +803,11 @@ pub fn StakeModal(
                                 disabled: {
                                     let amount_str = partial_unstake_amount();
                                     if let Ok(amount) = amount_str.parse::<f64>() {
-                                        amount < 0.01 || amount > available_sol || partial_unstaking()
+                                        let remaining = available_sol - amount;
+                                        amount + f64::EPSILON < minimum_stake_sol()
+                                            || amount >= available_sol
+                                            || remaining + f64::EPSILON < minimum_stake_sol()
+                                            || partial_unstaking()
                                     } else {
                                         true
                                     }
@@ -810,7 +821,11 @@ pub fn StakeModal(
                                     move |_| {
                                         let amount_str = partial_unstake_amount();
                                         let amount = match amount_str.parse::<f64>() {
-                                            Ok(amt) if amt >= 0.01 && amt <= available_sol => amt,
+                                            Ok(amt)
+                                                if amt.is_finite()
+                                                    && amt >= minimum_stake_sol()
+                                                    && amt < available_sol
+                                                    && available_sol - amt >= minimum_stake_sol() => amt,
                                             _ => return,
                                         };
 
@@ -1300,7 +1315,7 @@ pub fn StakeModal(
                             }
                             div {
                                 class: "field-hint",
-                                {format!("Minimum stake amount: {} SOL", minimum_stake_sol())}
+                                {format!("Minimum stake: {} SOL. Keep a little extra SOL available for account rent and transaction fees.", minimum_stake_sol())}
                             }
                         }
 
@@ -1399,7 +1414,8 @@ pub fn StakeModal(
                                         {
                                             let total_staked: f64 = stake_accounts()
                                                 .iter()
-                                                .map(|account| (account.balance.saturating_sub(account.rent_exempt_reserve)) as f64 / 1_000_000_000.0)
+                                                .filter(|account| account.counts_as_staked())
+                                                .map(|account| account.displayed_stake_lamports() as f64 / 1_000_000_000.0)
                                                 .sum();
                                             format!("{:.5} SOL", total_staked)
                                         }
@@ -1526,12 +1542,14 @@ pub fn StakeModal(
                                                     class: match account.state {
                                                         StakeAccountState::Delegated => "status-badge active",
                                                         StakeAccountState::Initialized => "status-badge activating",
+                                                        StakeAccountState::Deactivating => "status-badge deactivating",
                                                         StakeAccountState::Uninitialized => "status-badge inactive",
                                                         StakeAccountState::RewardsPool => "status-badge rewards",
                                                     },
                                                     match account.state {
                                                         StakeAccountState::Delegated => "ACTIVE",
                                                         StakeAccountState::Initialized => "ACTIVATING",
+                                                        StakeAccountState::Deactivating => "DEACTIVATING",
                                                         StakeAccountState::Uninitialized => "INACTIVE",
                                                         StakeAccountState::RewardsPool => "REWARDS",
                                                     }
@@ -1543,7 +1561,7 @@ pub fn StakeModal(
                                                 class: "stake-account-details-modern",
                                                 span {
                                                     class: "detail-value stake-amount",
-                                                    "{(account.balance.saturating_sub(account.rent_exempt_reserve) as f64 / 1_000_000_000.0):.2} SOL"
+                                                    "{(account.displayed_stake_lamports() as f64 / 1_000_000_000.0):.6} SOL"
                                                 }
                                             }
 
@@ -1666,7 +1684,10 @@ pub fn StakeModal(
                                                     }
                                                 }
                                                 // Show unstake buttons for active accounts
-                                                else if account.state == StakeAccountState::Delegated {
+                                                else if can_instant_unstake(&account)
+                                                    || can_partial_unstake(&account)
+                                                    || can_normal_unstake(&account)
+                                                {
                                                     button {
                                                         class: "action-btn secondary",
                                                         disabled: instant_unstaking() || !can_instant_unstake(&account),
@@ -1685,7 +1706,7 @@ pub fn StakeModal(
                                                             let mut stake_scan_completed_clone = stake_scan_completed.clone();
 
                                                             move |_| {
-                                                                let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
+                                                                let stake_balance_sol = account_clone.displayed_stake_lamports() as f64 / 1_000_000_000.0;
                                                                 println!("INSTANT UNSTAKE: Starting for account {} ({:.6} SOL)",
                                                                     account_clone.pubkey, stake_balance_sol);
 
@@ -1727,7 +1748,7 @@ pub fn StakeModal(
                                                                             stake_accounts_clone.set(Vec::new());
 
                                                                             // Show success modal
-                                                                            let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
+                                                                            let stake_balance_sol = account_async.displayed_stake_lamports() as f64 / 1_000_000_000.0;
                                                                             unstake_success_signature.set(signature);
                                                                             unstake_success_operation.set("Instant Unstake".to_string());
                                                                             unstake_success_amount.set(stake_balance_sol);
@@ -1819,7 +1840,7 @@ pub fn StakeModal(
                                                             let mut stake_scan_completed_clone = stake_scan_completed.clone();
 
                                                             move |_| {
-                                                                let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
+                                                                let stake_balance_sol = account_clone.displayed_stake_lamports() as f64 / 1_000_000_000.0;
                                                                 println!("NORMAL UNSTAKE: Starting for account {} ({:.6} SOL)",
                                                                     account_clone.pubkey, stake_balance_sol);
 
@@ -1861,7 +1882,7 @@ pub fn StakeModal(
                                                                             stake_accounts_clone.set(Vec::new());
 
                                                                             // Show success modal
-                                                                            let stake_balance_sol = (account_clone.balance.saturating_sub(account_clone.rent_exempt_reserve)) as f64 / 1_000_000_000.0;
+                                                                            let stake_balance_sol = account_async.displayed_stake_lamports() as f64 / 1_000_000_000.0;
                                                                             unstake_success_signature.set(signature);
                                                                             unstake_success_operation.set("Normal Unstake".to_string());
                                                                             unstake_success_amount.set(stake_balance_sol);
