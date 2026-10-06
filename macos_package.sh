@@ -78,12 +78,12 @@ case "$(uname -m)" in arm64) : ;; *) echo "❌ Script is configured for Apple Si
 
 ### 1) Build (release, desktop features, arm64)
 log "Building binary with Cargo (release, desktop, arm64)"
-cargo build --release --no-default-features --features desktop --target aarch64-apple-darwin
+cargo build --locked --release --no-default-features --features desktop --target aarch64-apple-darwin
 
 ### 2) Bundle into .app with cargo-bundle
 log "Bundling into .app with cargo-bundle"
 export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
-cargo bundle --release --no-default-features --features desktop --target aarch64-apple-darwin
+cargo bundle --locked --release --no-default-features --features desktop --target aarch64-apple-darwin
 
 APP_PATH="target/aarch64-apple-darwin/release/bundle/osx/${APP_NAME}.app"
 [ -d "$APP_PATH" ] || { echo "❌ Could not find ${APP_NAME}.app at $APP_PATH"; exit 1; }
@@ -105,6 +105,18 @@ do
     exit 1
   }
 done
+
+revision="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+dirty="clean"
+if ! git diff --quiet --ignore-submodules HEAD 2>/dev/null; then
+  dirty="dirty"
+fi
+{
+  echo "Unruggable app $(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+  echo "Target: aarch64-apple-darwin"
+  echo "Revision: ${revision} (${dirty})"
+  echo "Packaged UTC: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+} > "$APP_PATH/Contents/Resources/BUILD_INFO.txt"
 
 ### 3) Entitlements
 ENTITLEMENTS="$(pwd)/entitlements.generated.plist"
@@ -135,10 +147,14 @@ fi
 INFO_PLIST="${APP_PATH}/Contents/Info.plist"
 
 SHORT_VER="$(awk '
-  BEGIN{inpkg=0}
-  /^\[/{inpkg=($0 ~ /^\[package\]/)}
-  inpkg && $0 ~ /^\s*version\s*=/ {
-    match($0, /"[^\"]+"/, m); if (m[0]!="") { gsub(/"/,"",m[0]); print m[0]; exit }
+  /^\[package\]$/ { inpkg=1; next }
+  /^\[/ { inpkg=0 }
+  inpkg && $0 ~ /^[[:space:]]*version[[:space:]]*=/ {
+    line=$0
+    sub(/^[^"]*"/, "", line)
+    sub(/".*$/, "", line)
+    print line
+    exit
   }' Cargo.toml 2>/dev/null || true)"
 SHORT_VER="${SHORT_VER:-0.1.0}"
 BUILD_NUM="$(git rev-list --count HEAD 2>/dev/null || echo 1)"

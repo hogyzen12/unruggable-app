@@ -24,6 +24,18 @@ cp "${BIN_PATH}" "${STAGE_DIR}/"
 chmod +x "${STAGE_DIR}/${APP_NAME}"
 cp -R assets "${STAGE_DIR}/assets"
 
+revision="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+dirty="clean"
+if ! git diff --quiet --ignore-submodules HEAD 2>/dev/null; then
+  dirty="dirty"
+fi
+{
+  echo "Unruggable app $(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+  echo "Target: ${TARGET_TRIPLE}"
+  echo "Revision: ${revision} (${dirty})"
+  echo "Packaged UTC: $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+} > "${STAGE_DIR}/BUILD_INFO.txt"
+
 rm -f "${OUT_PATH}" "${SHA_PATH}"
 (
   cd "${STAGE_DIR}"
