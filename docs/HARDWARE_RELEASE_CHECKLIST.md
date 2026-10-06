@@ -29,8 +29,9 @@ Status snapshot: 2026-10-06. Checked items have evidence from this working branc
 - [x] Locked Windows MSVC release cross-build passes with the v1 transaction stack.
 - [x] Solana v1 focused tests pass: 6 passed, 0 failed.
 - [x] Focused protocol/serial tests pass: 9 passed, 0 failed.
-- [x] Deterministic desktop suite passes serially: 40 passed, 0 failed, 1 ignored physical test; four explicitly live-network tests are excluded from the offline run.
+- [x] Deterministic desktop suite passes serially: 41 passed, 0 failed, 1 ignored physical test; four explicitly live-network tests are excluded from the offline run.
 - [x] Staking/RPC regressions pass for the current parsed-account shape, 1 SOL floor, delegated balances, and epoch-boundary states: 4 passed, 0 failed.
+- [x] Show capability-aware button guidance: First Edition devices must keep the button held until approval completes; CurrentV2 uses a single press.
 - [x] Explicit configured-MLH USB identity test passes on macOS without a PIN attempt or signing action.
 
 ## Swap, stake, and RPC qualification
@@ -51,12 +52,13 @@ Status snapshot: 2026-10-06. Checked items have evidence from this working branc
 - [x] Display delegated stake rather than total account lamports, preserve inactive withdrawable balances, and authority-gate each stake action.
 - [x] Distinguish activating, active, deactivating, and inactive epoch-boundary states in the staking UI.
 - [x] Verify the configured staking RPC and the preselected Unruggable validator vote account.
+- [x] Verify native stake-account discovery and display against a hot wallet with stake accounts.
 - [ ] Confirm the production gateway's supported desktop authentication/access policy and release rate limits.
 - [ ] Complete a small controlled software-wallet swap on macOS.
 - [ ] Complete a small controlled CurrentV2 hardware-wallet swap on macOS.
 - [ ] Complete an oversized CurrentV2 hardware-wallet swap that falls back to v1 and no longer returns `decoded too large`.
 - [ ] Complete a small controlled CurrentV2 hardware-wallet stake on macOS.
-- [ ] Exercise stake-account discovery, deactivate, withdraw, partial-unstake, and merge flows against controlled accounts.
+- [ ] Exercise deactivate, withdraw, partial-unstake, and merge flows against controlled accounts.
 
 ## Live-build asset incident
 
@@ -100,6 +102,7 @@ For each Windows run, record Windows version, PC model, cable/hub, Hardware ID, 
 
 ## Legacy and Ledger regression matrix
 
+- [x] Physical First Edition wallet: detect, connect, and complete PIN setup.
 - [ ] `LegacyV0`: connect, retrieve public key, sign, disconnect, and reconnect.
 - [ ] Legacy PIN (`NewV1`): connect, unlock, sign, handle failed authentication safely, and reconnect.
 - [ ] Legacy OTP (`NewV1`): connect, unlock, sign, handle failed authentication safely, and reconnect.

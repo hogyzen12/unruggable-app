@@ -182,7 +182,7 @@ fn parse_validators_from_json(json_str: &str) -> HashMap<String, ValidatorEntry>
 
 /// Hardware wallet approval overlay component for staking transactions
 #[component]
-fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
+fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -226,7 +226,13 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "2" }
-                        span { "Press the hardware button once to confirm the transaction" }
+                        span {
+                            if hold_button {
+                                "First Edition: press and keep holding the hardware button until approval completes"
+                            } else {
+                                "Press the hardware button once to confirm the transaction"
+                            }
+                        }
                     }
                 }
 
@@ -987,6 +993,7 @@ pub fn StakeModal(
                 // Hardware approval overlay - shown when waiting for hardware confirmation
                 if show_hardware_approval() {
                     HardwareApprovalOverlay {
+                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_legacy_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             staking.set(false);

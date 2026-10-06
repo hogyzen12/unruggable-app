@@ -199,7 +199,11 @@ pub fn TokenTransactionSuccessModal(
 
 /// Hardware wallet approval overlay component shown during token transaction signing
 #[component]
-fn TokenHardwareApprovalOverlay(token_symbol: String, oncancel: EventHandler<()>) -> Element {
+fn TokenHardwareApprovalOverlay(
+    token_symbol: String,
+    hold_button: bool,
+    oncancel: EventHandler<()>,
+) -> Element {
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -243,7 +247,13 @@ fn TokenHardwareApprovalOverlay(token_symbol: String, oncancel: EventHandler<()>
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "2" }
-                        span { "Press the hardware button once to confirm" }
+                        span {
+                            if hold_button {
+                                "First Edition: press and keep holding the hardware button until approval completes"
+                            } else {
+                                "Press the hardware button once to confirm"
+                            }
+                        }
                     }
                 }
 
@@ -912,6 +922,7 @@ pub fn SendTokenModal(
                 if show_hardware_approval() {
                     TokenHardwareApprovalOverlay {
                         token_symbol: token_symbol.clone(),
+                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_legacy_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             sending.set(false);

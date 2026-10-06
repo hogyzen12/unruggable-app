@@ -65,6 +65,7 @@ Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The pack
 - Fixed displayed and aggregate stake balances using total account lamports minus rent instead of the RPC's delegated stake amount.
 - Fixed activation/deactivation epoch boundaries, added a distinct deactivating state, and restricted deactivate, split, instant-unstake, and withdraw actions to the authority required by each operation.
 - Fixed staking insufficient-balance errors reporting the wallet's SOL balance as though it were lamports.
+- Fixed First Edition approval prompts saying to press the hardware button once. Legacy PIN and pre-protocol devices now receive explicit instructions to press and keep holding until setup or transaction approval completes; CurrentV2 retains single-press guidance.
 
 ### Compatibility and operations
 
@@ -80,8 +81,11 @@ Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The pack
 - The locked Windows MSVC release cross-build passes with Solana v1 support enabled.
 - Six focused Solana v1 tests pass: v0 preservation, oversized fallback/round-trip, capability rejection, compute-budget conversion, and malformed/duplicate budget rejection.
 - All focused protocol and bounded-serial tests pass.
-- Deterministic desktop suite passes serially: 40 passed, 0 failed, 1 deliberately ignored physical-device test, with four live-network tests excluded from the offline run. The serial run avoids the existing process-global PIN-state race between parallel tests.
+- Deterministic desktop suite passes serially: 41 passed, 0 failed, 1 deliberately ignored physical-device test, with four live-network tests excluded from the offline run. The serial run avoids the existing process-global PIN-state race between parallel tests.
 - Four focused staking regressions pass for the current RPC fixture, the 1 SOL floor, delegated-balance accounting, and activation/deactivation epoch boundaries.
+- Native stake-account discovery and display were verified against a hot wallet with stake accounts.
+- A physical First Edition wallet connected and completed PIN setup; full signing/reconnect regression remains in progress.
+- The legacy/CurrentV2 button-guidance capability regression passes on macOS and the Windows MSVC cross-check remains clean.
 - The ignored physical-device test was run explicitly against the connected finalized MLH wallet and passed CurrentV2 classification, firmware-state checks, real Solana public-key validation, and clean disconnect.
 - The macOS desktop app builds, launches, and loads CSS/images from the local asset handler.
 - Live managed API checks pass for Jupiter quote/order/build, DFlow quote, latest blockhash, and epoch RPC requests.

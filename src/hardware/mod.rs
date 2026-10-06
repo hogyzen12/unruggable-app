@@ -11,7 +11,10 @@ pub mod serial;
 use protocol::{parse_hardware_pubkey, validate_signing_payload, Command, Response};
 pub use protocol::{AuthMode, DeviceInfo, Esp32Capability, KeyState, OtpSetupData, ProtocolError};
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
@@ -68,6 +71,7 @@ pub struct HardwareWallet {
     public_key: Arc<Mutex<Option<String>>>,
     device_type: Arc<Mutex<Option<HardwareDeviceType>>>,
     esp32_capability: Arc<Mutex<Option<Esp32Capability>>>,
+    legacy_button_hold: Arc<AtomicBool>,
     esp32_info: Arc<Mutex<Option<DeviceInfo>>>,
     esp32_unlocked_until: Arc<Mutex<Option<u64>>>,
 }
@@ -78,6 +82,7 @@ impl PartialEq for HardwareWallet {
         let pubkey_match = Arc::ptr_eq(&self.public_key, &other.public_key);
         let device_type_match = Arc::ptr_eq(&self.device_type, &other.device_type);
         let capability_match = Arc::ptr_eq(&self.esp32_capability, &other.esp32_capability);
+        let button_hold_match = Arc::ptr_eq(&self.legacy_button_hold, &other.legacy_button_hold);
         let info_match = Arc::ptr_eq(&self.esp32_info, &other.esp32_info);
         let unlock_match = Arc::ptr_eq(&self.esp32_unlocked_until, &other.esp32_unlocked_until);
 
@@ -91,6 +96,7 @@ impl PartialEq for HardwareWallet {
             && pubkey_match
             && device_type_match
             && capability_match
+            && button_hold_match
             && info_match
             && unlock_match
     }
@@ -112,6 +118,7 @@ impl HardwareWallet {
             public_key: Arc::new(Mutex::new(None)),
             device_type: Arc::new(Mutex::new(None)),
             esp32_capability: Arc::new(Mutex::new(None)),
+            legacy_button_hold: Arc::new(AtomicBool::new(false)),
             esp32_info: Arc::new(Mutex::new(None)),
             esp32_unlocked_until: Arc::new(Mutex::new(None)),
         }
@@ -148,6 +155,7 @@ impl HardwareWallet {
         *self.public_key.lock().await = pubkey;
         *self.device_type.lock().await = Some(HardwareDeviceType::ESP32);
         *self.esp32_capability.lock().await = Some(capability);
+        self.set_legacy_button_hold(Some(capability));
         if let Some(info) = info_state.as_ref() {
             self.sync_esp32_unlock_from_info(info).await;
         } else {
@@ -156,6 +164,22 @@ impl HardwareWallet {
         *self.esp32_info.lock().await = info_state;
 
         Ok(())
+    }
+
+    fn set_legacy_button_hold(&self, capability: Option<Esp32Capability>) {
+        self.legacy_button_hold.store(
+            matches!(
+                capability,
+                Some(Esp32Capability::LegacyV0 | Esp32Capability::NewV1)
+            ),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// Older ESP32 firmware samples the physical button while signing, so the
+    /// user should keep it held until the app receives the signature.
+    pub fn requires_legacy_button_hold(&self) -> bool {
+        self.legacy_button_hold.load(Ordering::Relaxed)
     }
 
     pub async fn get_cached_public_key(&self) -> Option<String> {
@@ -460,6 +484,7 @@ impl HardwareWallet {
             *self.public_key.lock().await = Some(pubkey);
             *self.device_type.lock().await = Some(HardwareDeviceType::Ledger);
             *self.esp32_capability.lock().await = None;
+            self.set_legacy_button_hold(None);
             *self.esp32_info.lock().await = None;
             *self.esp32_unlocked_until.lock().await = None;
             *ledger_guard = Some(connection);
@@ -634,6 +659,7 @@ impl HardwareWallet {
                     *self.public_key.lock().await = None;
                     *self.device_type.lock().await = None;
                     *self.esp32_capability.lock().await = None;
+                    self.set_legacy_button_hold(None);
                 }
                 result.map_err(Into::into)
             }
@@ -695,11 +721,13 @@ impl HardwareWallet {
                 let capability = info.capability();
                 self.sync_esp32_unlock_from_info(&info).await;
                 *self.esp32_capability.lock().await = Some(capability);
+                self.set_legacy_button_hold(Some(capability));
                 *self.esp32_info.lock().await = Some(info.clone());
                 Ok(Some(info))
             }
             Response::Error(ProtocolError::UnknownCommand) => {
                 *self.esp32_capability.lock().await = Some(Esp32Capability::LegacyV0);
+                self.set_legacy_button_hold(Some(Esp32Capability::LegacyV0));
                 *self.esp32_info.lock().await = None;
                 Ok(None)
             }
@@ -1106,6 +1134,7 @@ impl HardwareWallet {
         *self.public_key.lock().await = None;
         *self.device_type.lock().await = None;
         *self.esp32_capability.lock().await = None;
+        self.set_legacy_button_hold(None);
         *self.esp32_info.lock().await = None;
         *self.esp32_unlocked_until.lock().await = None;
 
@@ -1116,6 +1145,50 @@ impl HardwareWallet {
 
 fn is_six_digit_code(value: &str) -> bool {
     value.len() == 6 && value.chars().all(|c| c.is_ascii_digit())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn legacy_button_hold_guidance_tracks_device_capability() {
+        let wallet = HardwareWallet::new();
+        assert!(!wallet.requires_legacy_button_hold());
+
+        wallet
+            .set_esp32_identity(
+                Some("11111111111111111111111111111111".to_string()),
+                Esp32Capability::NewV1,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(wallet.requires_legacy_button_hold());
+
+        wallet
+            .set_esp32_identity(
+                Some("11111111111111111111111111111111".to_string()),
+                Esp32Capability::CurrentV2,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(!wallet.requires_legacy_button_hold());
+
+        wallet
+            .set_esp32_identity(
+                Some("11111111111111111111111111111111".to_string()),
+                Esp32Capability::LegacyV0,
+                None,
+            )
+            .await
+            .unwrap();
+        assert!(wallet.requires_legacy_button_hold());
+
+        wallet.disconnect().await.unwrap();
+        assert!(!wallet.requires_legacy_button_hold());
+    }
 }
 
 #[cfg(all(test, not(target_os = "android")))]

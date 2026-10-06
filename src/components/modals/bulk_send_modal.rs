@@ -21,7 +21,11 @@ pub struct SelectedTokenForBulkSend {
 
 /// Hardware wallet approval overlay component for bulk send
 #[component]
-fn BulkSendHardwareApprovalOverlay(selected_count: usize, oncancel: EventHandler<()>) -> Element {
+fn BulkSendHardwareApprovalOverlay(
+    selected_count: usize,
+    hold_button: bool,
+    oncancel: EventHandler<()>,
+) -> Element {
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -65,7 +69,13 @@ fn BulkSendHardwareApprovalOverlay(selected_count: usize, oncancel: EventHandler
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "2" }
-                        span { "Press the button on your Unruggable to confirm each transaction" }
+                        span {
+                            if hold_button {
+                                "First Edition: press and keep holding the hardware button until each approval completes"
+                            } else {
+                                "Press the button on your Unruggable to confirm each transaction"
+                            }
+                        }
                     }
                 }
                 
@@ -361,6 +371,7 @@ pub fn BulkSendModal(
                 if show_hardware_approval() {
                     BulkSendHardwareApprovalOverlay {
                         selected_count: selected_tokens().len(),
+                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_legacy_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             sending.set(false);

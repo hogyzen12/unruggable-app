@@ -99,7 +99,7 @@ async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
 
 /// Hardware wallet approval overlay component shown during transaction signing
 #[component]
-fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
+fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -138,7 +138,13 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "1" }
-                        span { "Press the hardware button once to confirm" }
+                        span {
+                            if hold_button {
+                                "First Edition: press and keep holding the hardware button until approval completes"
+                            } else {
+                                "Press the hardware button once to confirm"
+                            }
+                        }
                     }
                 }
 
@@ -875,6 +881,7 @@ pub fn SendModalWithHardware(
                 // Hardware approval overlay - shown when waiting for hardware confirmation
                 if show_hardware_approval() {
                     HardwareApprovalOverlay {
+                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_legacy_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             sending.set(false);

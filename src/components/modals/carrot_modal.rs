@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 /// Hardware wallet approval overlay for Carrot transactions
 #[component]
-fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
+fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -54,7 +54,13 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "2" }
-                        span { "Press the button to confirm" }
+                        span {
+                            if hold_button {
+                                "First Edition: press and keep holding the hardware button until approval completes"
+                            } else {
+                                "Press the button to confirm"
+                            }
+                        }
                     }
                 }
                 
@@ -347,6 +353,7 @@ pub fn CarrotModal(
                 // Hardware approval overlay
                 if show_hardware_approval() {
                     HardwareApprovalOverlay {
+                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_legacy_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             processing.set(false);

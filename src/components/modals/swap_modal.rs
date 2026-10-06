@@ -902,7 +902,7 @@ fn is_valid_mint(input: &str) -> bool {
 
 /// Hardware wallet approval overlay component for swap transactions
 #[component]
-fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
+fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Element {
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -941,7 +941,13 @@ fn HardwareApprovalOverlay(oncancel: EventHandler<()>) -> Element {
                     div {
                         class: "hardware-step",
                         div { class: "step-number", "1" }
-                        span { "Press the hardware button once to confirm the swap" }
+                        span {
+                            if hold_button {
+                                "First Edition: press and keep holding the hardware button until swap approval completes"
+                            } else {
+                                "Press the hardware button once to confirm the swap"
+                            }
+                        }
                     }
                 }
 
@@ -1398,6 +1404,7 @@ pub fn SwapModal(
     if show_hardware_approval() {
         return rsx! {
             HardwareApprovalOverlay {
+                hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_legacy_button_hold()),
                 oncancel: move |_| {
                     show_hardware_approval.set(false);
                     swapping.set(false);

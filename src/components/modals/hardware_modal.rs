@@ -899,6 +899,13 @@ pub fn HardwareWalletModal(
                                 }
                             }
 
+                            if capability() == Some(Esp32Capability::NewV1) {
+                                div {
+                                    class: "hardware-inline-note hardware-inline-note-strong",
+                                    "First Edition: after confirming the PIN, press and keep holding the hardware button until setup completes."
+                                }
+                            }
+
                             if setup_busy() {
                                 div {
                                     class: "hardware-auth-card hardware-setup-busy-card",
@@ -906,7 +913,11 @@ pub fn HardwareWalletModal(
                                     h3 { class: "hardware-setup-busy-title", "Save PIN On Device" }
                                     p {
                                         class: "hardware-setup-busy-copy",
-                                        "Follow both confirmation prompts on the hardware wallet to finish setup."
+                                        if capability() == Some(Esp32Capability::NewV1) {
+                                            "Press and keep holding the hardware button until PIN setup completes."
+                                        } else {
+                                            "Follow both confirmation prompts on the hardware wallet to finish setup."
+                                        }
                                     }
                                 }
                             } else if pin_setup_step() == PinSetupStep::Enter {
