@@ -29,9 +29,10 @@ Status snapshot: 2026-10-06. Checked items have evidence from this working branc
 - [x] Locked Windows MSVC release cross-build passes with the v1 transaction stack.
 - [x] Solana v1 focused tests pass: 6 passed, 0 failed.
 - [x] Focused protocol/serial tests pass: 9 passed, 0 failed.
-- [x] Deterministic desktop suite passes serially: 41 passed, 0 failed, 1 ignored physical test; four explicitly live-network tests are excluded from the offline run.
+- [x] Deterministic desktop suite passes serially: 42 passed, 0 failed, 1 ignored physical test; four explicitly live-network tests are excluded from the offline run.
 - [x] Staking/RPC regressions pass for the current parsed-account shape, 1 SOL floor, delegated balances, and epoch-boundary states: 4 passed, 0 failed.
 - [x] Show capability-aware button guidance: First Edition holds during PIN setup but uses a single press for transactions; CurrentV2/MLH holds during transaction review.
+- [x] Make approval cancellation interrupt unapproved USB exchanges, invalidate the session, clear stale connected state, and require reconnect; do not report cancellation after device approval.
 - [x] Explicit configured-MLH USB identity test passes on macOS without a PIN attempt or signing action.
 
 ## Swap, stake, and RPC qualification
@@ -77,6 +78,7 @@ Status snapshot: 2026-10-06. Checked items have evidence from this working branc
 - [ ] Configured wallet: show receive QR, verify it matches the app address, close it, and return to the wallet home screen.
 - [ ] Configured wallet: sign and submit a small controlled transaction after reviewing it on-device.
 - [ ] Configured wallet: complete two consecutive sends without reconnecting and confirm the hardware balance refreshes after each send.
+- [ ] Configured wallet: cancel before device approval, confirm no transaction is submitted, then reconnect and sign successfully.
 - [ ] Configured wallet: verify the exact guard/action/Jito/Jules order produces **App markers verified** without separate marker/tip review screens.
 - [ ] Configured wallet: verify an oversized v1 swap clearly enters the firmware's blind-review flow, then signs and submits successfully.
 - [ ] Configured wallet: allow the session to expire, unlock again, disconnect, reconnect, and repeat signing.

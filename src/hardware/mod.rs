@@ -12,13 +12,17 @@ use protocol::{parse_hardware_pubkey, validate_signing_payload, Command, Respons
 pub use protocol::{AuthMode, DeviceInfo, Esp32Capability, KeyState, OtpSetupData, ProtocolError};
 use std::error::Error;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU8, Ordering},
     Arc,
 };
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 const ESP32_CONNECT_TIMEOUT: Duration = Duration::from_secs(12);
+const OPERATION_IDLE: u8 = 0;
+const OPERATION_WAITING_FOR_APPROVAL: u8 = 1;
+const OPERATION_APPROVED: u8 = 2;
+const OPERATION_CANCELED: u8 = 3;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum HardwareDeviceType {
@@ -72,6 +76,8 @@ pub struct HardwareWallet {
     device_type: Arc<Mutex<Option<HardwareDeviceType>>>,
     esp32_capability: Arc<Mutex<Option<Esp32Capability>>>,
     transaction_button_hold: Arc<AtomicBool>,
+    operation_state: Arc<AtomicU8>,
+    operation_cancel_notify: Arc<Notify>,
     esp32_info: Arc<Mutex<Option<DeviceInfo>>>,
     esp32_unlocked_until: Arc<Mutex<Option<u64>>>,
 }
@@ -85,6 +91,11 @@ impl PartialEq for HardwareWallet {
         let button_hold_match = Arc::ptr_eq(
             &self.transaction_button_hold,
             &other.transaction_button_hold,
+        );
+        let operation_state_match = Arc::ptr_eq(&self.operation_state, &other.operation_state);
+        let cancel_notify_match = Arc::ptr_eq(
+            &self.operation_cancel_notify,
+            &other.operation_cancel_notify,
         );
         let info_match = Arc::ptr_eq(&self.esp32_info, &other.esp32_info);
         let unlock_match = Arc::ptr_eq(&self.esp32_unlocked_until, &other.esp32_unlocked_until);
@@ -100,6 +111,8 @@ impl PartialEq for HardwareWallet {
             && device_type_match
             && capability_match
             && button_hold_match
+            && operation_state_match
+            && cancel_notify_match
             && info_match
             && unlock_match
     }
@@ -122,6 +135,8 @@ impl HardwareWallet {
             device_type: Arc::new(Mutex::new(None)),
             esp32_capability: Arc::new(Mutex::new(None)),
             transaction_button_hold: Arc::new(AtomicBool::new(false)),
+            operation_state: Arc::new(AtomicU8::new(OPERATION_IDLE)),
+            operation_cancel_notify: Arc::new(Notify::new()),
             esp32_info: Arc::new(Mutex::new(None)),
             esp32_unlocked_until: Arc::new(Mutex::new(None)),
         }
@@ -159,6 +174,7 @@ impl HardwareWallet {
         *self.device_type.lock().await = Some(HardwareDeviceType::ESP32);
         *self.esp32_capability.lock().await = Some(capability);
         self.set_transaction_button_hold(Some(capability));
+        self.reset_operation_state();
         if let Some(info) = info_state.as_ref() {
             self.sync_esp32_unlock_from_info(info).await;
         } else {
@@ -180,6 +196,93 @@ impl HardwareWallet {
     /// First Edition firmware uses a single press for transaction signing.
     pub fn requires_transaction_button_hold(&self) -> bool {
         self.transaction_button_hold.load(Ordering::Relaxed)
+    }
+
+    fn reset_operation_state(&self) {
+        self.operation_state
+            .store(OPERATION_IDLE, Ordering::Release);
+    }
+
+    /// Mark a newly launched transaction as cancelable before its signing
+    /// future reaches the serial exchange.
+    pub fn prepare_hardware_operation(&self) {
+        if self.operation_state.load(Ordering::Acquire) != OPERATION_CANCELED {
+            self.operation_state
+                .store(OPERATION_WAITING_FOR_APPROVAL, Ordering::Release);
+        }
+    }
+
+    fn begin_signing_operation(&self) -> Result<(), Box<dyn Error>> {
+        loop {
+            let state = self.operation_state.load(Ordering::Acquire);
+            if state == OPERATION_CANCELED {
+                return Err(
+                    "Hardware operation canceled. Reconnect the hardware wallet before retrying."
+                        .into(),
+                );
+            }
+            if self
+                .operation_state
+                .compare_exchange(
+                    state,
+                    OPERATION_WAITING_FOR_APPROVAL,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                return Ok(());
+            }
+        }
+    }
+
+    fn mark_signing_approved(&self) -> Result<(), Box<dyn Error>> {
+        match self.operation_state.compare_exchange(
+            OPERATION_WAITING_FOR_APPROVAL,
+            OPERATION_APPROVED,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
+            Ok(_) => Ok(()),
+            Err(OPERATION_CANCELED) => Err(
+                "Hardware operation canceled. Reconnect the hardware wallet before retrying."
+                    .into(),
+            ),
+            Err(_) => Err("Hardware approval state changed unexpectedly".into()),
+        }
+    }
+
+    async fn wait_for_operation_cancel(&self) {
+        while self.operation_state.load(Ordering::Acquire) != OPERATION_CANCELED {
+            self.operation_cancel_notify.notified().await;
+        }
+    }
+
+    /// Cancel a transaction that has not yet been approved on the device.
+    /// Returns false once the hardware signature has already been accepted.
+    pub fn cancel_current_operation(&self) -> bool {
+        loop {
+            let state = self.operation_state.load(Ordering::Acquire);
+            if state == OPERATION_APPROVED {
+                return false;
+            }
+            if state == OPERATION_CANCELED {
+                return true;
+            }
+            if self
+                .operation_state
+                .compare_exchange(
+                    state,
+                    OPERATION_CANCELED,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                )
+                .is_ok()
+            {
+                self.operation_cancel_notify.notify_one();
+                return true;
+            }
+        }
     }
 
     pub async fn get_cached_public_key(&self) -> Option<String> {
@@ -485,6 +588,7 @@ impl HardwareWallet {
             *self.device_type.lock().await = Some(HardwareDeviceType::Ledger);
             *self.esp32_capability.lock().await = None;
             self.set_transaction_button_hold(None);
+            self.reset_operation_state();
             *self.esp32_info.lock().await = None;
             *self.esp32_unlocked_until.lock().await = None;
             *ledger_guard = Some(connection);
@@ -646,10 +750,23 @@ impl HardwareWallet {
             Some(HardwareDeviceType::ESP32) => {
                 let mut esp32_guard = self.esp32_connection.lock().await;
                 let result = match esp32_guard.as_ref() {
-                    Some(connection) => connection
-                        .send_command(command)
-                        .await
-                        .map_err(|err| err.to_string()),
+                    Some(connection) => {
+                        if self.operation_state.load(Ordering::Acquire) == OPERATION_CANCELED {
+                            Err("Hardware operation canceled. Reconnect the hardware wallet before retrying."
+                                .to_string())
+                        } else {
+                            tokio::select! {
+                                biased;
+                                _ = self.wait_for_operation_cancel() => {
+                                    Err("Hardware operation canceled. Reconnect the hardware wallet before retrying."
+                                        .to_string())
+                                }
+                                response = connection.send_command(command) => {
+                                    response.map_err(|err| err.to_string())
+                                }
+                            }
+                        }
+                    }
                     None => Err("ESP32 not connected".to_string()),
                 };
                 if result.is_err() {
@@ -1009,6 +1126,7 @@ impl HardwareWallet {
     }
 
     pub async fn sign_message(&self, message: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+        self.begin_signing_operation()?;
         let device_type = self.device_type.lock().await.clone();
 
         match device_type {
@@ -1063,7 +1181,10 @@ impl HardwareWallet {
                     .send_command(Command::SignMessage(message.to_vec()))
                     .await?;
                 match response {
-                    Response::Signature(sig) => Ok(sig),
+                    Response::Signature(sig) => {
+                        self.mark_signing_approved()?;
+                        Ok(sig)
+                    }
                     Response::Error(e) => {
                         if e == ProtocolError::Locked {
                             self.set_esp32_unlock_until(None).await;
@@ -1078,9 +1199,17 @@ impl HardwareWallet {
                 {
                     let ledger_guard = self.ledger_connection.lock().await;
                     match ledger_guard.as_ref() {
-                        Some(connection) => {
-                            connection.sign_message(message).await.map_err(|e| e.into())
-                        }
+                        Some(connection) => tokio::select! {
+                            biased;
+                            _ = self.wait_for_operation_cancel() => {
+                                Err("Hardware operation canceled. Reconnect the hardware wallet before retrying.".into())
+                            }
+                            signature = connection.sign_message(message) => {
+                                let signature = signature.map_err(|e| -> Box<dyn Error> { e.into() })?;
+                                self.mark_signing_approved()?;
+                                Ok(signature)
+                            }
+                        },
                         None => Err("Ledger not connected".into()),
                     }
                 }
@@ -1135,6 +1264,7 @@ impl HardwareWallet {
         *self.device_type.lock().await = None;
         *self.esp32_capability.lock().await = None;
         self.set_transaction_button_hold(None);
+        self.reset_operation_state();
         *self.esp32_info.lock().await = None;
         *self.esp32_unlocked_until.lock().await = None;
 
@@ -1188,6 +1318,26 @@ mod tests {
 
         wallet.disconnect().await.unwrap();
         assert!(!wallet.requires_transaction_button_hold());
+    }
+
+    #[tokio::test]
+    async fn cancellation_wins_before_approval_and_not_after() {
+        let wallet = HardwareWallet::new();
+        wallet.prepare_hardware_operation();
+        assert!(wallet.cancel_current_operation());
+        tokio::time::timeout(
+            Duration::from_millis(50),
+            wallet.wait_for_operation_cancel(),
+        )
+        .await
+        .expect("cancel notification should be observable");
+        assert!(wallet.begin_signing_operation().is_err());
+
+        wallet.reset_operation_state();
+        wallet.prepare_hardware_operation();
+        wallet.begin_signing_operation().unwrap();
+        wallet.mark_signing_approved().unwrap();
+        assert!(!wallet.cancel_current_operation());
     }
 }
 

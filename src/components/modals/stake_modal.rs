@@ -1,3 +1,4 @@
+use crate::components::modals::cancel_hardware_operation;
 use crate::hardware::{AuthMode, HardwareWallet};
 use crate::staking::create_stake_account;
 use crate::staking::find_mergeable_stake_accounts;
@@ -182,7 +183,12 @@ fn parse_validators_from_json(json_str: &str) -> HashMap<String, ValidatorEntry>
 
 /// Hardware wallet approval overlay component for staking transactions
 #[component]
-fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Element {
+fn HardwareApprovalOverlay(
+    hardware_wallet: Option<Arc<HardwareWallet>>,
+    hold_button: bool,
+    oncancel: EventHandler<()>,
+) -> Element {
+    let mut cancel_error = use_signal(|| None as Option<String>);
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -236,9 +242,22 @@ fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Ele
                     }
                 }
 
+                if let Some(message) = cancel_error() {
+                    p { class: "hardware-approval-text", "{message}" }
+                }
+
                 button {
                     class: "hardware-cancel-button",
-                    onclick: move |_| oncancel.call(()),
+                    onclick: move |_| {
+                        if cancel_hardware_operation(hardware_wallet.clone()) {
+                            oncancel.call(());
+                        } else {
+                            cancel_error.set(Some(
+                                "Already approved on the hardware wallet; waiting for network submission."
+                                    .to_string(),
+                            ));
+                        }
+                    },
                     "Cancel"
                 }
             }
@@ -842,7 +861,8 @@ pub fn StakeModal(
                                         show_partial_unstake_modal.set(false);
 
                                         // Show hardware approval overlay if using hardware wallet
-                                        if hardware_wallet_for_partial.is_some() {
+                                        if let Some(hardware_wallet) = hardware_wallet_for_partial.as_ref() {
+                                            hardware_wallet.prepare_hardware_operation();
                                             show_hardware_approval.set(true);
                                             was_hardware_transaction.set(true);
                                         } else {
@@ -993,6 +1013,7 @@ pub fn StakeModal(
                 // Hardware approval overlay - shown when waiting for hardware confirmation
                 if show_hardware_approval() {
                     HardwareApprovalOverlay {
+                        hardware_wallet: hardware_wallet.clone(),
                         hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_transaction_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
@@ -1002,7 +1023,10 @@ pub fn StakeModal(
                             normal_unstaking.set(false);
                             withdrawing.set(false);
                             merging.set(false);
-                            error_message.set(Some("Transaction cancelled".to_string()));
+                            error_message.set(Some(
+                                "Transaction canceled. Reconnect the hardware wallet before retrying."
+                                    .to_string(),
+                            ));
                         }
                     }
                 }
@@ -1600,7 +1624,8 @@ pub fn StakeModal(
                                                                 withdrawing_clone.set(true);
                                                                 error_message_clone.set(None);
 
-                                                                if hardware_wallet_for_withdraw.is_some() {
+                                                                if let Some(hardware_wallet) = hardware_wallet_for_withdraw.as_ref() {
+                                                                    hardware_wallet.prepare_hardware_operation();
                                                                     show_hardware_approval_clone.set(true);
                                                                     was_hardware_transaction.set(true);
                                                                 } else {
@@ -1721,7 +1746,8 @@ pub fn StakeModal(
                                                                 error_message_clone.set(None);
 
                                                                 // Show hardware approval overlay if using hardware wallet
-                                                                if hardware_wallet_for_instant.is_some() {
+                                                                if let Some(hardware_wallet) = hardware_wallet_for_instant.as_ref() {
+                                                                    hardware_wallet.prepare_hardware_operation();
                                                                     show_hardware_approval_clone.set(true);
                                                                     was_hardware_transaction.set(true);
                                                                 } else {
@@ -1855,7 +1881,8 @@ pub fn StakeModal(
                                                                 error_message_clone.set(None);
 
                                                                 // Show hardware approval overlay if using hardware wallet
-                                                                if hardware_wallet_for_normal.is_some() {
+                                                                if let Some(hardware_wallet) = hardware_wallet_for_normal.as_ref() {
+                                                                    hardware_wallet.prepare_hardware_operation();
                                                                     show_hardware_approval_clone.set(true);
                                                                     was_hardware_transaction.set(true);
                                                                 } else {
@@ -1989,7 +2016,8 @@ pub fn StakeModal(
                                 staking.set(true);
 
                                 // Show hardware approval overlay if using hardware wallet
-                                if hardware_wallet.is_some() {
+                                if let Some(hardware_wallet) = hardware_wallet.as_ref() {
+                                    hardware_wallet.prepare_hardware_operation();
                                     show_hardware_approval.set(true);
                                     was_hardware_transaction.set(true);
                                 } else {
@@ -2114,7 +2142,8 @@ pub fn StakeModal(
                                         let mut show_hardware_approval_clone = show_hardware_approval.clone();
 
                                         // Show hardware approval overlay if using hardware wallet
-                                        if hardware_wallet_for_merge.is_some() {
+                                        if let Some(hardware_wallet) = hardware_wallet_for_merge.as_ref() {
+                                            hardware_wallet.prepare_hardware_operation();
                                             show_hardware_approval.set(true);
                                         }
 

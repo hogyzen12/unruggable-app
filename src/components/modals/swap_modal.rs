@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use crate::components::common::Token;
+use crate::components::modals::cancel_hardware_operation;
 use crate::config::tokens::get_token_catalog;
 use crate::gateway;
 use crate::hardware::{AuthMode, Esp32Capability, HardwareWallet};
@@ -902,7 +903,12 @@ fn is_valid_mint(input: &str) -> bool {
 
 /// Hardware wallet approval overlay component for swap transactions
 #[component]
-fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Element {
+fn HardwareApprovalOverlay(
+    hardware_wallet: Option<Arc<HardwareWallet>>,
+    hold_button: bool,
+    oncancel: EventHandler<()>,
+) -> Element {
+    let mut cancel_error = use_signal(|| None as Option<String>);
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -951,9 +957,22 @@ fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Ele
                     }
                 }
 
+                if let Some(message) = cancel_error() {
+                    p { class: "hardware-approval-text", "{message}" }
+                }
+
                 button {
                     class: "hardware-cancel-button",
-                    onclick: move |_| oncancel.call(()),
+                    onclick: move |_| {
+                        if cancel_hardware_operation(hardware_wallet.clone()) {
+                            oncancel.call(());
+                        } else {
+                            cancel_error.set(Some(
+                                "Already approved on the hardware wallet; waiting for network submission."
+                                    .to_string(),
+                            ));
+                        }
+                    },
                     "Cancel Swap"
                 }
             }
@@ -1404,11 +1423,15 @@ pub fn SwapModal(
     if show_hardware_approval() {
         return rsx! {
             HardwareApprovalOverlay {
+                hardware_wallet: hardware_wallet.clone(),
                 hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_transaction_button_hold()),
                 oncancel: move |_| {
                     show_hardware_approval.set(false);
                     swapping.set(false);
-                    error_message.set(Some("Transaction cancelled".to_string()));
+                    error_message.set(Some(
+                        "Transaction canceled. Reconnect the hardware wallet before retrying."
+                            .to_string(),
+                    ));
                 }
             }
         };
@@ -2303,6 +2326,9 @@ pub fn SwapModal(
                             was_hardware_transaction.set(is_hardware);
 
                             if is_hardware {
+                                if let Some(hardware_wallet) = hw_clone.as_ref() {
+                                    hardware_wallet.prepare_hardware_operation();
+                                }
                                 swap_progress_stage.set(SwapProgressStage::AwaitingApproval);
                                 show_hardware_approval.set(true);
                             } else {
@@ -2605,6 +2631,9 @@ pub fn SwapModal(
                             was_hardware_transaction.set(is_hardware);
 
                             if is_hardware {
+                                if let Some(hardware_wallet) = hw_clone.as_ref() {
+                                    hardware_wallet.prepare_hardware_operation();
+                                }
                                 swap_progress_stage.set(SwapProgressStage::AwaitingApproval);
                                 show_hardware_approval.set(true);
                             } else {
@@ -2870,6 +2899,9 @@ pub fn SwapModal(
                             was_hardware_transaction.set(is_hardware);
 
                             if is_hardware {
+                                if let Some(hardware_wallet) = hw_clone.as_ref() {
+                                    hardware_wallet.prepare_hardware_operation();
+                                }
                                 swap_progress_stage.set(SwapProgressStage::AwaitingApproval);
                                 show_hardware_approval.set(true);
                             } else {

@@ -618,6 +618,29 @@ pub fn WalletView() -> Element {
                 let is_present = HardwareWallet::is_device_present();
                 let was_present = hardware_device_present();
 
+                // Serial timeouts and explicit operation cancellation invalidate
+                // the logical session even when the USB device remains plugged in.
+                // Clear the shared selection promptly so reconnect opens a fresh port.
+                let logical_session_ended = if hardware_connected() {
+                    match hardware_wallet() {
+                        Some(wallet) => !wallet.is_connected().await,
+                        None => true,
+                    }
+                } else {
+                    false
+                };
+                if logical_session_ended {
+                    log::info!("🔌 Hardware session ended; reconnect required");
+                    hardware_connected.set(false);
+                    hardware_wallet.set(None);
+                    hardware_pubkey.set(None);
+                    hardware_device_type.set(None);
+                    hardware_device_present.set(is_present);
+                    consecutive_absent_scans = 0;
+                    tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                    continue;
+                }
+
                 if is_present != was_present {
                     log::info!(
                         "🔍 Hardware device presence changed: {} -> {}",

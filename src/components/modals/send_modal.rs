@@ -1,4 +1,5 @@
 use crate::components::address_input::AddressInput; // ← ADD THIS IMPORT
+use crate::components::modals::cancel_hardware_operation;
 use crate::hardware::AuthMode;
 use crate::hardware::HardwareWallet;
 use crate::privacycash;
@@ -99,7 +100,12 @@ async fn resolve_unlock_mode(wallet: &HardwareWallet) -> Option<UnlockMode> {
 
 /// Hardware wallet approval overlay component shown during transaction signing
 #[component]
-fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Element {
+fn HardwareApprovalOverlay(
+    hardware_wallet: Option<Arc<HardwareWallet>>,
+    hold_button: bool,
+    oncancel: EventHandler<()>,
+) -> Element {
+    let mut cancel_error = use_signal(|| None as Option<String>);
     rsx! {
         div {
             class: "hardware-approval-overlay",
@@ -148,9 +154,22 @@ fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Ele
                     }
                 }
 
+                if let Some(message) = cancel_error() {
+                    p { class: "hardware-approval-text", "{message}" }
+                }
+
                 button {
                     class: "hardware-cancel-button",
-                    onclick: move |_| oncancel.call(()),
+                    onclick: move |_| {
+                        if cancel_hardware_operation(hardware_wallet.clone()) {
+                            oncancel.call(());
+                        } else {
+                            cancel_error.set(Some(
+                                "Already approved on the hardware wallet; waiting for network submission."
+                                    .to_string(),
+                            ));
+                        }
+                    },
                     "Cancel Transaction"
                 }
             }
@@ -343,7 +362,8 @@ pub fn SendModalWithHardware(
             error_message.set(None);
             sending.set(true);
 
-            if hardware_wallet.is_some() {
+            if let Some(hardware_wallet) = hardware_wallet.as_ref() {
+                hardware_wallet.prepare_hardware_operation();
                 show_hardware_approval.set(true);
                 was_hardware_transaction.set(true);
             } else {
@@ -881,10 +901,15 @@ pub fn SendModalWithHardware(
                 // Hardware approval overlay - shown when waiting for hardware confirmation
                 if show_hardware_approval() {
                     HardwareApprovalOverlay {
+                        hardware_wallet: hardware_wallet.clone(),
                         hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_transaction_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             sending.set(false);
+                            error_message.set(Some(
+                                "Transaction canceled. Reconnect the hardware wallet before retrying."
+                                    .to_string(),
+                            ));
                         }
                     }
                 }

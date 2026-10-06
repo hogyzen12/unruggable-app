@@ -66,6 +66,7 @@ Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The pack
 - Fixed activation/deactivation epoch boundaries, added a distinct deactivating state, and restricted deactivate, split, instant-unstake, and withdraw actions to the authority required by each operation.
 - Fixed staking insufficient-balance errors reporting the wallet's SOL balance as though it were lamports.
 - Corrected capability-aware button guidance: First Edition PIN setup says to keep the button held, First Edition transaction signing says to press once, and CurrentV2/MLH transaction review says to press and hold.
+- Fixed hardware approval cancellation so it interrupts an unapproved serial exchange, closes the logical USB session, and requires a clean reconnect. Once the device signature has already been accepted, the app no longer claims the transaction was canceled and instead waits for submission to finish.
 
 ### Compatibility and operations
 
@@ -81,7 +82,7 @@ Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The pack
 - The locked Windows MSVC release cross-build passes with Solana v1 support enabled.
 - Six focused Solana v1 tests pass: v0 preservation, oversized fallback/round-trip, capability rejection, compute-budget conversion, and malformed/duplicate budget rejection.
 - All focused protocol and bounded-serial tests pass.
-- Deterministic desktop suite passes serially: 41 passed, 0 failed, 1 deliberately ignored physical-device test, with four live-network tests excluded from the offline run. The serial run avoids the existing process-global PIN-state race between parallel tests.
+- Deterministic desktop suite passes serially: 42 passed, 0 failed, 1 deliberately ignored physical-device test, with four live-network tests excluded from the offline run. The serial run avoids the existing process-global PIN-state race between parallel tests.
 - Four focused staking regressions pass for the current RPC fixture, the 1 SOL floor, delegated-balance accounting, and activation/deactivation epoch boundaries.
 - Native stake-account discovery and display were verified against a hot wallet with stake accounts.
 - A physical First Edition wallet connected and completed PIN setup; full signing/reconnect regression remains in progress.
