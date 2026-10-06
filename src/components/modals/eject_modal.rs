@@ -1036,7 +1036,7 @@ fn EjectHardwareApprovalOverlay(
                         div { class: "step-number", "2" }
                         span {
                             if hold_button {
-                                "First Edition: press and keep holding the hardware button until approval completes"
+                                "MLH wallet: press and keep holding the hardware button until approval completes"
                             } else {
                                 "Press the button on your Unruggable to confirm"
                             }
@@ -1462,7 +1462,7 @@ pub fn EjectModal(
                 if show_hardware_approval() {
                     EjectHardwareApprovalOverlay {
                         selected_count: selected_tokens().len(),
-                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_legacy_button_hold()),
+                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_transaction_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             ejecting.set(false);

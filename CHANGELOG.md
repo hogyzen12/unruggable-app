@@ -65,7 +65,7 @@ Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The pack
 - Fixed displayed and aggregate stake balances using total account lamports minus rent instead of the RPC's delegated stake amount.
 - Fixed activation/deactivation epoch boundaries, added a distinct deactivating state, and restricted deactivate, split, instant-unstake, and withdraw actions to the authority required by each operation.
 - Fixed staking insufficient-balance errors reporting the wallet's SOL balance as though it were lamports.
-- Fixed First Edition approval prompts saying to press the hardware button once. Legacy PIN and pre-protocol devices now receive explicit instructions to press and keep holding until setup or transaction approval completes; CurrentV2 retains single-press guidance.
+- Corrected capability-aware button guidance: First Edition PIN setup says to keep the button held, First Edition transaction signing says to press once, and CurrentV2/MLH transaction review says to press and hold.
 
 ### Compatibility and operations
 
@@ -85,7 +85,7 @@ Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The pack
 - Four focused staking regressions pass for the current RPC fixture, the 1 SOL floor, delegated-balance accounting, and activation/deactivation epoch boundaries.
 - Native stake-account discovery and display were verified against a hot wallet with stake accounts.
 - A physical First Edition wallet connected and completed PIN setup; full signing/reconnect regression remains in progress.
-- The legacy/CurrentV2 button-guidance capability regression passes on macOS and the Windows MSVC cross-check remains clean.
+- The First Edition/CurrentV2 transaction-guidance capability regression passes on macOS and the Windows MSVC cross-check remains clean.
 - The ignored physical-device test was run explicitly against the connected finalized MLH wallet and passed CurrentV2 classification, firmware-state checks, real Solana public-key validation, and clean disconnect.
 - The macOS desktop app builds, launches, and loads CSS/images from the local asset handler.
 - Live managed API checks pass for Jupiter quote/order/build, DFlow quote, latest blockhash, and epoch RPC requests.

@@ -228,7 +228,7 @@ fn HardwareApprovalOverlay(hold_button: bool, oncancel: EventHandler<()>) -> Ele
                         div { class: "step-number", "2" }
                         span {
                             if hold_button {
-                                "First Edition: press and keep holding the hardware button until approval completes"
+                                "MLH wallet: press and keep holding the hardware button until approval completes"
                             } else {
                                 "Press the hardware button once to confirm the transaction"
                             }
@@ -993,7 +993,7 @@ pub fn StakeModal(
                 // Hardware approval overlay - shown when waiting for hardware confirmation
                 if show_hardware_approval() {
                     HardwareApprovalOverlay {
-                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_legacy_button_hold()),
+                        hold_button: hardware_wallet.as_ref().is_some_and(|wallet| wallet.requires_transaction_button_hold()),
                         oncancel: move |_| {
                             show_hardware_approval.set(false);
                             staking.set(false);

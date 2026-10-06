@@ -31,7 +31,7 @@ Status snapshot: 2026-10-06. Checked items have evidence from this working branc
 - [x] Focused protocol/serial tests pass: 9 passed, 0 failed.
 - [x] Deterministic desktop suite passes serially: 41 passed, 0 failed, 1 ignored physical test; four explicitly live-network tests are excluded from the offline run.
 - [x] Staking/RPC regressions pass for the current parsed-account shape, 1 SOL floor, delegated balances, and epoch-boundary states: 4 passed, 0 failed.
-- [x] Show capability-aware button guidance: First Edition devices must keep the button held until approval completes; CurrentV2 uses a single press.
+- [x] Show capability-aware button guidance: First Edition holds during PIN setup but uses a single press for transactions; CurrentV2/MLH holds during transaction review.
 - [x] Explicit configured-MLH USB identity test passes on macOS without a PIN attempt or signing action.
 
 ## Swap, stake, and RPC qualification
