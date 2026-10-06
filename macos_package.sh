@@ -83,7 +83,7 @@ cargo build --locked --release --no-default-features --features desktop --target
 ### 2) Bundle into .app with cargo-bundle
 log "Bundling into .app with cargo-bundle"
 export SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
-cargo bundle --locked --release --no-default-features --features desktop --target aarch64-apple-darwin
+cargo bundle --release --no-default-features --features desktop --target aarch64-apple-darwin
 
 APP_PATH="target/aarch64-apple-darwin/release/bundle/osx/${APP_NAME}.app"
 [ -d "$APP_PATH" ] || { echo "❌ Could not find ${APP_NAME}.app at $APP_PATH"; exit 1; }
