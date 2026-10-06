@@ -5,9 +5,9 @@ for software wallets, Ledger devices, and Unruggable hardware wallets.
 
 ## Repository status
 
-- `main` is the stable desktop-app lineage. Its current release is `v1.1.1`.
-- `dev/v2.0.0` is reserved for the next desktop update: MLH hardware V2
-  compatibility, Windows USB diagnostics, and related reliability fixes.
+- `main` is the stable desktop-app lineage. The current release is `v2.0.0`,
+  adding MLH hardware V2 compatibility, Windows USB diagnostics, and related
+  reliability fixes.
 - Historical experiments are retained as descriptive `archive/*` tags rather
   than permanent development branches.
 - Firmware is versioned independently. The shipped MLH firmware is

@@ -113,7 +113,7 @@ For each Windows run, record Windows version, PC model, cable/hub, Hardware ID, 
 ## Packaging and release gates
 
 - [x] Review and commit the initial v2 compatibility implementation on `dev/v2.0.0`.
-- [ ] Bump `Cargo.toml` from `1.1.1` to `2.0.0` after physical qualification.
+- [x] Bump `Cargo.toml` from `1.1.1` to `2.0.0` after physical qualification.
 - [ ] Build all release artifacts from a clean commit and record the commit in each artifact.
 - [ ] Build the macOS app/DMG, verify local assets, code-sign, notarize, and verify the checksum.
 - [ ] Replace the transitional portable Windows zip with a signed installer.

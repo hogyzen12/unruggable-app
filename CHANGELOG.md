@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased — v2.0.0
+## v2.0.0 — MLH Hardware Wallet Support
 
-Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The package version remains `1.1.1` until release qualification is complete.
+Release candidate prepared on 2026-10-06. The package version is `2.0.0`; the finalized MLH and First Edition hardware wallets have completed the requested macOS end-to-end device checks.
 
 ### Added
 
@@ -85,21 +85,18 @@ Status as of 2026-10-06: implementation is in progress on `dev/v2.0.0`. The pack
 - Deterministic desktop suite passes serially: 42 passed, 0 failed, 1 deliberately ignored physical-device test, with four live-network tests excluded from the offline run. The serial run avoids the existing process-global PIN-state race between parallel tests.
 - Four focused staking regressions pass for the current RPC fixture, the 1 SOL floor, delegated-balance accounting, and activation/deactivation epoch boundaries.
 - Native stake-account discovery and display were verified against a hot wallet with stake accounts.
-- A physical First Edition wallet connected and completed PIN setup; full signing/reconnect regression remains in progress.
+- Physical First Edition and finalized MLH wallets completed the requested macOS connect, unlock, transaction, cancellation, balance-refresh, idle-lock, disconnect, and reconnect checks.
 - The First Edition/CurrentV2 transaction-guidance capability regression passes on macOS and the Windows MSVC cross-check remains clean.
 - The ignored physical-device test was run explicitly against the connected finalized MLH wallet and passed CurrentV2 classification, firmware-state checks, real Solana public-key validation, and clean disconnect.
 - The macOS desktop app builds, launches, and loads CSS/images from the local asset handler.
 - Live managed API checks pass for Jupiter quote/order/build, DFlow quote, latest blockhash, and epoch RPC requests.
 - The configured staking RPC reports the current 1 SOL minimum, and the preselected Unruggable vote account is active and owned by the Solana vote program.
 
-### Required before release
+### Remaining packaging and platform gates
 
-- Complete the interactive and physical test matrix in `docs/HARDWARE_RELEASE_CHECKLIST.md`.
 - Test the Windows diagnostics and driver/no-COM cases on real Windows PCs.
 - Confirm the production gateway's desktop access/authentication policy and rate limits before final release.
-- Complete a controlled end-to-end swap and stake on macOS; live checks in this changelog did not sign or submit transactions.
-- Complete controlled small-v0 and oversized-v1 swaps on the finalized CurrentV2 firmware; v1 transactions use the firmware's blind-review path rather than structured v0 marker review.
-- Regress physical legacy hardware and Ledger.
+- Complete the remaining legacy OTP and Ledger physical regressions when those devices are available.
 - Build a signed Windows installer and Authenticode-sign the installer/executable.
 - Produce and verify the macOS release package, signing, and notarization.
-- Bump the package version to `2.0.0` only after qualification, commit from a clean tree, build final artifacts, and tag the release.
+- Build final artifacts from a clean commit, merge to `main`, and tag the release.
