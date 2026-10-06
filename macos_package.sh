@@ -247,20 +247,25 @@ hdiutil convert "$RW_DMG" -ov -format UDZO -o "$DMG_FILE"
 log "Code-signing DMG (optional)"
 codesign --force --timestamp --sign "$IDENTITY" "$DMG_FILE" || true
 
-### 8) Store/refresh notarytool credentials
-log "Storing/refreshing notarytool credentials profile: $NOTARY_PROFILE"
-if [ "$MODE" = "API" ]; then
-  [ -f "$API_KEY_PATH" ] || { echo "❌ Missing API_KEY_PATH: $API_KEY_PATH"; exit 1; }
-  xcrun notarytool store-credentials "$NOTARY_PROFILE" \
-    --key "$API_KEY_PATH" --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID"
+### 8) Verify or store notarytool credentials
+log "Checking notarytool credentials profile: $NOTARY_PROFILE"
+if xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+  echo "Using existing notarytool profile: $NOTARY_PROFILE"
 else
-  if [ -n "$APPLE_APP_SPECIFIC_PW" ]; then
+  log "Storing notarytool credentials profile: $NOTARY_PROFILE"
+  if [ "$MODE" = "API" ]; then
+    [ -f "$API_KEY_PATH" ] || { echo "❌ Missing API_KEY_PATH: $API_KEY_PATH"; exit 1; }
     xcrun notarytool store-credentials "$NOTARY_PROFILE" \
-      --apple-id "$APPLE_ID_EMAIL" --team-id "$TEAM_ID" <<<"$APPLE_APP_SPECIFIC_PW"
+      --key "$API_KEY_PATH" --key-id "$API_KEY_ID" --issuer "$API_ISSUER_ID"
   else
-    xcrun notarytool store-credentials "$NOTARY_PROFILE" \
-      --apple-id "$APPLE_ID_EMAIL" --team-id "$TEAM_ID"
-    echo "Paste your APP-SPECIFIC password when prompted."
+    if [ -n "$APPLE_APP_SPECIFIC_PW" ]; then
+      xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+        --apple-id "$APPLE_ID_EMAIL" --team-id "$TEAM_ID" <<<"$APPLE_APP_SPECIFIC_PW"
+    else
+      xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+        --apple-id "$APPLE_ID_EMAIL" --team-id "$TEAM_ID"
+      echo "Paste your APP-SPECIFIC password when prompted."
+    fi
   fi
 fi
 
